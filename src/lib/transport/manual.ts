@@ -16,7 +16,7 @@
  * UI's job (through the broker when it is back, or a new manual exchange).
  */
 import { buildUrl, parseUrl } from '../url';
-import type { Message, TransportState } from '../types';
+import type { Message, TransportState } from '../chessTypes';
 import {
   defaultTimers,
   ICE_SERVERS,

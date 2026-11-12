@@ -4,7 +4,7 @@ import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStore, memoryStorage } from '@/lib/storage';
 import { createMemoryNetwork } from '@/lib/transport';
-import type { SavedGame, Store } from '@/lib/types';
+import type { SavedGame, Store } from '@/lib/chessTypes';
 import { parseUrl } from '@/lib/url';
 import zhess from '@/lib/zhess';
 import { useGameState, type UseGameStateOptions } from './useGameState';

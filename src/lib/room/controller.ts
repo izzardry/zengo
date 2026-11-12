@@ -73,8 +73,8 @@ import type {
   TransportState,
   WelcomeMsg,
   ZhessApi,
-} from '../types';
-import { PROTOCOL_VERSION } from '../types';
+} from '../chessTypes';
+import { PROTOCOL_VERSION } from '../chessTypes';
 import zhessDefault, { parseTc } from '../zhess';
 import { remaining } from '../clock';
 import { defaultTimers, type RoomTransport, type Timers, type TransportFailureKind, type TransportRole } from '../transport/common';

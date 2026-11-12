@@ -3,7 +3,7 @@ import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { createFakeController, type FakeController } from '@/components/room/testUtils';
 import type { RoomControllerOptions } from '@/lib/room';
-import type { RoomNotice } from '@/lib/types';
+import type { RoomNotice } from '@/lib/chessTypes';
 import { IDLE_ROOM_VIEW, useRoom, type ManualApi, type UseRoomOptions } from './useRoom';
 
 function setup(extra: Partial<UseRoomOptions> = {}) {

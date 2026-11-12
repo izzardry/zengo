@@ -14,7 +14,7 @@ import { createPortal } from 'react-dom';
 import { useI18n } from '@/lib/i18n';
 import { board as boardOf, history, inCheck, lastMove as lastMoveOf } from '@/lib/zhess';
 import { cn } from '@/lib/utils';
-import type { Color, Game, Square } from '@/lib/types';
+import type { Color, Game, Square } from '@/lib/chessTypes';
 import { useBoardInput } from '@/hooks/useBoardInput';
 import { DEFAULT_CELL_SIZE, drawOrder, isLightSquare, squareToCell } from './geometry';
 import { describeMove, describeSquare, pieceName } from './describe';

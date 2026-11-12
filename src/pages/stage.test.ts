@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import zhess from '@/lib/zhess';
-import type { Game } from '@/lib/types';
+import type { Game } from '@/lib/chessTypes';
 import { createSession } from '@/lib/gameRecord';
 import { allSan, baseOrientation, canContinueFrom, other, pgnMeta, PLAYABLE_MODES, reviewClockView, totalTime } from './stage';
 

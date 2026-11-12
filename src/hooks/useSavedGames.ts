@@ -19,7 +19,7 @@ import {
   type TimeGroup,
 } from '@/lib/gameRecord';
 import { store as defaultStore } from '@/lib/storage';
-import type { Now, Room, SavedGame, Store } from '@/lib/types';
+import type { Now, Room, SavedGame, Store } from '@/lib/chessTypes';
 
 export type { TimeGroup, TimeGroupKey } from '@/lib/gameRecord';
 

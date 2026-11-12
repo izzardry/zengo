@@ -2,7 +2,7 @@ import { act, fireEvent, screen, within } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { newGame, play } from '@/lib/zhess';
-import type { Color, Game, Seating } from '@/lib/types';
+import type { Color, Game, Seating } from '@/lib/chessTypes';
 import { ChessBoard } from './ChessBoard';
 import type { BoardHighlights, Movable, Premove } from './types';
 import {

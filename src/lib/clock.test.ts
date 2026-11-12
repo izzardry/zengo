@@ -20,7 +20,7 @@ import {
   timerSet,
   toTimeControl,
 } from './clock';
-import type { Game, TimeControl } from './types';
+import type { Game, TimeControl } from './chessTypes';
 import zhess, { parseTc } from './zhess';
 
 const TC_1_0: TimeControl = { baseMs: 60_000, incMs: 0 };

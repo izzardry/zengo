@@ -4,7 +4,7 @@
  * thumbnails and the promotion dial.
  */
 import { memo, type CSSProperties } from 'react';
-import type { Color, PieceType } from '@/lib/types';
+import type { Color, PieceType } from '@/lib/chessTypes';
 import { BACKGROUND, PIECE_SHAPES, partStyle, piecePaint, strokeForSize } from './pieceShapes';
 
 export interface PieceIconProps {

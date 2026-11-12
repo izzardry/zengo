@@ -17,7 +17,7 @@
  * (placement, side, castling, en passant).
  */
 import { Chess, type Square as ChessSquare } from 'chess.js';
-import type { EngineState, Eval, Uci } from '../types';
+import type { EngineState, Eval, Uci } from '../chessTypes';
 import { negateEval, scoreCp } from './uci.ts';
 import { EngineAbortError, EngineUnavailableError, type EngineHandle, type EngineSnapshot } from './driver.ts';
 

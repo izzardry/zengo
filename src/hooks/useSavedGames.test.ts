@@ -3,7 +3,7 @@ import { createElement, type ReactNode } from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createStore, memoryStorage } from '@/lib/storage';
-import type { SavedGame, Store } from '@/lib/types';
+import type { SavedGame, Store } from '@/lib/chessTypes';
 import { useGameState } from './useGameState';
 import { useSavedGames } from './useSavedGames';
 

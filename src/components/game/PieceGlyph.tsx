@@ -1,6 +1,6 @@
 import { useContext, type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
-import type { Color, PieceType } from '@/lib/types';
+import type { Color, PieceType } from '@/lib/chessTypes';
 import { PIECE_CHARS, PieceRenderContext, TEXT_VS, type PieceRender } from './pieceContext';
 import { figurineParts } from './notation';
 

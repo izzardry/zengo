@@ -4,7 +4,7 @@
  */
 import { memo, useMemo } from 'react';
 import { cn } from '@/lib/utils';
-import type { Color, Square } from '@/lib/types';
+import type { Color, Square } from '@/lib/chessTypes';
 import { HIGHLIGHT_ALPHA, cellToSquare, isLightSquare, parseFenBoard, squareToCell } from './geometry';
 import { PIECE_SHAPES, partStyle, piecePaint, strokeForSize } from './pieceShapes';
 

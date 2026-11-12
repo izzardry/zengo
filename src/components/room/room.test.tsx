@@ -8,7 +8,7 @@ import type { ShareNavigator } from '@/components/game/share';
 import { IDLE_ROOM_VIEW, useRoom, type ManualView, type UseRoomOptions } from '@/hooks/useRoom';
 import { dictionaries } from '@/lib/i18n';
 import type { RoomControllerOptions } from '@/lib/room';
-import type { RoomNotice, RoomNoticeKind } from '@/lib/types';
+import type { RoomNotice, RoomNoticeKind } from '@/lib/chessTypes';
 import { parseUrl, serializeUrl, urlQuery } from '@/lib/url';
 import {
   InviteSheet,

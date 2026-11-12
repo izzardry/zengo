@@ -7,7 +7,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import type { ReactElement } from 'react';
 import { I18nProvider } from '@/lib/i18n';
 import { createStore, memoryStorage } from '@/lib/storage';
-import type { Color, Square } from '@/lib/types';
+import type { Color, Square } from '@/lib/chessTypes';
 import { squareCenter } from './geometry';
 
 export const CELL = 50;

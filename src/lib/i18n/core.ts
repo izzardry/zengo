@@ -4,11 +4,11 @@
  * `zigo:lang`, #16 `<html lang>` — see index.tsx) and per-package tables (PLAN 3.2).
  */
 import { store as defaultStore } from '../storage';
-import type { Language, Store } from '../types';
+import type { Language, Store } from '../chessTypes';
 import type { Strings } from './define';
 import * as tables from './tables';
 
-export type { Language } from '../types';
+export type { Language } from '../chessTypes';
 
 /** Languages in menu order; labels are in their own language (Ztyle chapter 14). */
 export const LANGUAGES: readonly { code: Language; label: string; flag: string }[] = [

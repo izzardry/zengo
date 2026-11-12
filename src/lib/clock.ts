@@ -9,7 +9,7 @@
  * themselves, because they move the cursor and the log is the truth.
  */
 import { formatClock, formatElapsed, isLowTime } from './timeUtils';
-import type { Color, Game, TcString, TimeControl } from './types';
+import type { Color, Game, TcString, TimeControl } from './chessTypes';
 import { clockRunning, clocks, parseTc } from './zhess';
 
 /* ---------------------------------------------------------------------------------------------- */

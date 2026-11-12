@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { X } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
-import type { Color } from '@/lib/types';
+import type { Color } from '@/lib/chessTypes';
 
 /** How long a resignation can be taken back (DESIGN 8.3, Ztyle 09 undo toasts). */
 export const RESIGN_UNDO_MS = 5000;

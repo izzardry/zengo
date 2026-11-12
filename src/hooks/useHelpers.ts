@@ -4,7 +4,7 @@
  */
 import { useCallback, useState } from 'react';
 import { store as defaultStore } from '@/lib/storage';
-import type { Store } from '@/lib/types';
+import type { Store } from '@/lib/chessTypes';
 
 export interface HelpersState {
   /** True when helpers are on. */

@@ -6,7 +6,7 @@
  * - Clock pill: off · 1+0 · 3+2 · 5+0 · 10+0 · 15+10 · 30+0 → off.
  * - Start pill label: START / RESUME / REVIEW from the code's saved game.
  */
-import type { ColorChoice, Opponent, SavedGame, TimeControl } from '@/lib/types';
+import type { ColorChoice, Opponent, SavedGame, TimeControl } from '@/lib/chessTypes';
 
 /* ---------------------------------------------------------------------------------------------- */
 /* Opponent                                                                                        */

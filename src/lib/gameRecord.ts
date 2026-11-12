@@ -16,7 +16,7 @@ import type {
   Rng,
   SavedGame,
   TcString,
-} from './types';
+} from './chessTypes';
 import { normalizeTc } from './url';
 import zhess from './zhess';
 

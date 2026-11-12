@@ -18,7 +18,7 @@ import {
   pickMoveTrace,
 } from './levels';
 import { scoreCp, type PvLine } from './engine/uci';
-import type { Eval } from './types';
+import type { Eval } from './chessTypes';
 
 /** Deterministic PRNG (mulberry32). */
 function seeded(seed: number): () => number {

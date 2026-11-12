@@ -7,7 +7,7 @@ import { createRoomController, type RoomControllerApi, type RoomControllerOption
 import { createHarness, seeded, type Harness } from '@/lib/room/testkit';
 import { createStore, memoryStorage } from '@/lib/storage';
 import { createMemoryPair, ManualError, type MemoryPair, type RoomTransport, type TransportFailureKind, type TransportRole } from '@/lib/transport';
-import type { Message, RoomNotice, Store, Transport, TransportFactory, TransportState } from '@/lib/types';
+import type { Message, RoomNotice, Store, Transport, TransportFactory, TransportState } from '@/lib/chessTypes';
 import {
   bankRoomTurn,
   createRoomSession,

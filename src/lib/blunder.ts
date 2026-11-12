@@ -15,7 +15,7 @@
  * queen at +20 still is.
  */
 import { Chess, type Square as ChessSquare } from 'chess.js';
-import type { Color, Eval, Square, Uci } from './types';
+import type { Color, Eval, Square, Uci } from './chessTypes';
 import { negateEval, scoreCp } from './engine/uci';
 import { allowsMateIn1, legalUci } from './levels';
 

@@ -14,7 +14,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { createPortal } from 'react-dom';
 import { ArrowLeft, ChevronDown } from 'lucide-react';
 import { useI18n, type TranslationKey } from '@/lib/i18n';
-import type { Room, SavedGame } from '@/lib/types';
+import type { Room, SavedGame } from '@/lib/chessTypes';
 import { cn } from '@/lib/utils';
 import { DeleteUndoToasts } from './DeleteUndoToasts';
 import { GameCard, THUMBNAIL_SIZE, type RenderThumbnail } from './GameCard';

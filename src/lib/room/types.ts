@@ -17,7 +17,7 @@ import type {
   Transport,
   TransportFactory,
   ZhessApi,
-} from '../types';
+} from '../chessTypes';
 import type { Timers, TransportFailureKind } from '../transport/common';
 
 /** Settings a device uses when it creates the room (DESIGN 4.1: clock and color of the start screen). */

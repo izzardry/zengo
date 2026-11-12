@@ -50,7 +50,7 @@ import {
   type RoomTransport,
   type Timers,
 } from '@/lib/transport';
-import type { Now, RequestKind, RoomNotice, Rng, Store, Transport, TransportFactory, TransportState } from '@/lib/types';
+import type { Now, RequestKind, RoomNotice, Rng, Store, Transport, TransportFactory, TransportState } from '@/lib/chessTypes';
 
 /* ---------------------------------------------------------------------------------------------- */
 /* Public types                                                                                     */

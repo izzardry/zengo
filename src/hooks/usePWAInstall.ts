@@ -12,7 +12,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { flags } from '@/lib/flags';
 import { store as defaultStore } from '@/lib/storage';
-import type { Store } from '@/lib/types';
+import type { Store } from '@/lib/chessTypes';
 
 export const INSTALL_DISMISSED_KEY = 'install-dismissed';
 

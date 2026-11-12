@@ -13,7 +13,7 @@
  * are device-wide), with an in-memory fallback when storage is blocked. Pure apart from the
  * injected storage; every access is guarded.
  */
-import type { Game, Now } from './types';
+import type { Game, Now } from './chessTypes';
 
 export const TURN_BANK_KEY = 'zigo:turn';
 

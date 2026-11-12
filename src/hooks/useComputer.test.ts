@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { FakeEngine } from '@/lib/engine/fake';
-import type { EngineApi, Game } from '@/lib/types';
+import type { EngineApi, Game } from '@/lib/chessTypes';
 import { newGame, play, START_FEN, undo } from '@/lib/zhess';
 import { engineClock, playableMove, toTc, useComputer, useEngineStart, type UseComputerOptions } from './useComputer';
 

@@ -15,7 +15,7 @@ import { setSharedEngine } from '@/hooks/useZhessEngine';
 import { FakeEngine } from '@/lib/engine/fake';
 import { I18nProvider } from '@/lib/i18n';
 import { bankTurn } from '@/lib/turnBank';
-import type { Color, Game, Square } from '@/lib/types';
+import type { Color, Game, Square } from '@/lib/chessTypes';
 import zhess, { encodeMoves } from '@/lib/zhess';
 import Index from './Index';
 

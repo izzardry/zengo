@@ -7,7 +7,7 @@
  * Imports carry explicit `.ts` extensions so that Node (type stripping) can load this file directly
  * from `scripts/selfplay.mjs`.
  */
-import type { Eval, Uci } from '../types';
+import type { Eval, Uci } from '../chessTypes';
 
 /* ------------------------------------------------------------------------------------------------
  * Lines

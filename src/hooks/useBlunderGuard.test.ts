@@ -1,7 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { FakeEngine } from '@/lib/engine/fake';
 import { BEFORE_TIMEOUT_MS, CONFIRM_WINDOW_MS, GUARD_DEPTH } from '@/lib/blunder';
-import type { EngineApi, Game } from '@/lib/types';
+import type { EngineApi, Game } from '@/lib/chessTypes';
 import { newGame, play } from '@/lib/zhess';
 import { useBlunderGuard, type BlunderCheck, type UseBlunderGuardOptions } from './useBlunderGuard';
 

@@ -2,7 +2,7 @@
  * What the game-over overlay says, from the device player's point of view (DESIGN 8.4). Pure.
  */
 import type { TranslationKey } from '@/lib/i18n';
-import type { Color, GameEnd, Mode } from '@/lib/types';
+import type { Color, GameEnd, Mode } from '@/lib/chessTypes';
 
 /** Outcome for this device's player; pass-and-play has no single player and reports `local`. */
 export type Outcome = 'win' | 'loss' | 'draw' | 'local';

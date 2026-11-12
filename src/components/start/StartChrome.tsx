@@ -12,7 +12,7 @@
  */
 import type { ReactNode } from 'react';
 import { flags } from '@/lib/flags';
-import type { ColorChoice, Opponent, Rng, TimeControl } from '@/lib/types';
+import type { ColorChoice, Opponent, Rng, TimeControl } from '@/lib/chessTypes';
 import { BackToTop } from './BackToTop';
 import { ClockPill, type ClockPillAnchor } from './ClockPill';
 import { CodeSelector, type CodeSource } from './CodeSelector';

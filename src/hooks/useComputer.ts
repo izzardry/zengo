@@ -19,7 +19,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { EngineUnavailableError, isEngineAbort } from '@/lib/engine/driver';
 import { MIN_REPLY_MS, legalUci, type EngineClock } from '@/lib/levels';
-import type { Color, EngineApi, Game, Now, TcString, TimeControl, Uci } from '@/lib/types';
+import type { Color, EngineApi, Game, Now, TcString, TimeControl, Uci } from '@/lib/chessTypes';
 import { clocks, parseTc } from '@/lib/zhess';
 
 /* ---------------------------------------------------------------------------------------------- */

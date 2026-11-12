@@ -9,7 +9,7 @@
  */
 import { useCallback, useState } from 'react';
 import { store as defaultStore } from '@/lib/storage';
-import type { ColorChoice, Opponent, Store, TimeControl } from '@/lib/types';
+import type { ColorChoice, Opponent, Store, TimeControl } from '@/lib/chessTypes';
 import { formatTc, parseTc } from '@/lib/zhess';
 import { DEFAULT_COLOR, DEFAULT_OPPONENT, OPPONENTS, isColorChoice, isOpponent, opponentIndex } from './options';
 

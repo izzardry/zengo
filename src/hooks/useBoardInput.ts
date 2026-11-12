@@ -8,7 +8,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type RefObject } from 'react';
 import { board as boardOf, legalMoves, sanToUci } from '@/lib/zhess';
-import type { Color, Game, Piece, PromotionPiece, Square, Uci } from '@/lib/types';
+import type { Color, Game, Piece, PromotionPiece, Square, Uci } from '@/lib/chessTypes';
 import { isPromotionRank, premoveTargets, squareAt, squareCenter, stepSquare, type Box } from '@/components/board/geometry';
 import { clampDialCenter, DIAL_HOLD_MS, dialPick, type DialZone } from '@/components/board/dial';
 import type { Movable, Premove } from '@/components/board/types';

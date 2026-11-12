@@ -9,7 +9,7 @@
  */
 import { useCallback, useState } from 'react';
 import { store as defaultStore } from '@/lib/storage';
-import type { Seating, Store } from '@/lib/types';
+import type { Seating, Store } from '@/lib/chessTypes';
 
 /** Ztyle's touch-device query. */
 export const TOUCH_QUERY = '(pointer: coarse) and (not (pointer: fine)) and (not (hover: hover))';

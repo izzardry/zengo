@@ -3,7 +3,7 @@
  * integrator (e.g. for toasts or the info pill). Kept apart from the components for fast refresh.
  */
 import { levelKey, useI18n } from '@/lib/i18n';
-import type { ColorChoice, Opponent, TimeControl } from '@/lib/types';
+import type { ColorChoice, Opponent, TimeControl } from '@/lib/chessTypes';
 import { formatTc } from '@/lib/zhess';
 
 /** Overline (`kind`) and value (`name`) of an opponent, e.g. `Computer · Level 5` / `Medium`. */

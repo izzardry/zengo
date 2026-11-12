@@ -21,7 +21,7 @@
  * Imports carry explicit `.ts` extensions so that Node can load this file for `scripts/selfplay.mjs`.
  */
 import { Chess, type Square as ChessSquare } from 'chess.js';
-import type { Color, Eval, Uci } from './types';
+import type { Color, Eval, Uci } from './chessTypes';
 import { MATE_CP, scoreCp, type PvLine } from './engine/uci.ts';
 
 /** Default level of a new computer game (DESIGN 10.2). */

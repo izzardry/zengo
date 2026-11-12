@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { translate } from '@/lib/i18n';
 import { history, newGame, play, START_FEN } from '@/lib/zhess';
-import type { Game, Language } from '@/lib/types';
+import type { Game, Language } from '@/lib/chessTypes';
 import { BoardThumbnail } from './BoardThumbnail';
 import { describeMove, describeSquare, type Translate } from './describe';
 import { clampDialCenter, dialPick } from './dial';

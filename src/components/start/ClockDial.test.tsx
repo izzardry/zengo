@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { DIAL_GEOMETRY, DIAL_INCREMENTS, DIAL_MINUTES } from '@/lib/clock';
 import { I18nProvider } from '@/lib/i18n';
 import { createStore, memoryStorage } from '@/lib/storage';
-import type { Language, TimeControl } from '@/lib/types';
+import type { Language, TimeControl } from '@/lib/chessTypes';
 import { ClockDial, type ClockDialProps } from './ClockDial';
 import { captionSide, clampCenter, DIAL_EXTENT, DIAL_MARGIN } from './dialPlacement';
 

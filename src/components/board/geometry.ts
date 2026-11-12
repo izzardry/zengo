@@ -2,7 +2,7 @@
  * Pure board geometry: square ↔ screen cell, hit testing, FEN parsing for thumbnails, premove
  * targets. No React, no DOM beyond the `DOMRect`-like shape.
  */
-import type { Color, Piece, PieceType, Square, Uci } from '@/lib/types';
+import type { Color, Piece, PieceType, Square, Uci } from '@/lib/chessTypes';
 
 export const FILES = 'abcdefgh';
 export const BOARD_SIZE = 8;

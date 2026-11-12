@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { NO_PREMOVE, cancel, legalPremove, premoveAllowed, queue, queuedUci, settle } from './premove';
-import type { Game } from './types';
+import type { Game } from './chessTypes';
 import zhess from './zhess';
 
 function playAll(moves: string[], g: Game = zhess.newGame()): Game {

@@ -2,7 +2,7 @@ import { act, renderHook } from '@testing-library/react';
 import type { KeyboardEvent, PointerEvent } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { newGame, play } from '@/lib/zhess';
-import type { Game, Square } from '@/lib/types';
+import type { Game, Square } from '@/lib/chessTypes';
 import { squareCenter } from '@/components/board/geometry';
 import { isSanChar, normalizeTyped, useBoardInput, type BoardInputOptions } from './useBoardInput';
 

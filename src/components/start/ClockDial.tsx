@@ -31,7 +31,7 @@ import {
   type DialZone,
 } from '@/lib/clock';
 import { useI18n } from '@/lib/i18n';
-import type { TcString, TimeControl } from '@/lib/types';
+import type { TcString, TimeControl } from '@/lib/chessTypes';
 import { cn } from '@/lib/utils';
 
 export interface ClockDialProps {

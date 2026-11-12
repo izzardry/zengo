@@ -1,5 +1,5 @@
 import { useI18n } from '@/lib/i18n';
-import type { Color, PieceType } from '@/lib/types';
+import type { Color, PieceType } from '@/lib/chessTypes';
 import { cn } from '@/lib/utils';
 import { PieceGlyph } from './PieceGlyph';
 import { groupCaptured } from './notation';

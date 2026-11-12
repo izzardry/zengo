@@ -17,7 +17,7 @@ import { I18nProvider } from '@/lib/i18n';
 import { createRoomController, type RoomControllerApi } from '@/lib/room';
 import { createStore, memoryStorage } from '@/lib/storage';
 import type { MemoryNetwork } from '@/lib/transport';
-import type { Square } from '@/lib/types';
+import type { Square } from '@/lib/chessTypes';
 import Index from './Index';
 
 const broker = vi.hoisted(() => ({ net: null as MemoryNetwork | null, fail: false }));

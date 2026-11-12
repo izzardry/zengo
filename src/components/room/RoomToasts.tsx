@@ -20,7 +20,7 @@ import { useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 import type { ManualCause } from '@/hooks/useRoom';
 import { useI18n } from '@/lib/i18n';
-import type { RequestKind, RoomNotice } from '@/lib/types';
+import type { RequestKind, RoomNotice } from '@/lib/chessTypes';
 import { RequestToasts } from './RequestToasts';
 import { manualCauseKey, noticeKey } from './text';
 import { createToastSlot } from './toastSlot';

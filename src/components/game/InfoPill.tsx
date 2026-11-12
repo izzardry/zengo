@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useI18n } from '@/lib/i18n';
-import type { Color } from '@/lib/types';
+import type { Color } from '@/lib/chessTypes';
 import { cn } from '@/lib/utils';
 import { MoveList } from './MoveList';
 import { FigurineSan } from './PieceGlyph';

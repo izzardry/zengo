@@ -6,7 +6,7 @@
  * (the piece set's own convention: white outlined, black solid).
  */
 import { useI18n } from '@/lib/i18n';
-import type { ColorChoice } from '@/lib/types';
+import type { ColorChoice } from '@/lib/chessTypes';
 import { cn } from '@/lib/utils';
 import { nextColor } from './options';
 import { useColorName } from './text';

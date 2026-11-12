@@ -31,7 +31,7 @@ import {
   type Refusal,
   type Verdict,
 } from '@/lib/blunder';
-import type { Color, EngineApi, Eval, Game, Now, Square, Uci } from '@/lib/types';
+import type { Color, EngineApi, Eval, Game, Now, Square, Uci } from '@/lib/chessTypes';
 import { play } from '@/lib/zhess';
 
 export interface UseBlunderGuardOptions {

@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useRef, type KeyboardEvent, type PointerEvent } from 'react';
 import { Timer } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
-import type { TimeControl } from '@/lib/types';
+import type { TimeControl } from '@/lib/chessTypes';
 import { cn } from '@/lib/utils';
 import { formatTc } from '@/lib/zhess';
 import { nextClock } from './options';

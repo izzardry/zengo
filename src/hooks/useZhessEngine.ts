@@ -10,7 +10,7 @@
  * or pass an engine to the hook directly.
  */
 import { useMemo, useSyncExternalStore } from 'react';
-import type { EngineApi } from '@/lib/types';
+import type { EngineApi } from '@/lib/chessTypes';
 import type { EngineHandle } from '@/lib/engine/driver';
 import { createBrowserEngine } from '@/lib/engine/browser';
 

@@ -1,4 +1,4 @@
-import type { GameEnd, GameLog, HeadMsg, LogsMsg, Message, SavedGame, Seat } from './types';
+import type { GameEnd, GameLog, HeadMsg, LogsMsg, Message, SavedGame, Seat } from './chessTypes';
 import zhess from './zhess';
 import {
   appendPly,

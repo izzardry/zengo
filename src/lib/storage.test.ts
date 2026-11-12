@@ -1,6 +1,27 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_GAMES, PREFIX, createStore, memoryStorage, store as defaultStore } from './storage';
-import type { Room, SavedGame } from './types';
+import {
+  KEYS,
+  MAX_GAMES,
+  PREFIX,
+  createGoStore,
+  createStore,
+  isGoSavedGame,
+  memoryStorage,
+  readClock,
+  readColorChoice,
+  readEngineBackend,
+  readHandicap,
+  readRules,
+  readSize,
+  store as defaultStore,
+  writeClock,
+  writeEngineBackend,
+  writeHandicap,
+  writeRules,
+  writeSize,
+} from './storage';
+import type { Room, SavedGame } from './chessTypes';
+import type { SavedGame as GoSavedGame } from './types';
 
 function game(id: string, lastPlayedAt: number, extra: Partial<SavedGame> = {}): SavedGame {
   return {
@@ -168,5 +189,119 @@ describe('storage', () => {
       if (original) Object.defineProperty(globalThis, 'localStorage', original);
       else delete (globalThis as { localStorage?: unknown }).localStorage;
     }
+  });
+});
+
+describe('Go store and preferences (DESIGN 12.1, 13.1)', () => {
+  function goGame(id: string, lastPlayedAt: number, extra: Partial<GoSavedGame> = {}): GoSavedGame {
+    return {
+      id,
+      code: id.split('.')[0],
+      mode: 'local',
+      color: 'B',
+      size: 9,
+      rules: 'area',
+      handicap: 0,
+      tc: null,
+      moves: 'eecc',
+      ms: [1000, 900],
+      assisted: false,
+      createdAt: lastPlayedAt,
+      lastPlayedAt,
+      ...extra,
+    };
+  }
+
+  it('lists the new keys', () => {
+    expect(KEYS.size).toBe('size');
+    expect(KEYS.rules).toBe('rules');
+    expect(KEYS.handicap).toBe('handicap');
+    expect(KEYS.engineBackend).toBe('engine-backend');
+  });
+
+  it('stores Go games with scoring and result, newest first, capped at 100', () => {
+    const s = createGoStore(memoryStorage());
+    const scoring = { round: 1 as const, rev: 2, dead: ['cc'], accepted: [2, 2] as [number, number] };
+    s.saveGame(goGame('A', 1, { scoring, result: { winner: 'B', by: 'score', margin: 9 } }));
+    s.saveGame(goGame('B', 2, { size: 19, rules: 'territory', handicap: 4, tc: '20m5x30' }));
+    expect(s.games().map((g) => g.id)).toEqual(['B', 'A']);
+    expect(s.games()[1].scoring).toEqual(scoring);
+    expect(s.games()[0].tc).toBe('20m5x30');
+    for (let i = 0; i < 110; i++) s.saveGame(goGame(`G${i}`, 100 + i));
+    expect(s.games()).toHaveLength(MAX_GAMES);
+    expect(s.deleteGame('G109')?.id).toBe('G109');
+  });
+
+  it('drops stored games that are not Go games', () => {
+    const mem = memoryStorage({
+      'zigo:games': JSON.stringify([goGame('OK', 1), game('CHESS', 2), { ...goGame('BAD', 3), size: 7 }, null]),
+    });
+    expect(createGoStore(mem).games().map((g) => g.id)).toEqual(['OK']);
+    expect(isGoSavedGame(goGame('X', 1))).toBe(true);
+    expect(isGoSavedGame({ ...goGame('X', 1), rules: 'chinese' })).toBe(false);
+  });
+
+  it('reads and writes size, rules, handicap per size, clock per size and the engine backend', () => {
+    const mem = memoryStorage();
+    const s = createGoStore(mem);
+    expect(readSize(s)).toBe(9);
+    expect(readRules(s)).toBe('area');
+    expect(readHandicap(s, 13)).toBe(0);
+    expect(readClock(s, 19)).toBeNull();
+    expect(readClock(s, 19, '5+7')).toBe('5+7');
+    expect(readEngineBackend(s)).toBeNull();
+    expect(readColorChoice(s)).toBe('random');
+
+    writeSize(s, 19);
+    writeRules(s, 'territory');
+    writeHandicap(s, 13, 4);
+    writeHandicap(s, 9, 7); // clamped to 5
+    writeClock(s, 19, '20m 5x30s');
+    writeClock(s, 9, null);
+    writeEngineBackend(s, 'wasm');
+    s.setPref('color', 'W');
+
+    expect(mem.dump()).toMatchObject({
+      'zigo:size': '19',
+      'zigo:rules': '"territory"',
+      'zigo:handicap': '{"9":5,"13":4}',
+      'zigo:clock': '{"9":null,"19":"20m5x30"}',
+      'zigo:engine-backend': '"wasm"',
+    });
+    expect(readSize(s)).toBe(19);
+    expect(readRules(s)).toBe('territory');
+    expect(readHandicap(s, 13)).toBe(4);
+    expect(readHandicap(s, 9)).toBe(5);
+    expect(readHandicap(s, 19)).toBe(0);
+    expect(readClock(s, 19)).toBe('20m5x30');
+    expect(readClock(s, 9, '2+7')).toBeNull(); // stored as off
+    expect(readClock(s, 13, '3+7')).toBe('3+7'); // never set
+    expect(readEngineBackend(s)).toBe('wasm');
+    expect(readColorChoice(s)).toBe('W');
+    writeEngineBackend(s, null);
+    expect(mem.getItem('zigo:engine-backend')).toBeNull();
+  });
+
+  it('falls back on corrupt or chess-era preference values', () => {
+    const s = createGoStore(
+      memoryStorage({
+        'zigo:size': '"13"',
+        'zigo:rules': '"chinese"',
+        'zigo:handicap': '[1,2]',
+        'zigo:clock': '"5+0"',
+        'zigo:engine-backend': '"cuda"',
+        'zigo:color': '"b"',
+      }),
+    );
+    expect(readSize(s)).toBe(13); // a numeric string is accepted
+    expect(readRules(s)).toBe('area');
+    expect(readHandicap(s, 19)).toBe(0);
+    expect(readClock(s, 9, '2+7')).toBe('2+7');
+    expect(readEngineBackend(s)).toBeNull();
+    expect(readColorChoice(s)).toBe('random');
+    const junk = createGoStore(memoryStorage({ 'zigo:clock': '{"9":"fast","13":42}', 'zigo:size': '7' }));
+    expect(readClock(junk, 9, null)).toBeNull();
+    expect(readClock(junk, 13, '3+7')).toBe('3+7');
+    expect(readSize(junk)).toBe(9);
   });
 });

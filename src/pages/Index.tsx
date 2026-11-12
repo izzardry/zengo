@@ -75,7 +75,7 @@ import { flags } from '@/lib/flags';
 import { DEFAULT_LEVEL, gameFromSaved, opponentOf } from '@/lib/gameRecord';
 import { useI18n } from '@/lib/i18n';
 import { bankTurn, bankedTurnMs } from '@/lib/turnBank';
-import type { Color, LockReason, Opponent, SavedGame, Square, TimeControl } from '@/lib/types';
+import type { Color, LockReason, Opponent, SavedGame, Square, TimeControl } from '@/lib/chessTypes';
 import { appBaseUrl } from '@/lib/url';
 import { cn } from '@/lib/utils';
 import zhess, { attacked, formatTc, lastMove, material, parseTc } from '@/lib/zhess';

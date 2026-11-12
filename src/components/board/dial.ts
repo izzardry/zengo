@@ -2,7 +2,7 @@
  * Geometry of the promotion dial (Ztyle 08 radial dial, ported from Zudoku's SudokuCell):
  * distances, zones and the angle-to-item mapping. Pure.
  */
-import type { PromotionPiece } from '@/lib/types';
+import type { PromotionPiece } from '@/lib/chessTypes';
 
 /** Items in dial order: Q at 12 o'clock, then clockwise. */
 export const DIAL_PIECES: readonly PromotionPiece[] = ['q', 'r', 'b', 'n'];

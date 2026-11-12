@@ -5,7 +5,7 @@ import { GameHistory } from './GameHistory';
 import { COLLAPSE_MS } from './useSwipeToDelete';
 import { UNDO_TOAST_MS } from './DeleteUndoToasts';
 import { renderWithI18n, savedGame } from './test-utils';
-import type { Room, SavedGame } from '@/lib/types';
+import type { Room, SavedGame } from '@/lib/chessTypes';
 
 const NOW = new Date(2026, 10, 11, 15, 0, 0).getTime();
 const now = () => NOW;

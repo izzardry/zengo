@@ -4,7 +4,7 @@ import { render, renderHook, type RenderOptions } from '@testing-library/react';
 import { I18nProvider } from '@/lib/i18n';
 import { createStore, memoryStorage } from '@/lib/storage';
 import { encodeMoves } from '@/lib/zhess';
-import type { Language, SavedGame, Store } from '@/lib/types';
+import type { Language, SavedGame, Store } from '@/lib/chessTypes';
 
 export function memStore(initial: Record<string, string> = {}): Store & { raw: ReturnType<typeof memoryStorage> } {
   const raw = memoryStorage(initial);

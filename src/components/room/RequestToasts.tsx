@@ -18,7 +18,7 @@
 import { useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 import { useI18n } from '@/lib/i18n';
-import type { RequestKind } from '@/lib/types';
+import type { RequestKind } from '@/lib/chessTypes';
 import { requestKey } from './text';
 import { createToastSlot } from './toastSlot';
 

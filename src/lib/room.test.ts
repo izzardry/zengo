@@ -6,7 +6,7 @@
  * claim timing, rematch colors and score, liveness, persistence and code collisions.
  */
 import { describe, expect, it } from 'vitest';
-import type { GameLog, Message, Room, SavedGame, Seat } from './types';
+import type { GameLog, Message, Room, SavedGame, Seat } from './chessTypes';
 import { createStore, memoryStorage } from './storage';
 import { appendPly, endLog, generateKey, hashLog, logToSaved, makeHead, newLog, proveSeat, roomGameId, roomScore, scoreView } from './sync';
 import zhess from './zhess';
@@ -1376,7 +1376,7 @@ describe('both devices end the game while apart', () => {
 
 describe('plain transports', () => {
   /** Only the `Transport` contract of types.ts: no state, no reconnect, no unsubscribe. */
-  function plain(t: import('./transport/memory').MemoryTransport): import('./types').Transport {
+  function plain(t: import('./transport/memory').MemoryTransport): import('./chessTypes').Transport {
     return {
       get role() {
         return t.role;

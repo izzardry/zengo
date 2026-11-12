@@ -8,7 +8,7 @@
  * "Past move 30" means 30 full moves have been completed: the FEN move number at the cursor is 31
  * or higher. A game continued from a position counts from that position's move number.
  */
-import type { EngineApi, Eval, Game } from './types';
+import type { EngineApi, Eval, Game } from './chessTypes';
 import { moveNumber } from './zhess';
 
 /** The game must be past this full move (DESIGN 8.3). */

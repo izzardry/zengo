@@ -76,7 +76,7 @@ import type {
   SavedGame,
   Store,
   TcString,
-} from '@/lib/types';
+} from '@/lib/chessTypes';
 import {
   appBaseUrl,
   buildUrl,

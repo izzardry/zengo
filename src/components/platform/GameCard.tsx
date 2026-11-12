@@ -14,7 +14,7 @@
 import { memo, type KeyboardEvent, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 import { levelKey, useI18n } from '@/lib/i18n';
-import type { Room, SavedGame } from '@/lib/types';
+import type { Room, SavedGame } from '@/lib/chessTypes';
 import { cn } from '@/lib/utils';
 import { cardState, formatRelativeTime, formatRoomScore, moveCount, plyCount, type CardState } from './history';
 import { useSwipeToDelete } from './useSwipeToDelete';

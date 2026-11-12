@@ -6,7 +6,7 @@ import { Toaster } from '@/components/ui/sonner';
 import { I18nProvider } from '@/lib/i18n';
 import type { RoomControllerApi, RoomControllerOptions, RoomState } from '@/lib/room';
 import { createStore, memoryStorage } from '@/lib/storage';
-import type { Language, RoomNotice, RoomNoticeKind, RequestKind } from '@/lib/types';
+import type { Language, RoomNotice, RoomNoticeKind, RequestKind } from '@/lib/chessTypes';
 import zhess from '@/lib/zhess';
 
 // Radix measures with ResizeObserver, which jsdom lacks.

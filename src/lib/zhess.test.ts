@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Game, Ply } from './types';
+import type { Game, Ply } from './chessTypes';
 import zhess, {
   START_FEN,
   SQUARES,

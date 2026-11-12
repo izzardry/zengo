@@ -5,7 +5,7 @@
  */
 import { createContext } from 'react';
 import type { ReactNode } from 'react';
-import type { Color, PieceType } from '@/lib/types';
+import type { Color, PieceType } from '@/lib/chessTypes';
 
 /**
  * Renders one piece. `className` carries the size (e.g. `w-4 h-4`); the piece set should fill it.

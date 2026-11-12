@@ -30,7 +30,7 @@ import {
   viewOf,
   type GameSession,
 } from './gameRecord';
-import type { Game, SavedGame } from './types';
+import type { Game, SavedGame } from './chessTypes';
 import zhess from './zhess';
 
 const SCHOLAR = ['e2e4', 'e7e5', 'f1c4', 'b8c6', 'd1h5', 'g8f6', 'h5f7'];

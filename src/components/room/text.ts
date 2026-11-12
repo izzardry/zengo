@@ -5,7 +5,7 @@
 import type { ManualCause, ManualIssue } from '@/hooks/useRoom';
 import type { TranslationKey } from '@/lib/i18n';
 import type { RoomState } from '@/lib/room';
-import type { Presence, RequestKind, RoomNotice } from '@/lib/types';
+import type { Presence, RequestKind, RoomNotice } from '@/lib/chessTypes';
 import type { UrlParams } from '@/lib/url';
 
 /** Label of the presence dot (DESIGN 9.10). */

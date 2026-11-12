@@ -24,7 +24,7 @@ import type {
   TimeControl,
   Uci,
   ZhessApi,
-} from './types';
+} from './chessTypes';
 
 /* ---------------------------------------------------------------------------------------------- */
 /* Squares                                                                                         */

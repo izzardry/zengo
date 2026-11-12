@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { isEngineAbort } from '@/lib/engine/driver';
 import { attacked } from '@/lib/zhess';
-import type { Color, EngineApi, Game, Square, Uci } from '@/lib/types';
+import type { Color, EngineApi, Game, Square, Uci } from '@/lib/chessTypes';
 import { playableMove } from './useComputer';
 
 /** Depth of the hint search (MultiPV 1 at full strength). */

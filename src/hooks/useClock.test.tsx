@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Color, Game, TcString, TimeControl } from '@/lib/types';
+import type { Color, Game, TcString, TimeControl } from '@/lib/chessTypes';
 import zhess from '@/lib/zhess';
 import { useClock, usePremove, type UseClockOptions, type UsePremoveOptions } from './useClock';
 

@@ -3,7 +3,7 @@
  * the facts on each card, relative time and the room score. No React.
  */
 import { zhess } from '@/lib/zhess';
-import type { Color, Language, Room, SavedGame } from '@/lib/types';
+import type { Color, Language, Room, SavedGame } from '@/lib/chessTypes';
 
 const DAY = 24 * 60 * 60 * 1000;
 

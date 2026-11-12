@@ -34,7 +34,7 @@ import {
   type PremoveState,
   type QueuedMove,
 } from '@/lib/premove';
-import type { Color, Game, Mode, Now, TcString, TimeControl, Uci } from '@/lib/types';
+import type { Color, Game, Mode, Now, TcString, TimeControl, Uci } from '@/lib/chessTypes';
 import { formatClock, formatElapsed } from '@/lib/timeUtils';
 
 /* ---------------------------------------------------------------------------------------------- */

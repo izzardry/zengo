@@ -6,255 +6,342 @@
  * file serially. Shapes copied from DESIGN.md name their section.
  *
  * This file holds types and a handful of `as const` values only. No logic.
+ *
+ * Transition (package 0b): the chess contracts copied from Zhess live in `./chessTypes.ts` until
+ * milestone 1 deletes the chess modules. Shapes that Go does not change (rooms, presence, seating,
+ * language, `Now`, `Rng`, …) are defined identically in both files, so either import works.
+ *
+ * Conventions used throughout:
+ * - A `Point` is two SGF letters, column then row from the top (`aa` = top-left); `tt` = pass.
+ * - Board arrays (`Game.board`, ownership maps) are row-major from the top: index = row × size + col,
+ *   with row 0 the top row (SGF row `a`). Use `pointToIndex` / `indexToPoint` in `lib/zigo.ts`.
+ * - Anything that can carry half points is an integer of half points ×2 (`komi2`, `margin`, …).
  */
 
 /* ------------------------------------------------------------------------------------------------
- * Chess primitives
+ * Go primitives (PLAN 4, DESIGN 8, 13.2)
  * --------------------------------------------------------------------------------------------- */
 
-/** Side: white or black. */
-export type Color = 'w' | 'b';
+/** Side: Black or White. */
+export type Color = 'B' | 'W';
 
-/** Board file letter. */
-export type File = 'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g' | 'h';
-/** Board rank digit. */
-export type Rank = '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8';
-/** Algebraic square name, `a1` … `h8`. Identical to chess.js's `Square`. */
-export type Square = `${File}${Rank}`;
+/** Board size. */
+export type Size = 9 | 13 | 19;
 
-/** Piece kind in chess.js letters: pawn, knight, bishop, rook, queen, king. */
-export type PieceType = 'p' | 'n' | 'b' | 'r' | 'q' | 'k';
-/** Pieces a pawn may promote to. Queen is the default (DESIGN 6.2). */
-export type PromotionPiece = 'q' | 'r' | 'b' | 'n';
+/** Rule set (DESIGN 8.2): `area` = Chinese-style (default), `territory` = Japanese-style counting. */
+export type Rules = 'area' | 'territory';
 
-/** A piece standing on the board. */
-export interface Piece {
-  readonly color: Color;
-  readonly type: PieceType;
-}
-
-/**
- * A move in UCI long algebraic form: from, to and an optional lower-case promotion letter,
- * e.g. `e2e4`, `e1g1` (castling is always the king's two-square move), `a7a8n`.
- */
-export type Uci = string;
-
-/** A legal move as offered by `ZhessApi.legalMoves`. */
-export interface Move {
-  readonly from: Square;
-  readonly to: Square;
-  /** Canonical UCI of this move, including the promotion letter. */
-  readonly uci: Uci;
-  /** Standard algebraic notation with English letters, e.g. `Nf3`, `exd5`, `O-O`, `e8=Q+`. */
-  readonly san: string;
-  readonly color: Color;
-  /** The moving piece. */
-  readonly piece: PieceType;
-  /** The captured piece, also for en passant (`p`). */
-  readonly captured?: PieceType;
-  /** Set on promotions. chess.js lists one move per promotion piece. */
-  readonly promotion?: PromotionPiece;
-  /** Set on castling: `k` king side, `q` queen side. */
-  readonly castle?: 'k' | 'q';
-  /** True for an en passant capture. */
-  readonly enPassant?: boolean;
-}
-
-/** Game result in PGN form. */
-export type Result = '1-0' | '0-1' | '1/2-1/2';
-
-/**
- * How a game ended (DESIGN 8, 12.1).
- * `material` = insufficient material, `fifty` = 50-move rule, `agreed` = draw by agreement.
- * `time` is a loss on time, or a draw when the side that did not flag cannot mate (DESIGN 8.2).
- */
-export type Termination =
-  | 'mate'
-  | 'resign'
-  | 'time'
-  | 'stalemate'
-  | 'repetition'
-  | 'fifty'
-  | 'material'
-  | 'agreed';
-
-/** End of a game: its result and the reason. */
-export interface GameEnd {
-  readonly result: Result;
-  readonly by: Termination;
-}
+/** Two SGF letters, `aa` … `ss` (column, then row from the top); `tt` = pass (DESIGN 13.2). */
+export type Point = string;
 
 /** Play mode (DESIGN 3). `local` is pass-and-play ("Two players"). */
 export type Mode = 'computer' | 'local' | 'room';
 
-/** Chess clock: base time and Fischer increment in milliseconds; `null` = clock off (DESIGN 11). */
-export type TimeControl = { readonly baseMs: number; readonly incMs: number } | null;
+/**
+ * Time control (DESIGN 11); `null` = clock off.
+ * - Fischer `m+s`: base time, increment added after each completed move.
+ * - Japanese byo-yomi `Mm P×Ss`: base time, then `periods` periods of `periodMs` each.
+ */
+export type TimeControl =
+  | { readonly kind: 'fischer'; readonly baseMs: number; readonly incMs: number }
+  | { readonly kind: 'byoyomi'; readonly baseMs: number; readonly periods: number; readonly periodMs: number }
+  | null;
 
 /**
- * Time control in its compact text form `minutes+incrementSeconds`, e.g. `5+0`, `15+10`.
- * Used in URLs (`t`), `SavedGame.tc` and protocol messages. Convert with `formatTc` / `parseTc`
- * in `lib/zhess.ts`.
+ * Time control in its compact text form: `5+7` (Fischer) or `20m5x30` (byo-yomi). Used in URLs
+ * (`t`), `SavedGame.tc` and protocol messages. Convert with `parseTc` / `formatTc` in `lib/zigo.ts`.
  */
 export type TcString = string;
 
-/** One half-move in a game record (DESIGN 9.4). */
+/** Game settings (DESIGN 8.2). `handicap` is 0 or 2–9 (2–5 on 9×9); `komi2` = komi ×2 (7.5 → 15). */
+export interface Settings {
+  readonly size: Size;
+  readonly rules: Rules;
+  readonly handicap: number;
+  readonly komi2: number;
+}
+
+/** One ply of a game record (DESIGN 9.2): a point or `tt` for a pass, and the mover's ms. */
 export interface Ply {
-  /** The move in UCI. */
-  readonly m: Uci;
+  readonly m: Point;
   /** Milliseconds the mover used for it, measured on the mover's device. */
   readonly ms: number;
 }
 
+/** How a game ended (DESIGN 9.2). */
+export type Termination = 'score' | 'resign' | 'time';
+
+/** Result of a game (DESIGN 9.2). There are no draws (half-point komi). */
+export interface Result {
+  readonly winner: Color;
+  readonly by: Termination;
+  /** For `by: 'score'`: the winning margin in half points ×2 (`B+4.5` → 9). */
+  readonly margin?: number;
+}
+
+/**
+ * The scoring phase (DESIGN 9.2, 8.4). Present after two consecutive passes.
+ * `round` 2 = scoring reached again after a resume: scored directly, no marking round.
+ */
+export interface Scoring {
+  readonly round: 1 | 2;
+  /** Incremented on every toggle; the higher rev wins a reconcile. Starts at 0. */
+  readonly rev: number;
+  /** Dead stones as sorted SGF points. */
+  readonly dead: readonly Point[];
+  /** The rev each seat (or, in pass-and-play, each side: [Black, White]) accepted; 0 = none. */
+  readonly accepted: readonly [number, number];
+}
+
 /* ------------------------------------------------------------------------------------------------
- * Game value and the rules wrapper
+ * Game value and the rules core (PLAN 4, DESIGN 8.1)
  * --------------------------------------------------------------------------------------------- */
 
 /**
- * Immutable game value. Every operation of `ZhessApi` returns a new one; values are frozen and
- * plain JSON. `plies` keeps the redo tail after an undo; `cursor` says how many plies are applied.
+ * Immutable game value. Every operation of `ZigoApi` returns a new one. The object and `plies`
+ * are frozen; `board` is a typed array (which cannot be frozen) and must never be mutated.
  */
 export interface Game {
-  /** The start position (FEN). The standard start unless the game was created from a position. */
-  readonly start: string;
+  readonly settings: Settings;
   /** All recorded plies, including a redo tail beyond `cursor`. */
   readonly plies: readonly Ply[];
   /** Plies applied; `< plies.length` while redo is possible, or while reviewing. */
   readonly cursor: number;
-  /** Position at `cursor` (FEN). */
-  readonly fen: string;
-  /** Side to move at `cursor`. */
+  /** size², 0 empty, 1 black, 2 white, at `cursor`. Row-major from the top. */
+  readonly board: Uint8Array;
+  /** Side to move at `cursor`. White moves first with a handicap of 2 or more. */
   readonly turn: Color;
+  /** Stones captured BY each color up to `cursor` (dead stones at scoring not included). */
+  readonly prisoners: Readonly<Record<Color, number>>;
+  /** Simple-ko point: the point the side to move may not retake this turn, else null. */
+  readonly ko: Point | null;
   /**
-   * Set when the game is over. Automatic endings are detected by `play`, `undo` and `redo`;
-   * resign, time and agreed draws are set with `end`. `goto` (review) keeps it unchanged.
+   * Consecutive passes at `cursor`, counted since the last stone or the last `resume`
+   * (so 0 right after a resume even when the last two plies are passes).
    */
-  readonly end?: GameEnd;
+  readonly passes: number;
+  /** Present while the game is in the scoring phase (two consecutive passes, not resumed). */
+  readonly scoring?: Scoring;
+  /** Set when the game is over. `goto` keeps it; `undo` / `redo` drop it. */
+  readonly end?: { readonly result: Result };
+  /**
+   * Addition: the start position of a game created from a set-up board (`newGame(settings, setup)`),
+   * absent for a normal game (empty board plus handicap stones from `settings.handicap`).
+   */
+  readonly setup?: { readonly board: Uint8Array; readonly turn: Color };
 }
 
-/** Engine evaluation from the side to move's point of view: centipawns or mate in N (negative = getting mated). */
-export interface Eval {
-  readonly cp?: number;
-  readonly mate?: number;
-}
+/** Why a point cannot be played (`ZigoApi.illegalReason`). `ko` = the simple-ko point; `superko` = a longer cycle. */
+export type IllegalReason = 'occupied' | 'suicide' | 'ko' | 'superko';
 
-/** PGN header values. Missing tags are written as `?`. `Result` comes from the game. */
-export interface PgnMeta {
-  readonly event?: string;
-  readonly site?: string;
-  /** `YYYY.MM.DD`. */
-  readonly date?: string;
-  readonly round?: string;
-  readonly white?: string;
+/** Header values for SGF export (DESIGN 13.3). Missing names and date are left out. */
+export interface SgfMeta {
+  /** App version for `AP[Zigo:<version>]`. */
+  readonly version: string;
+  /** `PB`, e.g. `Zigo Level 5` for the computer. */
   readonly black?: string;
-  /** Written as the PGN `TimeControl` tag (`seconds+increment`) when the clock was on. */
-  readonly timeControl?: TimeControl;
-  /** Extra tags, written after the seven-tag roster. */
-  readonly tags?: Readonly<Record<string, string>>;
-}
-
-/** Material summary for the player strips (DESIGN 4.2). */
-export interface Material {
-  /** Pieces captured BY each color (so `captured.w` lists black pieces), grouped p, n, b, r, q. */
-  readonly captured: Record<Color, PieceType[]>;
-  /** Board material of white minus black, in pawns (P 1, N 3, B 3, R 5, Q 9). Positive = white ahead. */
-  readonly diff: number;
+  /** `PW`. */
+  readonly white?: string;
+  /** `DT`, ISO `YYYY-MM-DD`. */
+  readonly date?: string;
+  /** Written as `TM` (main time in seconds) and `OT` (overtime as free text). */
+  readonly tc?: TimeControl | TcString | null;
 }
 
 /**
- * `lib/zhess.ts` — the rules wrapper over chess.js. Pure: no React, no DOM.
- * The first block is PLAN.md section 4; the rest are additions documented in place.
+ * One side's clock derived from the ply log (DESIGN 11).
+ * - Fischer: `mainMs` is the remaining time; `periodMs` and `periods` are 0.
+ * - Byo-yomi: `mainMs` is the main time left; `periods` the periods left; `periodMs` the time the
+ *   current period offers for the next move (a full period, because a move made inside a period
+ *   keeps it). Out of time: `mainMs` 0, `periods` 0, `periodMs` 0.
+ * - Clock off: `mainMs` is the time used so far; the rest 0.
  */
-export interface ZhessApi {
-  /** A new game from the standard start or from `startFen`. Throws on an invalid FEN. */
-  newGame(startFen?: string): Game;
-  /** Legal moves at the cursor, optionally only from one square. Empty when the game is over. */
-  legalMoves(g: Game, from?: Square): Move[];
-  /**
-   * Plays a move at the cursor and drops the redo tail. Accepts UCI; a pawn move to the last rank
-   * without a letter promotes to a queen; a king dropped on its own rook castles (DESIGN 6.1).
-   * Stores the canonical UCI. Detects mate, stalemate, insufficient material, threefold
-   * repetition and the 50-move rule. Throws on an illegal move or when the game is over.
-   */
-  play(g: Game, uci: string, ms: number): Game;
-  /** Moves the cursor back (keeps the redo tail). Drops any end and re-detects automatic endings. */
+export interface ClockState {
+  readonly mainMs: number;
+  readonly periodMs: number;
+  readonly periods: number;
+}
+
+/** What the engine is told about the clock of the side it moves for (`EngineApi.genmove`). */
+export interface ClockInfo {
+  readonly tc: NonNullable<TimeControl>;
+  /** The engine's own clock at the start of its turn. */
+  readonly left: ClockState;
+}
+
+/** A position handed to the engine (`ZigoApi.position`). Arrays are row-major from the top. */
+export interface Position {
+  readonly size: Size;
+  readonly rules: Rules;
+  readonly komi2: number;
+  /** Stones on the board before the first ply (handicap or set-up). */
+  readonly setup: { readonly B: readonly Point[]; readonly W: readonly Point[] };
+  /** The color that made the first ply. */
+  readonly first: Color;
+  /** Plies applied, in order; `tt` = pass. */
+  readonly moves: readonly Point[];
+  /** Board after `moves`: size², 0 empty, 1 black, 2 white. */
+  readonly board: Uint8Array;
+  readonly turn: Color;
+  readonly ko: Point | null;
+}
+
+/** `lib/zigo.ts` — pure, no React, no DOM. PLAN 4 first; additions documented in place. */
+export interface ZigoApi {
+  /** A new game; places the handicap stones of `settings.handicap` unless `setup` is given. */
+  newGame(settings: Settings, setup?: { board: Uint8Array; turn: Color }): Game;
+  /** occupied / suicide / ko / positional superko. False while scoring or after the end. */
+  isLegal(g: Game, p: Point): boolean;
+  /** Why the side to move cannot play `p`, by the rules alone (ignores scoring and end). Off-board = occupied. */
+  illegalReason(g: Game, p: Point): IllegalReason | null;
+  /** Plays at the cursor; throws on illegal, while scoring or after the end; drops the redo tail; `tt` passes. */
+  play(g: Game, p: Point, ms: number): Game;
+  /** A pass; the second consecutive pass enters scoring. Throws while scoring or after the end. */
+  pass(g: Game, ms: number): Game;
+  /** Moves the cursor back (keeps the redo tail). Drops `end`; undoing the second pass leaves scoring. */
   undo(g: Game, plies: number): Game;
-  /** Moves the cursor forward along the redo tail. Re-detects automatic endings. */
+  /** Moves the cursor forward along the redo tail. Drops `end`. */
   redo(g: Game, plies: number): Game;
-  /** Moves the cursor anywhere in `0..plies.length` for review. Keeps `end` unchanged. */
+  /** Moves the cursor anywhere in `0..plies.length` for review. Keeps `end`. */
   goto(g: Game, cursor: number): Game;
-  /** Ends the game at the cursor (drops the redo tail). A game that is already over is returned unchanged. */
-  end(g: Game, result: Result, by: Termination): Game;
-  /** Squares attacked by `by` at the cursor (threat peek). */
-  attacked(g: Game, by: Color): Square[];
-  /** The king square of the side to move if it is in check, else null. */
-  inCheck(g: Game): Square | null;
-  /** Captured pieces and material balance at the cursor. */
-  material(g: Game): Material;
-  /** SAN of every ply up to the cursor. */
-  san(g: Game): string[];
-  /**
-   * PGN with English letters. Exports all plies of a finished game (review), otherwise the plies up
-   * to the cursor. Result tag from `g.end`, `*` while running.
-   */
-  pgn(g: Game, meta: PgnMeta): string;
-  /** Compact move list for the URL and storage (DESIGN 13.2). */
+  /** The chain at `p`, sorted; [] for an empty point. */
+  groupAt(g: Game, p: Point): Point[];
+  /** Liberties of the chain at `p`; 0 for an empty point. */
+  libertiesOf(g: Game, p: Point): number;
+  /** Chains of `color` with exactly one liberty, each sorted, ordered by their first point. */
+  atari(g: Game, color: Color): Point[][];
+  /** Stones of the side to move put into atari that the opponent can capture at once by playing `p`; 0 if none or illegal. */
+  selfAtariSize(g: Game, p: Point): number;
+  /** Leaves scoring; play continues with the player to move; the next scoring is round 2. */
+  resume(g: Game): Game;
+  /** Ends the game at the cursor (drops the redo tail, keeps scoring). An ended game is returned unchanged. */
+  end(g: Game, result: Result): Game;
+  /** `D4`, `pass`. Columns A–T without I, rows from the bottom. */
+  gtp(p: Point, size: Size): string;
+  /** Inverse of `gtp`, case-insensitive; null if not a point on this board. */
+  fromGtp(s: string, size: Size): Point | null;
+  /** Two SGF letters per ply (DESIGN 13.2). Throws on a malformed ply. */
   encodeMoves(plies: readonly Ply[]): string;
-  /**
-   * Decodes `encodeMoves` output to UCI. Queen promotions come back without their letter
-   * (e.g. `e7e8`); `play` turns them into queens. Throws on malformed input.
-   */
-  decodeMoves(s: string): string[];
-  /**
-   * Remaining ms per side at the cursor, excluding the running turn. Fischer: each counted move
-   * subtracts its `ms` and adds the increment. Each side's first move is untimed (DESIGN 9.8:
-   * "the first move of each side starts that side's clock"). With `tc === null` it returns the
-   * time used per side instead (all plies counted), which the strips show dimmed.
-   */
-  clocks(g: Game, tc: TimeControl): Record<Color, number>;
+  /** Inverse of `encodeMoves`. Returns the longest well-formed prefix (never throws). */
+  decodeMoves(s: string): Point[];
+  /** SGF FF[4] (DESIGN 13.3): all plies of a finished game, else the plies up to the cursor. */
+  sgf(g: Game, meta: SgfMeta): string;
+  /** Each side's clock at the cursor, excluding the running turn (each side's first move is untimed). */
+  clocks(g: Game, tc: TimeControl): Record<Color, ClockState>;
 
-  /* ---- additions ---- */
+  /* ---- additions (package 0b) ---- */
 
-  /** Replays plies from `startFen` (default: standard start) with the cursor at the end. Throws on an illegal ply. */
-  replay(plies: readonly Ply[], startFen?: string): Game;
-  /**
-   * Rebuilds a game from stored fields (`SavedGame.moves`, `.ms`, `.result`, `.by`): decodes,
-   * replays, and applies a manual ending. With `lenient`, stops at the first illegal ply instead
-   * of throwing (for links typed or cut by hand).
-   */
-  fromRecord(
-    moves: string,
-    ms: readonly number[],
-    end?: GameEnd,
-    opts?: { startFen?: string; lenient?: boolean },
-  ): Game;
-  /** Removes a manual ending (resign, time, agreed) so play can go on: the resign undo toast. Automatic endings stay. */
+  /** Plays a sequence of plies (or points) from a new game. Resumes scoring implicitly when a ply follows it. Throws on an illegal ply. */
+  replay(settings: Settings, plies: readonly (Ply | Point)[]): Game;
+  /** Rebuilds a game from stored fields (`SavedGame`, `GameLog`). See `lib/zigo.ts`. */
+  fromRecord(rec: GameRecordFields, opts?: { lenient?: boolean }): Game;
+  /** Replaces the marks of the scoring phase (dead sorted and de-duplicated). Throws when not scoring. */
+  setScoring(g: Game, scoring: Scoring): Game;
+  /** Removes the ending so play can go on (the resign undo toast). */
   reopen(g: Game): Game;
-  /** Ends the game on time for `flagged`: a loss, or a draw if the other side cannot mate (DESIGN 8.2). */
-  timeout(g: Game, flagged: Color): Game;
-  /** Result of `flagged` running out of time in this position, without changing the game. */
-  timeoutResult(g: Game, flagged: Color): GameEnd;
-  /** Whether `color` still has material that could possibly mate (used for time-outs). */
-  canMate(g: Game, color: Color): boolean;
-  /** True when the side to move has made a move before in this game, so its clock is running (DESIGN 9.8). */
-  clockRunning(g: Game): boolean;
-  /** Time used per side up to the cursor (sum of `ms`, all plies). */
-  timeUsed(g: Game): Record<Color, number>;
-  /** Board at the cursor: 64 entries indexed by `squareIndex` (a1 = 0, b1 = 1, … h8 = 63). */
-  board(g: Game): ReadonlyArray<Piece | null>;
-  /** The last applied move (for the last-move highlight), or null at the start. */
-  lastMove(g: Game): { from: Square; to: Square } | null;
-  /** Verbose history up to the cursor: one `Move` per applied ply (move list, live region). */
-  history(g: Game): Move[];
-  /** Color that made ply `i` (0-based) of this game. */
+  /** The engine's view of the game at the cursor. */
+  position(g: Game): Position;
+  /** Color that made ply `i` (0-based). */
   colorOfPly(g: Game, i: number): Color;
-  /** Converts typed SAN (`Nf3`, `exd5`, `O-O`, also UCI) to canonical UCI if it is legal at the cursor, else null. */
-  sanToUci(g: Game, text: string): Uci | null;
-  /** Number of the full move at the cursor (1-based, as in FEN). */
-  moveNumber(g: Game): number;
+  /** The last applied ply's point (`tt` for a pass), or null at the start. */
+  lastMove(g: Game): Point | null;
+  /** Time used per side up to the cursor (sum of `ms`). */
+  timeUsed(g: Game): Record<Color, number>;
+  /** True when the side to move has moved before, so its clock is running (first move untimed). */
+  clockRunning(g: Game): boolean;
+}
+
+/** The stored fields `ZigoApi.fromRecord` reads (a subset of `SavedGame`). */
+export interface GameRecordFields {
+  readonly size: Size;
+  readonly rules: Rules;
+  readonly handicap: number;
+  /** Komi ×2; defaults to the rule set's komi for the handicap. */
+  readonly komi2?: number;
+  readonly moves: string;
+  readonly ms?: readonly number[];
+  readonly scoring?: Scoring;
+  readonly result?: Result;
 }
 
 /* ------------------------------------------------------------------------------------------------
- * Persistence (DESIGN 12.1, 9.3, 13.1)
+ * Scoring (DESIGN 8.4)
+ * --------------------------------------------------------------------------------------------- */
+
+/** One side's count. Whole points (stones and points are integers). */
+export interface ScoreSide {
+  /** Empty points (and points of dead opponent stones) counted for this side. */
+  readonly territory: number;
+  /** This side's living stones on the board. */
+  readonly stones: number;
+  /** Stones captured during play plus opponent stones marked dead (counted under territory rules only). */
+  readonly prisoners: number;
+}
+
+/**
+ * A count (`ScoringApi.score`). Totals and margin are half points ×2.
+ * - Area: total2 = 2 × (stones + territory); White adds komi2 + compensation2.
+ * - Territory: total2 = 2 × (territory + prisoners); White adds komi2.
+ */
+export interface Score {
+  readonly rules: Rules;
+  readonly B: ScoreSide;
+  readonly W: ScoreSide;
+  /** Komi ×2, added to White. */
+  readonly komi2: number;
+  /** Area rules with handicap: White gets 1 point per handicap stone, ×2 here; else 0. */
+  readonly compensation2: number;
+  readonly total2: Readonly<Record<Color, number>>;
+  /** total2.B − total2.W; positive = Black ahead. */
+  readonly margin2: number;
+}
+
+/** `lib/scoring.ts` — pure, over the vendored goscorer. */
+export interface ScoringApi {
+  /** Area or territory count (by `g.settings.rules`) of the board at the cursor with `dead` removed. */
+  score(g: Game, dead: readonly Point[]): Score;
+  /** Owner of every empty or dead point (null = nobody: dame, seki, neutral). Living stones are absent. */
+  territory(g: Game, dead: readonly Point[]): Record<Point, Color | null>;
+  /** Toggles the whole chain at `p` between alive and dead; returns the new dead set, sorted. */
+  toggle(g: Game, dead: readonly Point[], p: Point): Point[];
+  /**
+   * Dead stones from an ownership map (size², row-major from the top, +1 = Black owns, −1 = White):
+   * a stone whose ownership is ≥ 0.7 toward the opponent is dead. null → none dead. Sorted.
+   */
+  propose(g: Game, ownership: Float32Array | null): Point[];
+  /** The result of a count: winner by `margin2`, `by: 'score'`, margin in half points ×2. */
+  result(g: Game, score: Score): Result;
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Engine (DESIGN 10, PLAN 4)
+ * --------------------------------------------------------------------------------------------- */
+
+/** Lifecycle of the lazily loaded engine worker. */
+export type EngineState = 'idle' | 'loading' | 'ready' | 'failed';
+
+/** `hooks/useZigoEngine` — and the FakeEngine used in tests. */
+export interface EngineApi {
+  readonly state: EngineState;
+  /** 0..1 while loading. */
+  readonly progress: number;
+  readonly backend: 'webgpu' | 'wasm' | null;
+  /** Which networks are cached: `small` = b6c96 (stage 1), `large` = b10c128 (stage 2). */
+  readonly nets: { readonly small: boolean; readonly large: boolean };
+  load(stage: 1 | 2): Promise<void>;
+  genmove(pos: Position, level: number, clock?: ClockInfo): Promise<{ move: Point | 'resign' }>;
+  /** `ownership` and `policy` are size² row-major from the top (policy has one more entry for pass); +1 = Black. */
+  evaluate(
+    pos: Position,
+    opts: { visits?: number; timeMs?: number; net?: 'small' | 'large' },
+    timeoutMs?: number,
+  ): Promise<{ winrate: number; scoreLead: number; ownership: Float32Array; policy: Float32Array } | null>;
+  analyze(pos: Position, n: number): Promise<{ move: Point; winrate: number; scoreLead: number }[]>;
+  stop(): void;
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Persistence (DESIGN 12.1, 13.1)
  * --------------------------------------------------------------------------------------------- */
 
 /** Room seat: 0 = creator, 1 = joiner. */
@@ -268,24 +355,29 @@ export interface SavedGame {
   mode: Mode;
   /** Computer level 1–12; computer games only. */
   level?: number;
-  /** This device's side; `w` in pass-and-play. */
+  /** This device's side; `B` in pass-and-play. */
   color: Color;
-  /** Time control as `5+0`, or null. */
+  size: Size;
+  rules: Rules;
+  /** 0 or 2–9. */
+  handicap: number;
+  /** `5+7`, `20m5x30` or null. */
   tc: TcString | null;
-  /** Compact move encoding (DESIGN 13.2). */
+  /** Compact encoding (DESIGN 13.2). */
   moves: string;
   /** Time used per ply. */
   ms: number[];
+  /** During or after scoring. */
+  scoring?: Scoring;
   result?: Result;
-  by?: Termination;
-  /** A hint or an undo was used (DESIGN 7.3). */
+  /** A hint, the territory preview, an undo or the guard was used (DESIGN 7). */
   assisted: boolean;
   room?: { n: number; epoch: number };
   createdAt: number;
   lastPlayedAt: number;
 }
 
-/** A stored room record and its seat lock (DESIGN 9.3). */
+/** A stored room record and its seat lock (as Zhess). */
 export interface Room {
   /** Room code, e.g. `K7QW2M`. */
   code: string;
@@ -295,7 +387,7 @@ export interface Room {
   createdAt: number;
   /** Last successful sync. */
   lastSeenAt: number;
-  /** Points per seat, in half points ×2 (a win adds 2, a draw adds 1 to each). */
+  /** Points per seat, in half points ×2 (as Zhess: a win adds 2). */
   score: [number, number];
   /** Ids of this room's games (`SavedGame.id`), oldest first. */
   games: string[];
@@ -325,9 +417,13 @@ export interface Store {
 export type PrefKey =
   | 'opponent'
   | 'color'
+  | 'size'
+  | 'rules'
+  | 'handicap'
   | 'clock'
   | 'helpers'
   | 'seating'
+  | 'engine-backend'
   | 'lang'
   | 'tutorial-seen'
   | 'donation-shown'
@@ -349,34 +445,13 @@ export type Seating = 'face' | 'side';
 export type Language = 'en' | 'de' | 'fr' | 'es';
 
 /* ------------------------------------------------------------------------------------------------
- * Engine (DESIGN 10)
- * --------------------------------------------------------------------------------------------- */
-
-/** Lifecycle of the lazily loaded engine worker. */
-export type EngineState = 'idle' | 'loading' | 'ready' | 'failed';
-
-/** `hooks/useZhessEngine` — and the fake used in tests. */
-export interface EngineApi {
-  readonly state: EngineState;
-  /** 0..1 while loading. */
-  readonly progress: number;
-  load(): Promise<void>;
-  /** Best move in UCI for `level` 1–12; `clock` lets level 12 and timed games respect the engine's own clock. */
-  bestMove(fen: string, level: number, clock?: { wMs: number; bMs: number; incMs: number }): Promise<Uci>;
-  /** Fixed-depth evaluation from the side to move; null on timeout. */
-  evaluate(fen: string, depth: number, timeoutMs?: number): Promise<Eval | null>;
-  multiPv(fen: string, n: number, depth: number): Promise<{ uci: Uci; eval: Eval }[]>;
-  stop(): void;
-}
-
-/* ------------------------------------------------------------------------------------------------
  * Rooms: sync record, protocol, transport, controller (DESIGN 9)
  * --------------------------------------------------------------------------------------------- */
 
 /**
- * Live record of one game in a room (DESIGN 9.4).
- * `white` and `tc` are additions: a device restored by `grant` must learn each game's colors and
- * time control, which the design's shape does not carry.
+ * Live record of one game in a room (DESIGN 9.2).
+ * Additions as in Zhess (a device restored by `grant` must learn each game's colors and settings,
+ * which the design's shape does not carry): `black`, `tc`, `size`, `rules`, `handicap`.
  */
 export interface GameLog {
   /** Game number within the room, 1-based. */
@@ -384,17 +459,22 @@ export interface GameLog {
   /** Incremented on every accepted takeback. */
   epoch: number;
   plies: Ply[];
-  end?: GameEnd;
-  /** Seat that plays white in this game (rematch alternates). */
-  white: Seat;
-  /** Time control of this game, e.g. `5+0`, or null. */
+  /** Present after two consecutive passes (and kept after a scored end). */
+  scoring?: Scoring;
+  end?: { result: Result; by: Termination };
+  /** Seat that plays Black in this game. */
+  black: Seat;
+  /** Time control of this game, or null. */
   tc: TcString | null;
+  size: Size;
+  rules: Rules;
+  handicap: number;
 }
 
-/** The three request kinds of DESIGN 9.7. */
-export type RequestKind = 'takeback' | 'draw' | 'rematch';
+/** The request kinds of DESIGN 9.4. There is no draw request in Go. */
+export type RequestKind = 'takeback' | 'rematch';
 
-/** Current protocol version (DESIGN 9.11). */
+/** Current protocol version (DESIGN 9.6). */
 export const PROTOCOL_VERSION = 1 as const;
 export type ProtocolVersion = typeof PROTOCOL_VERSION;
 
@@ -404,40 +484,52 @@ export interface HelloMsg { t: 'hello'; v: ProtocolVersion; hasKey: boolean; non
 export interface ProofMsg { t: 'proof'; v: ProtocolVersion; mac: string }
 /** A device without a key asks for seat 1 of an open room. */
 export interface JoinMsg { t: 'join'; v: ProtocolVersion }
-/** Answer to `join`: the key, the joiner's seat, the time control and the joiner's color in the current game. */
-export interface WelcomeMsg { t: 'welcome'; v: ProtocolVersion; key: string; seat: Seat; tc: TcString | null; color: Color }
-/** A device without a key asks for its seat back in a locked room (DESIGN 9.5). */
+/** Answer to `join` (DESIGN 9.1): the key, the joiner's seat and color, and the creator's game settings. */
+export interface WelcomeMsg {
+  t: 'welcome';
+  v: ProtocolVersion;
+  key: string;
+  seat: Seat;
+  tc: TcString | null;
+  color: Color;
+  size: Size;
+  rules: Rules;
+  handicap: number;
+}
+/** A device without a key asks for its seat back in a locked room. */
 export interface RejoinMsg { t: 'rejoin'; v: ProtocolVersion }
 /** Rejoin allowed: everything the lost device needs. `score` is per seat, half points ×2. */
 export interface GrantMsg { t: 'grant'; v: ProtocolVersion; key: string; seat: Seat; score: [number, number]; games: GameLog[] }
 /** Rejoin declined. */
 export interface DenyMsg { t: 'deny'; v: ProtocolVersion }
 /**
- * Reconcile summary of the current game. `ended` feeds rule 5 (finished beats unfinished).
- * `turnMs` is an addition: the ms the sender has already used on its own running turn, reported
- * after a pause (DESIGN 9.8); omitted when it is not the sender's turn.
+ * Reconcile summary of the current game (as Zhess). `hash` covers the plies and the scoring state.
+ * `turnMs`: the ms the sender has already used on its own running turn, reported after a pause.
  */
 export interface HeadMsg { t: 'head'; v: ProtocolVersion; n: number; epoch: number; len: number; hash: string; ended: boolean; turnMs?: number }
 /** Reconcile payload: games the other side is missing, the current one last. */
 export interface LogsMsg { t: 'logs'; v: ProtocolVersion; games: GameLog[] }
-/** One live ply: ply index `i` (0-based) of game `n` at `epoch`. */
-export interface MoveMsg { t: 'move'; v: ProtocolVersion; n: number; epoch: number; i: number; m: Uci; ms: number }
-/** Acknowledges ply `i`. `n` and `epoch` are additions so a stale ack is ignored. */
+/** One live ply (DESIGN 9.6): `m` is two SGF letters or `tt` for a pass. */
+export interface MoveMsg { t: 'move'; v: ProtocolVersion; n: number; epoch: number; i: number; m: Point; ms: number }
+/** Acknowledges ply `i`. */
 export interface AckMsg { t: 'ack'; v: ProtocolVersion; n: number; epoch: number; i: number }
-/**
- * A request (DESIGN 9.7). `n`, `epoch` and `len` (plies at the time of asking) are additions that
- * let the receiver drop a request made stale by a move or a takeback.
- */
+/** A scoring proposal or toggle (DESIGN 9.5, 9.6). `dead` sorted. */
+export interface MarkMsg { t: 'mark'; v: ProtocolVersion; n: number; epoch: number; rev: number; dead: Point[] }
+/** Acceptance of the marking at `rev`. */
+export interface AcceptMsg { t: 'accept'; v: ProtocolVersion; n: number; rev: number }
+/** Leave scoring and play on. */
+export interface ResumeMsg { t: 'resume'; v: ProtocolVersion; n: number; epoch: number }
+/** A request (`n`, `epoch`, `len` let the receiver drop a stale one, as Zhess). */
 export interface AskMsg { t: 'ask'; v: ProtocolVersion; kind: RequestKind; n: number; epoch: number; len: number }
 /** Answer to `ask`, echoing its context. */
 export interface ReplyMsg { t: 'reply'; v: ProtocolVersion; kind: RequestKind; ok: boolean; n: number; epoch: number; len: number }
-/** Resign, flag, agreed draw. */
-export interface EndMsg { t: 'end'; v: ProtocolVersion; n: number; result: Result; by: Termination }
+/** Resign, time, or a round-2 score with the dead set it was counted from (DESIGN 9.6). */
+export interface EndMsg { t: 'end'; v: ProtocolVersion; n: number; result: Result; by: Termination; dead?: Point[] }
 /** Liveness every 5 s; three misses mark the peer disconnected. */
 export interface PingMsg { t: 'ping'; v: ProtocolVersion }
 export interface PongMsg { t: 'pong'; v: ProtocolVersion }
 
-/** Every data-channel message (DESIGN 9.11), discriminated by `t`. JSON over the wire. */
+/** Every data-channel message, discriminated by `t`. JSON over the wire. */
 export type Message =
   | HelloMsg
   | ProofMsg
@@ -450,6 +542,9 @@ export type Message =
   | LogsMsg
   | MoveMsg
   | AckMsg
+  | MarkMsg
+  | AcceptMsg
+  | ResumeMsg
   | AskMsg
   | ReplyMsg
   | EndMsg
@@ -462,12 +557,12 @@ export type MessageType = Message['t'];
 /** State of a transport connection. */
 export type TransportState = 'connecting' | 'open' | 'closed' | 'failed';
 
-/** Why a transport failed (DESIGN 9.10, PLAN 3B). */
+/** Why a transport failed. */
 export type TransportFailure = 'broker-unreachable' | 'id-taken' | 'ice-failed' | 'timeout';
 
 /** `lib/transport` — one reliable, ordered data channel. */
 export interface Transport {
-  /** Transport role only; gives no authority over the game (DESIGN 9.2). */
+  /** Transport role only; gives no authority over the game. */
   readonly role: 'anchor' | 'dialer';
   send(msg: Message): void;
   onMessage(cb: (msg: Message) => void): void;
@@ -476,17 +571,17 @@ export interface Transport {
 }
 export type TransportFactory = (code: string) => Promise<Transport>;
 
-/** Presence of the opponent as the dot shows it (DESIGN 9.10). */
+/** Presence of the opponent as the dot shows it. */
 export type Presence = 'connecting' | 'waiting' | 'connected' | 'reconnecting';
 
-/** Room lock state as seen from this device (DESIGN 9.3). */
+/** Room lock state as seen from this device. */
 export type RoomLock = 'open' | 'locked' | 'rejoin-pending';
 
 /** Why the board is not playable for this device right now. */
 export type LockReason =
-  /** Timed game while the opponent is disconnected (DESIGN 9.6). */
+  /** Timed game while the opponent is disconnected. */
   | 'disconnected'
-  /** The room is open in another tab (DESIGN 9.12). */
+  /** The room is open in another tab. */
   | 'other-tab'
   /** This device has no seat yet (waiting for welcome or grant). */
   | 'no-seat'
@@ -495,7 +590,7 @@ export type LockReason =
   /** Rejoin was declined or the challenge failed. */
   | 'denied';
 
-/** One-off events the UI turns into toasts (DESIGN 9.5, 9.7, 9.10, 9.11). */
+/** One-off events the UI turns into toasts. */
 export type RoomNoticeKind =
   | 'opponent-joined'
   | 'opponent-connected'
@@ -517,7 +612,7 @@ export interface RoomNotice {
   readonly request?: RequestKind;
 }
 
-/** Everything the room UI renders. Produced by `RoomController`. */
+/** Everything the room UI renders. Produced by `RoomController` (Zhess's shape, Go types). */
 export interface RoomSnapshot {
   readonly code: string;
   readonly presence: Presence;
@@ -530,7 +625,7 @@ export interface RoomSnapshot {
   /** Current game number and takeback epoch. */
   readonly n: number;
   readonly epoch: number;
-  /** The current game. The room controller owns it in room mode (PLAN 7). */
+  /** The current game (settings, plies, scoring, end). */
   readonly game: Game;
   /** This device's color in the current game. */
   readonly color: Color;
@@ -544,11 +639,7 @@ export interface RoomSnapshot {
   readonly locked: LockReason | null;
   /** Plies played here but not yet acknowledged by the opponent. */
   readonly unsent: number;
-  /**
-   * Running-turn clock (DESIGN 9.8): `paused` while disconnected in a timed game; `turnStart` is the
-   * `now()` stamp at which the side to move's current turn (re)started, null while paused;
-   * `turnUsed` is what that side had already used in this turn before the last pause.
-   */
+  /** Running-turn clock: as Zhess. Stopped during scoring. */
   readonly clock: { readonly paused: boolean; readonly turnStart: number | null; readonly turnUsed: number };
   /** The latest notice, if any. */
   readonly notice: RoomNotice | null;
@@ -556,11 +647,16 @@ export interface RoomSnapshot {
   readonly failure: TransportFailure | null;
 }
 
-/** `lib/room.ts` — framework-free state machine over a `Transport`. */
+/** `lib/room.ts` — Zhess's RoomController, extended for Go (PLAN 4). */
 export interface RoomController {
   readonly snapshot: RoomSnapshot;
   subscribe(cb: (s: RoomSnapshot) => void): () => void;
-  move(uci: string, ms: number): void;
+  move(point: Point, ms: number): void;
+  pass(ms: number): void;
+  /** Sends a scoring proposal or toggle (the full dead set). */
+  mark(dead: Point[]): void;
+  accept(): void;
+  resume(): void;
   ask(kind: RequestKind): void;
   reply(kind: RequestKind | 'rejoin', ok: boolean): void;
   resign(): void;

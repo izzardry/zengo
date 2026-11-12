@@ -11,7 +11,7 @@
  * - Premoves bypass the blunder guard: the caller plays the returned UCI directly.
  */
 import { flags } from './flags';
-import type { Color, Game, Mode, PromotionPiece, Square, TcString, TimeControl, Uci } from './types';
+import type { Color, Game, Mode, PromotionPiece, Square, TcString, TimeControl, Uci } from './chessTypes';
 import { legalMoves } from './zhess';
 
 /** A queued move, as the board reports it (`Premove` of `components/board`). */

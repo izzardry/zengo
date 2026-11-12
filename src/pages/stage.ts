@@ -5,7 +5,7 @@
 import { clockView, toTimeControl, type ClockView } from '@/lib/clock';
 import { flags } from '@/lib/flags';
 import type { GameSession } from '@/lib/gameRecord';
-import type { Color, Game, Mode, PgnMeta, TcString, TimeControl } from '@/lib/types';
+import type { Color, Game, Mode, PgnMeta, TcString, TimeControl } from '@/lib/chessTypes';
 import zhess, { legalMoves, parseTc } from '@/lib/zhess';
 
 /**

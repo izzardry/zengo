@@ -9,7 +9,7 @@
 import { useCallback, useState } from 'react';
 import { flags } from '@/lib/flags';
 import { store as defaultStore } from '@/lib/storage';
-import type { Store } from '@/lib/types';
+import type { Store } from '@/lib/chessTypes';
 
 export const TUTORIAL_SEEN_KEY = 'tutorial-seen';
 

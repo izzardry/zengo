@@ -3,7 +3,7 @@
  * descriptions for the live region (`Black: knight to f6, check`).
  */
 import type { TranslationKey, TranslationVars } from '@/lib/i18n';
-import type { Color, Move, Piece, PieceType, Square } from '@/lib/types';
+import type { Color, Move, Piece, PieceType, Square } from '@/lib/chessTypes';
 
 /** The `t` of `useI18n()`. */
 export type Translate = (key: TranslationKey, vars?: TranslationVars) => string;

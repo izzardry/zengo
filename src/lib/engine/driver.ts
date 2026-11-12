@@ -21,7 +21,7 @@
  *
  * Imports carry explicit `.ts` extensions so that Node can load this file for `scripts/selfplay.mjs`.
  */
-import type { EngineApi, EngineState, Eval, Uci } from '../types';
+import type { EngineApi, EngineState, Eval, Uci } from '../chessTypes';
 import {
   SearchCollector,
   fenTurn,

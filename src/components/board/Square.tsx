@@ -4,7 +4,7 @@
  */
 import { memo, type CSSProperties } from 'react';
 import { cn } from '@/lib/utils';
-import type { Piece, Square } from '@/lib/types';
+import type { Piece, Square } from '@/lib/chessTypes';
 import { HIGHLIGHT_ALPHA } from './geometry';
 import { PieceIcon } from './PieceIcon';
 

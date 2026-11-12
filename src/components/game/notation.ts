@@ -1,7 +1,7 @@
 /**
  * Pure helpers for move numbering and figurine notation. No React.
  */
-import type { Color, PieceType } from '@/lib/types';
+import type { Color, PieceType } from '@/lib/chessTypes';
 
 /** A SAN string split into text and piece parts: `Nxf3+` → [{piece:'n'}, 'xf3+']. */
 export type FigurinePart = string | { piece: PieceType };

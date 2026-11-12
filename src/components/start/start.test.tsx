@@ -4,7 +4,7 @@ import { useState, type ReactElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { I18nProvider } from '@/lib/i18n';
 import { createStore, memoryStorage } from '@/lib/storage';
-import type { ColorChoice, Language, Opponent, TimeControl } from '@/lib/types';
+import type { ColorChoice, Language, Opponent, TimeControl } from '@/lib/chessTypes';
 import { BackToTop } from './BackToTop';
 import { BoardPreview } from './BoardPreview';
 import { NO_FIT, PREVIEW_GAP, PREVIEW_MIN_SCALE, previewFit } from './previewFit';

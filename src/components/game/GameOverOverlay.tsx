@@ -2,7 +2,7 @@ import { Fragment, useEffect, useRef, useState } from 'react';
 import { Loader2, Share2 } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
 import { formatElapsed } from '@/lib/timeUtils';
-import type { Color, GameEnd, Mode } from '@/lib/types';
+import type { Color, GameEnd, Mode } from '@/lib/chessTypes';
 import { cn } from '@/lib/utils';
 import { ShareMenu } from './ShareMenu';
 import { endTexts, tintClass, type Tint } from './outcome';

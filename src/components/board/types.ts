@@ -2,7 +2,7 @@
  * Types of the board package (1A). Cross-package shapes live in `src/lib/types.ts`; these are
  * local to the board and re-exported from `components/board/index.ts`.
  */
-import type { Color, Game, PromotionPiece, Seating, Square, Uci } from '@/lib/types';
+import type { Color, Game, PromotionPiece, Seating, Square, Uci } from '@/lib/chessTypes';
 
 /** A queued move for the opponent's turn (DESIGN 6.3). */
 export interface Premove {

@@ -16,7 +16,7 @@
 import { createPortal } from 'react-dom';
 import type { KeyboardEvent, RefObject } from 'react';
 import { cn } from '@/lib/utils';
-import type { Color, PromotionPiece } from '@/lib/types';
+import type { Color, PromotionPiece } from '@/lib/chessTypes';
 import { PieceIcon } from './PieceIcon';
 import { DIAL_PIECES, DIAL_POP_RADIUS, DIAL_RADIUS, type DialZone } from './dial';
 

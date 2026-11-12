@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Opponent, SavedGame, TimeControl } from '@/lib/types';
+import type { Opponent, SavedGame, TimeControl } from '@/lib/chessTypes';
 import {
   CLOCK_PRESETS,
   DEFAULT_OPPONENT,

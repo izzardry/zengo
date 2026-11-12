@@ -27,8 +27,8 @@ import type {
   Seat,
   Termination,
   ZhessApi,
-} from './types';
-import { PROTOCOL_VERSION } from './types';
+} from './chessTypes';
+import { PROTOCOL_VERSION } from './chessTypes';
 import zhess, { parseTc } from './zhess';
 
 /* ---------------------------------------------------------------------------------------------- */

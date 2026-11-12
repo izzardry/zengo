@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { GameEnd } from '@/lib/types';
+import type { GameEnd } from '@/lib/chessTypes';
 import {
   figurineParts,
   formatPoints,

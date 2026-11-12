@@ -10,7 +10,7 @@
  * - `dot`    small filled marks in the contrast color (the knight's eye),
  * - `line`   stroke-only lines in the outline color (the king's cross).
  */
-import type { Color, PieceType } from '@/lib/types';
+import type { Color, PieceType } from '@/lib/chessTypes';
 
 export type PiecePart =
   | { readonly kind: 'body' | 'detail' | 'line'; readonly d: string }

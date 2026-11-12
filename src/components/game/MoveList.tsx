@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useI18n } from '@/lib/i18n';
-import type { Color } from '@/lib/types';
+import type { Color } from '@/lib/chessTypes';
 import { cn } from '@/lib/utils';
 import { FigurineSan } from './PieceGlyph';
 import { movePairs, plyNumber } from './notation';

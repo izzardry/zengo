@@ -13,8 +13,11 @@
  * | `p`   | `1` = playing                                        |
  * | `o`   | opponent: `c` computer, `l` local, `r` room          |
  * | `w`   | this side: `w` or `b`                                |
- * | `t`   | time control, e.g. `5+0`                             |
- * | `m`   | moves (compact encoding, `zhess.encodeMoves`)        |
+ * | `t`   | time control, e.g. `5+0`; Go also `20m5x30`          |
+ * | `n`   | board size: `9`, `13`, `19` (Go, package 0b)         |
+ * | `g`   | rules: `a` area (default, omitted), `t` territory    |
+ * | `h`   | handicap stones: 0 or 2–9 (2–5 on 9×9)               |
+ * | `m`   | moves (compact encoding, DESIGN 13.2)                |
  * | `r`   | result of a finished game, e.g. `1-0.resign` (addition, see below) |
  * | `x`,`y` | manual signalling offer and answer (transient, reserved) |
  *
@@ -25,8 +28,9 @@
 import { useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { isValidCode, normalizeCode } from './codes';
-import type { Color, GameEnd, Mode, Result, TcString, Termination } from './types';
-import { formatTc, parseTc } from './zhess';
+import type { Color, GameEnd, Mode, Result, TcString, Termination } from './chessTypes';
+import type { Rules, Size } from './types';
+import { formatTc, maxHandicap, parseTc } from './zigo';
 
 /** Parsed query parameters. Absent or invalid values are `undefined`. */
 export interface UrlParams {
@@ -42,6 +46,12 @@ export interface UrlParams {
   color?: Color;
   /** `t`: time control in its normalized text form, e.g. `5+0`. Absent = clock off. */
   tc?: TcString;
+  /** `n`: board size. */
+  size?: Size;
+  /** `g`: rule set. `area` is the default and is not written. */
+  rules?: Rules;
+  /** `h`: handicap stones, 0 or 2–9 (at most 5 on 9×9). 0 is not written. */
+  handicap?: number;
   /** `m`: compact move list (DESIGN 13.2). Never written for room games. */
   moves?: string;
   /** `r`: the ending of a finished game. */
@@ -53,7 +63,7 @@ export interface UrlParams {
 }
 
 /** Parameter letters in the order they are written. */
-export const PARAM_ORDER = ['s', 'd', 'p', 'o', 'w', 't', 'm', 'r', 'x', 'y'] as const;
+export const PARAM_ORDER = ['s', 'd', 'p', 'o', 'w', 't', 'n', 'g', 'h', 'm', 'r', 'x', 'y'] as const;
 
 const MODE_TO_PARAM: Record<Mode, string> = { computer: 'c', local: 'l', room: 'r' };
 const PARAM_TO_MODE: Record<string, Mode> = { c: 'computer', l: 'local', r: 'room' };
@@ -89,7 +99,7 @@ export function parseEnd(s: string | null | undefined): GameEnd | undefined {
   return { result, by };
 }
 
-/** Normalizes a time-control string (`5+0`, `15+10`); undefined if it is not one. */
+/** Normalizes a time-control string (Fischer `5+0`, `15+10`, or byo-yomi `20m5x30`); undefined if it is not one. */
 export function normalizeTc(s: string | null | undefined): TcString | undefined {
   const tc = parseTc(s ?? null);
   return tc ? (formatTc(tc) ?? undefined) : undefined;
@@ -123,6 +133,19 @@ export function parseUrl(search: URLSearchParams | string): UrlParams {
   const tc = normalizeTc(q.get('t'));
   if (tc) out.tc = tc;
 
+  const n = q.get('n')?.trim();
+  if (n === '9' || n === '13' || n === '19') out.size = Number(n) as Size;
+
+  const g = q.get('g')?.trim().toLowerCase();
+  if (g === 'a') out.rules = 'area';
+  else if (g === 't') out.rules = 'territory';
+
+  const h = q.get('h')?.trim();
+  if (h !== undefined && /^\d$/.test(h)) {
+    const k = Number(h);
+    if (k === 0 || (k >= 2 && k <= maxHandicap(out.size ?? 19))) out.handicap = k;
+  }
+
   const m = q.get('m');
   if (m !== null && MOVES_RE.test(m)) out.moves = m;
 
@@ -137,7 +160,10 @@ export function parseUrl(search: URLSearchParams | string): UrlParams {
   return out;
 }
 
-/** Writes the query parameters in the fixed order `s d p o w t m r x y`. Undefined values are left out. */
+/**
+ * Writes the query parameters in the fixed order `s d p o w t n g h m r x y`. Undefined values are
+ * left out, and so are the defaults `g=a` (area) and `h=0`.
+ */
 export function serializeUrl(p: UrlParams): URLSearchParams {
   const q = new URLSearchParams();
   if (p.code) q.set('s', p.code);
@@ -146,6 +172,9 @@ export function serializeUrl(p: UrlParams): URLSearchParams {
   if (p.mode) q.set('o', MODE_TO_PARAM[p.mode]);
   if (p.color) q.set('w', p.color);
   if (p.tc) q.set('t', p.tc);
+  if (p.size) q.set('n', String(p.size));
+  if (p.rules === 'territory') q.set('g', 't');
+  if (p.handicap) q.set('h', String(p.handicap));
   // Room games never carry their moves (DESIGN 13.2).
   if (p.moves !== undefined && p.mode !== 'room') q.set('m', p.moves);
   if (p.end && p.mode !== 'room') q.set('r', formatEnd(p.end));
@@ -186,6 +215,10 @@ export interface ShareableGame {
   level?: number;
   color: Color;
   tc: TcString | null;
+  /** Go settings (DESIGN 12.1); written as `n`, `g`, `h` when present. */
+  size?: Size;
+  rules?: Rules;
+  handicap?: number;
   /** Compact move list. */
   moves: string;
   result?: Result;
@@ -224,6 +257,9 @@ export function gameParams(g: ShareableGame): UrlParams {
     mode: g.mode,
     color: g.mode === 'local' ? undefined : g.color,
     tc: g.tc ?? undefined,
+    size: g.size,
+    rules: g.rules,
+    handicap: g.handicap,
     moves: g.mode === 'room' ? undefined : g.moves,
     end: g.mode === 'room' ? undefined : end,
   };

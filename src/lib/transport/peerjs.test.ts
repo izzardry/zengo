@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Message, TransportFactory, TransportState } from '../types';
+import type { Message, TransportFactory, TransportState } from '../chessTypes';
 import { ICE_SERVERS } from './common';
 import {
   anchorPeerId,

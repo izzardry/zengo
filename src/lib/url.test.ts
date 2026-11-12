@@ -19,6 +19,7 @@ import {
   type ShareableGame,
 } from './url';
 import zhess from './zhess';
+import zigo from './zigo';
 
 const BASE = 'https://izzardry.github.io/zigo/';
 
@@ -168,5 +169,54 @@ describe('useUrlParams', () => {
     const before = result.current.loc;
     act(() => result.current.url.write({ code: 'SAME' }));
     expect(result.current.loc).toBe(before);
+  });
+});
+
+describe('Go parameters n, g, h (DESIGN 13.2)', () => {
+  it('reads size, rules and handicap', () => {
+    expect(parseUrl('n=13&g=t&h=3')).toEqual({ size: 13, rules: 'territory', handicap: 3 });
+    expect(parseUrl('n=19&g=a&h=0')).toEqual({ size: 19, rules: 'area', handicap: 0 });
+    expect(parseUrl('g=T').rules).toBe('territory');
+  });
+
+  it('drops invalid values', () => {
+    expect(parseUrl('n=7&g=x&h=1')).toEqual({});
+    expect(parseUrl('n=9&h=7')).toEqual({ size: 9 }); // 9×9 allows at most 5
+    expect(parseUrl('n=9&h=5').handicap).toBe(5);
+    expect(parseUrl('h=9').handicap).toBe(9);
+    expect(parseUrl('h=10').handicap).toBeUndefined();
+    expect(parseUrl('n=13.0').size).toBeUndefined();
+  });
+
+  it('writes them after t, leaving out area and handicap 0', () => {
+    expect(urlQuery({ code: 'K7QW2M', tc: '5+7', size: 13, rules: 'territory', handicap: 3, moves: 'ddtt' })).toBe(
+      's=K7QW2M&t=5%2B7&n=13&g=t&h=3&m=ddtt',
+    );
+    expect(urlQuery({ size: 9, rules: 'area', handicap: 0 })).toBe('n=9');
+  });
+
+  it('round-trips a Go game with byo-yomi and passes', () => {
+    const p = {
+      code: 'ZIGO1',
+      playing: true,
+      mode: 'local' as const,
+      tc: '20m5x30',
+      size: 19 as const,
+      rules: 'territory' as const,
+      handicap: 4,
+      moves: zigo.encodeMoves(['pd', 'tt', 'dp'].map((m) => ({ m, ms: 0 }))),
+    };
+    expect(parseUrl(serializeUrl(p))).toEqual(p);
+  });
+
+  it('normalizes byo-yomi time controls', () => {
+    expect(parseUrl('t=20m%205x30s').tc).toBe('20m5x30');
+    expect(parseUrl('t=20m5x0').tc).toBeUndefined();
+  });
+
+  it('share links carry the settings; room invites do not', () => {
+    const g: ShareableGame = { code: 'K7QW2M', mode: 'local', color: 'w', tc: null, moves: 'eecc', size: 9, rules: 'territory', handicap: 2 };
+    expect(soloShareUrl(g, BASE)).toBe(`${BASE}#/?s=K7QW2M&p=1&o=l&n=9&g=t&h=2&m=eecc`);
+    expect(shareUrl({ ...g, mode: 'room' }, BASE)).toBe(`${BASE}#/?s=K7QW2M&o=r`);
   });
 });

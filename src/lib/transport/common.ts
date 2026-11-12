@@ -16,7 +16,7 @@
  *   keeps retrying after `failed` (it emits `connecting` when the next attempt starts); the manual
  *   transport cannot and stays `failed`.
  */
-import type { Message, Transport, TransportFailure, TransportState } from '../types';
+import type { Message, Transport, TransportFailure, TransportState } from '../chessTypes';
 
 /**
  * Why a connection attempt failed or a channel was lost. `TransportFailure` from `types.ts` plus

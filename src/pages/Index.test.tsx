@@ -11,7 +11,7 @@ import { Toaster } from '@/components/ui/sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { I18nProvider } from '@/lib/i18n';
 import { encodeMoves } from '@/lib/zhess';
-import type { Square } from '@/lib/types';
+import type { Square } from '@/lib/chessTypes';
 import { installPointerEvent, layoutGrid, tap } from '@/components/board/test-helpers';
 import Index from './Index';
 
