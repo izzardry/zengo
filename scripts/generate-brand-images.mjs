@@ -2,22 +2,22 @@
 /**
  * Rasterizes the Zigo brand images into public/ (DESIGN 2, Ztyle 01 and 12):
  *
- *   public/pwa-192x192.png            icon, 192 × 192
+ *   public/pwa-192x192.png            icon, 192 × 192 (also the apple-touch-icon in index.html)
  *   public/pwa-512x512.png            icon, 512 × 512
  *   public/pwa-512x512-maskable.png   icon, 512 × 512, motif scaled into the central 80 %
  *   public/favicon.ico                PNG-in-ICO: 16, 32, 48 (simplified) and 256 (full)
  *   public/og-image.png               social card, 1200 × 630
  *
- * Source artwork: scripts/brand/icon.svg. Rendering uses Playwright's bundled Chromium
- * (`page.setContent` + `screenshot`), so no image library is needed. The output is committed;
- * run this again only when the artwork changes:
+ * Source artwork: scripts/brand/icon.svg (two stones from the stone set on a grid corner).
+ * Rendering uses Playwright's bundled Chromium (`page.setContent` + `screenshot`), so no image
+ * library is needed. The output is committed; run this again only when the artwork changes:
  *
  *   node scripts/generate-brand-images.mjs
  */
 import { chromium } from "@playwright/test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const pub = (name) => join(root, "public", name);
@@ -25,72 +25,36 @@ const pub = (name) => join(root, "public", name);
 /** Ztyle dark tokens (hex), DESIGN 2 / Ztyle 01. */
 const C = {
   tile: "#0d0d0d",
+  card: "#171717",
   fg: "#f2f2f2",
   muted: "#8c8c8c",
 };
 
-const KNIGHT_GROUP = /(<g id="knight"[^>]*>)[\s\S]*?(<\/g>)/;
+/** Feature line of the OG image: three items, as Ztyle 01 asks. */
+const FEATURES = ["9×9 to 19×19", "12 computer levels", "zero ads"];
 
-/**
- * The knight of the piece set (DESIGN 2: "one knight glyph from the piece set"), painted as a
- * white piece: body = tile fill + foreground stroke, eye = foreground dot, details = foreground
- * lines. Node strips the TypeScript types on import. Null when the set is not importable; the
- * copy in icon.svg is used then.
- */
-async function pieceSetKnight() {
-  try {
-    const mod = await import(pathToFileURL(join(root, "src/components/board/pieceShapes.ts")).href);
-    const parts = mod.PIECE_SHAPES?.n;
-    if (!Array.isArray(parts) || parts.length === 0) return null;
-    const markup = parts
-      .map((p) => {
-        const paint =
-          p.kind === "body"
-            ? `fill="${C.tile}" stroke="${C.fg}"`
-            : p.kind === "dot"
-              ? `fill="${C.fg}" stroke="none"`
-              : `fill="none" stroke="${C.fg}"`;
-        return "circle" in p
-          ? `<circle cx="${p.circle[0]}" cy="${p.circle[1]}" r="${p.circle[2]}" ${paint} />`
-          : `<path d="${p.d}" ${paint} />`;
-      })
-      .join("");
-    return { markup, stroke: typeof mod.PIECE_STROKE === "number" ? mod.PIECE_STROKE : 3.5 };
-  } catch {
-    return null;
-  }
-}
+const STONES_GROUP = /(<g id="stones"[^>]*>)/;
 
-let master = readFileSync(join(root, "scripts/brand/icon.svg"), "utf8")
+const master = readFileSync(join(root, "scripts/brand/icon.svg"), "utf8")
   .replace(/<\?xml[^>]*>\s*/, "")
   .replace(/<!--[\s\S]*?-->\s*/g, "");
-
-const knight = await pieceSetKnight();
-if (knight) {
-  master = master
-    .replace(KNIGHT_GROUP, (_, open, close) => `${open.replace(/stroke-width="[\d.]+"/, `stroke-width="${knight.stroke}"`)}${knight.markup}${close}`);
-  console.log("Knight: from src/components/board/pieceShapes.ts");
-} else {
-  console.log("Knight: from scripts/brand/icon.svg (piece set not importable)");
-}
 
 /** The master SVG at a pixel size, optionally transformed into a variant. */
 function iconSvg(size, variant = "full") {
   let svg = master.replace(/width="512" height="512"/, `width="${size}" height="${size}"`);
   if (variant === "maskable") {
     // Maskable icons are cropped to a circle of 80 % diameter: keep the tile full-bleed and
-    // scale the motif to 80 %, which puts the 62.5 % board at 50 %, inside the safe circle.
+    // scale the motif to 80 %, which keeps the stones well inside the safe circle.
     svg = svg.replace('<g id="motif">', '<g id="motif" transform="translate(256 256) scale(0.8) translate(-256 -256)">');
   }
   if (variant === "small") {
-    // Favicon sizes: an 8 × 8 grid at 16 px is noise. Drop it, enlarge the knight, thicken its stroke.
+    // Favicon sizes: grid lines at 16 px are noise. Drop them, enlarge the stones, thicken the outline.
     svg = svg
       .replace('<g id="grid" ', '<g id="grid" display="none" ')
-      .replace('<g id="grid-dark" ', '<g id="grid-dark" display="none" ')
-      .replace(KNIGHT_GROUP, (_, open, close) =>
+      .replace(STONES_GROUP, (open) =>
         open
-          .replace(/scale\([\d.]+\) translate\([-\d. ]+\)/, "scale(4.4) translate(-50 -51)")
-          .replace(/stroke-width="[\d.]+"/, 'stroke-width="6"') + _.slice(open.length, -close.length) + close,
+          .replace('<g id="stones"', '<g id="stones" transform="translate(256 256) scale(1.45) translate(-256 -256)"')
+          .replace(/stroke-width="[\d.]+"/, 'stroke-width="12"'),
       );
   }
   return svg;
@@ -109,17 +73,34 @@ function fontFace(weight) {
     src: url(data:font/woff2;base64,${data}) format("woff2"); }`;
 }
 
-/** A blurred 8 × 8 board as on the start screen (Ztyle 01: "blurred 8 px at 60 % opacity"). */
-function blurredBoard(cell) {
-  let squares = "";
-  for (let r = 0; r < 8; r++) {
-    for (let f = 0; f < 8; f++) {
-      const dark = (r + f) % 2 === 1;
-      squares += `<rect x="${f * cell}" y="${r * cell}" width="${cell}" height="${cell}" fill="${dark ? "#262626" : "#171717"}" />`;
-    }
+/** A small opening on 9×9 for the blurred board: [column, row from the top, 1 black / 2 white]. */
+const OG_STONES = [
+  [2, 6, 1], [6, 2, 2], [6, 6, 1], [2, 2, 2], [4, 4, 1], [5, 6, 2], [6, 5, 1], [3, 3, 2], [2, 5, 1], [5, 3, 2],
+];
+
+/**
+ * A 9 × 9 board as on the start screen (Ztyle 01: "blurred 8 px at 60 % opacity"): card surface,
+ * grid lines, star points and a few stones in the ink colors with a foreground outline.
+ */
+function blurredBoard(side) {
+  const n = 9;
+  const pitch = side / (n + 0.6);
+  const at = (i) => pitch * (0.8 + i);
+  let svg = `<rect width="${side}" height="${side}" rx="12" fill="${C.card}" />`;
+  for (let i = 0; i < n; i++) {
+    const w = i === 0 || i === n - 1 ? 2 : 1;
+    svg += `<line x1="${at(0)}" y1="${at(i)}" x2="${at(n - 1)}" y2="${at(i)}" stroke="${C.fg}" stroke-opacity="0.4" stroke-width="${w}" />`;
+    svg += `<line x1="${at(i)}" y1="${at(0)}" x2="${at(i)}" y2="${at(n - 1)}" stroke="${C.fg}" stroke-opacity="0.4" stroke-width="${w}" />`;
   }
-  const side = cell * 8;
-  return `<svg width="${side}" height="${side}" viewBox="0 0 ${side} ${side}">${squares}</svg>`;
+  for (const [c, r] of [[2, 2], [2, 6], [6, 2], [6, 6], [4, 4]]) {
+    svg += `<circle cx="${at(c)}" cy="${at(r)}" r="${pitch * 0.12}" fill="${C.fg}" fill-opacity="0.4" />`;
+  }
+  for (const [c, r, color] of OG_STONES) {
+    // White at 30 %: blurred, full white stones read as bright blobs behind the wordmark.
+    const paint = color === 1 ? `fill="${C.tile}" stroke="${C.fg}" stroke-opacity="0.5"` : `fill="${C.fg}" fill-opacity="0.3" stroke="none"`;
+    svg += `<circle cx="${at(c)}" cy="${at(r)}" r="${pitch * 0.45}" ${paint} stroke-width="2" />`;
+  }
+  return `<svg width="${side}" height="${side}" viewBox="0 0 ${side} ${side}">${svg}</svg>`;
 }
 
 function ogHtml() {
@@ -134,18 +115,18 @@ function ogHtml() {
       display: flex; align-items: center; justify-content: center; position: relative;
     }
     .board { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
-             filter: blur(8px); opacity: 0.6; border-radius: 12px; overflow: hidden; }
+             filter: blur(8px); opacity: 0.6; }
     .text { position: relative; text-align: center; }
     .mark { font-weight: 300; font-size: 96px; letter-spacing: 0.3em; margin-right: -0.3em; line-height: 1; }
     .tag  { margin-top: 36px; font-size: 36px; color: ${C.muted}; font-weight: 400; }
     .feat { margin-top: 44px; font-size: 24px; color: ${C.muted}; opacity: 0.7; white-space: pre; font-weight: 400; }
   `;
   const body = `
-    <div class="board">${blurredBoard(64)}</div>
+    <div class="board">${blurredBoard(520)}</div>
     <div class="text">
       <div class="mark">ZIGO</div>
       <div class="tag">Zero Distractions. Just Go.</div>
-      <div class="feat">12 computer levels  |  rooms for two  |  zero ads</div>
+      <div class="feat">${FEATURES.join("  |  ")}</div>
     </div>`;
   return page(body, 1200, 630, css);
 }

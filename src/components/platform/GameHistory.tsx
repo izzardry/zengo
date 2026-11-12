@@ -7,14 +7,14 @@
  * With no games (and no pending undo) nothing renders (Ztyle 09 "Empty states").
  *
  * Ported from Zudoku `GameHistory.tsx` with the audit fixes (#15 translated labels) and the
- * Zigo card. The thumbnail comes from the caller (`renderThumbnail`), since the board
- * thumbnail belongs to the board package.
+ * Zigo card. Each card draws the game's position with `BoardThumbnail` from the board package;
+ * `renderThumbnail` replaces it.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, ChevronDown } from 'lucide-react';
 import { useI18n, type TranslationKey } from '@/lib/i18n';
-import type { Room, SavedGame } from '@/lib/chessTypes';
+import type { Room, SavedGame } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { DeleteUndoToasts } from './DeleteUndoToasts';
 import { GameCard, THUMBNAIL_SIZE, type RenderThumbnail } from './GameCard';
@@ -30,7 +30,7 @@ export interface GameHistoryProps {
   onDelete: (game: SavedGame) => void;
   /** Undo of a deletion: put the game back. */
   onRestore: (game: SavedGame) => void;
-  /** Board thumbnail of the game's current position (`<BoardThumbnail>` from the board package). */
+  /** Replaces the card's own `BoardThumbnail` of the game's position. */
   renderThumbnail?: RenderThumbnail;
   /** Room records, for the score on room game cards. */
   rooms?: readonly Room[];

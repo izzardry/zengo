@@ -5,7 +5,15 @@ import { GameHistory } from './GameHistory';
 import { COLLAPSE_MS } from './useSwipeToDelete';
 import { UNDO_TOAST_MS } from './DeleteUndoToasts';
 import { renderWithI18n, savedGame } from './test-utils';
-import type { Room, SavedGame } from '@/lib/chessTypes';
+import type { Room, SavedGame } from '@/lib/types';
+
+// The board package draws the real thumbnail; here a stub shows what the card hands it.
+vi.mock('@/components/board', () => ({
+  BoardThumbnail: ({ size, board }: { size: number; board: Uint8Array }) => (
+    <div data-testid="board-thumbnail" data-size={size} data-stones={[...board].filter((v) => v !== 0).length} />
+  ),
+  StoneGlyph: ({ color }: { color: string }) => <svg data-stone={color} />,
+}));
 
 const NOW = new Date(2026, 10, 11, 15, 0, 0).getTime();
 const now = () => NOW;
@@ -89,24 +97,54 @@ describe('GameHistory', () => {
   });
 
   it('shows the facts of DESIGN 12.2 on a card', () => {
-    const thumb = vi.fn((g: SavedGame, size: number) => <div data-testid="thumb">{`${g.code}@${size}`}</div>);
     renderWithI18n(
       <Harness
-        renderThumbnail={thumb}
         initial={[
-          savedGame({ uci: ['e2e4', 'e7e5'], tc: '5+0', assisted: true, lastPlayedAt: NOW - 5 * MIN, level: 5 }),
+          savedGame({ gtp: ['D4', 'E5', 'pass'], tc: '5+7', assisted: true, lastPlayedAt: NOW - 5 * MIN, level: 5, color: 'W' }),
         ]}
       />,
     );
     const card = cards()[0];
     expect(card).toHaveTextContent('K7QW2M');
     expect(card).toHaveTextContent('Level 5 Medium');
+    expect(card).toHaveTextContent('9×9');
     expect(card).toHaveTextContent('Your move');
-    expect(card).toHaveTextContent('1 move');
-    expect(card).toHaveTextContent('5+0');
+    expect(card).toHaveTextContent('3 moves');
+    expect(card).toHaveTextContent('5+7');
     expect(card).toHaveTextContent(/5 min/);
     expect(within(card).getByRole('img', { name: 'Assisted' })).toBeInTheDocument();
+    // The thumbnail: the board package's BoardThumbnail at the game's size and position.
+    const thumb = within(card).getByTestId('board-thumbnail');
+    expect(thumb).toHaveAttribute('data-size', '9');
+    expect(thumb).toHaveAttribute('data-stones', '2');
+  });
+
+  it('shows the size with the rules, a scored win and a single move', () => {
+    renderWithI18n(
+      <Harness
+        initial={[
+          savedGame({ size: 19, rules: 'territory', gtp: ['Q16'], color: 'B', result: { winner: 'B', by: 'score', margin: 9 } }),
+        ]}
+      />,
+    );
+    const card = cards()[0];
+    expect(card).toHaveTextContent('19×19 · JP');
+    expect(card).toHaveTextContent('Won by 4.5');
+    expect(card).toHaveTextContent('1 move');
+    expect(within(card).getByTestId('board-thumbnail')).toHaveAttribute('data-size', '19');
+  });
+
+  it('says Scoring while the game is being scored', () => {
+    const scoring = { round: 1 as const, rev: 2, dead: [], accepted: [0, 0] as [number, number] };
+    renderWithI18n(<Harness initial={[savedGame({ gtp: ['D4', 'pass', 'pass'], scoring })]} />);
+    expect(cards()[0]).toHaveTextContent('Scoring');
+  });
+
+  it('takes a thumbnail override', () => {
+    const thumb = vi.fn((g: SavedGame, size: number) => <div data-testid="thumb">{`${g.code}@${size}`}</div>);
+    renderWithI18n(<Harness renderThumbnail={thumb} initial={[savedGame()]} />);
     expect(screen.getByTestId('thumb')).toHaveTextContent('K7QW2M@96');
+    expect(screen.queryByTestId('board-thumbnail')).toBeNull();
     expect(thumb).toHaveBeenCalled();
   });
 
@@ -115,7 +153,7 @@ describe('GameHistory', () => {
     renderWithI18n(
       <Harness
         rooms={[room]}
-        initial={[savedGame({ id: 'ROOM1.3', code: 'ROOM1', mode: 'room', room: { n: 3, epoch: 0 }, result: '0-1', color: 'b' })]}
+        initial={[savedGame({ id: 'ROOM1.3', code: 'ROOM1', mode: 'room', room: { n: 3, epoch: 0 }, result: { winner: 'W', by: 'resign' }, color: 'W' })]}
       />,
     );
     const card = cards()[0];
@@ -136,10 +174,18 @@ describe('GameHistory', () => {
     expect(card.querySelector('[data-part="room-score"]')).toHaveTextContent('2 – 1');
   });
 
-  it('shows pass-and-play opponent and results', () => {
-    renderWithI18n(<Harness initial={[savedGame({ mode: 'local', result: '1-0' })]} />);
+  it('shows pass-and-play opponent, side to move and results', () => {
+    renderWithI18n(
+      <Harness
+        initial={[
+          savedGame({ id: 'A', code: 'A', mode: 'local', result: { winner: 'B', by: 'score', margin: 9 }, lastPlayedAt: NOW - MIN }),
+          savedGame({ id: 'B', code: 'B', mode: 'local', gtp: ['D4'], lastPlayedAt: NOW - 2 * MIN }),
+        ]}
+      />,
+    );
     expect(cards()[0]).toHaveTextContent('2 players');
-    expect(cards()[0]).toHaveTextContent('1–0');
+    expect(cards()[0]).toHaveTextContent('B+4.5');
+    expect(cards()[1]).toHaveTextContent('White to move');
   });
 
   it('opens a game on tap', () => {
@@ -305,7 +351,7 @@ describe('GameHistory', () => {
   });
 
   it('translates', () => {
-    renderWithI18n(<Harness initial={[savedGame({ color: 'b' })]} />, 'de');
+    renderWithI18n(<Harness initial={[savedGame({ color: 'W' })]} />, 'de');
     expect(screen.getByText('Vorherige Spiele')).toBeInTheDocument();
     expect(cards()[0]).toHaveTextContent('Gegner am Zug');
   });

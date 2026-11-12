@@ -9,15 +9,14 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { flags } from '@/lib/flags';
-import { store as defaultStore } from '@/lib/storage';
-import type { Store } from '@/lib/chessTypes';
+import { store as defaultStore, type PrefStore } from '@/lib/storage';
 
 export const DONATION_SHOWN_KEY = 'donation-shown';
 /** Delay after the game-over overlay (Ztyle 09, 13). */
 export const DONATION_DELAY_MS = 1500;
 
 export interface UseDonationPromptOptions {
-  store?: Store;
+  store?: PrefStore;
   /** Feature flag; `flags.donationPrompt` by default. */
   enabled?: boolean;
 }

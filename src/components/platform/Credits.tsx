@@ -1,17 +1,17 @@
 /**
  * Credit lines at the bottom of the start screen's scroll area:
  *
- * - `EngineCredit`: `computer opponent: Stockfish (GPLv3)` (DESIGN 15.2). "Stockfish" links to
- *   the upstream source of the shipped build, "GPLv3" to the licence file next to the engine.
+ * - `EngineCredit`: `computer opponent: KataGo networks (CC0), search after Web KaTrain (MIT)`
+ *   (DESIGN 15.2), linking to the KataGo network archive and to Web KaTrain.
  * - `IzzardryFooter`: `an izzardry game` (Ztyle 01), lowercase, 10 px, muted at 40 %.
  */
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
-/** Upstream of the files in public/engine (stockfish.js 19.0.1, see public/engine/README.md). */
-export const ENGINE_SOURCE_URL = 'https://github.com/nmrugg/stockfish.js';
-/** The GPLv3 text shipped next to the engine; relative, so it works under `base: "./"`. */
-export const ENGINE_LICENCE_URL = 'engine/Copying.txt';
+/** Where the CC0 KataGo networks in public/engine/nets come from. */
+export const NETWORKS_URL = 'https://katagoarchive.org/';
+/** The MIT project the engine's search is ported from. */
+export const SEARCH_URL = 'https://github.com/Sir-Teo/web-katrain';
 
 const link = 'text-muted-foreground/80 hover:text-foreground transition-colors';
 
@@ -20,14 +20,14 @@ export function EngineCredit({ className }: { className?: string }) {
   return (
     <p className={cn('text-[10px] text-muted-foreground/60 text-center', className)}>
       {t('platform.credits.engine')}:{' '}
-      <a href={ENGINE_SOURCE_URL} target="_blank" rel="noopener noreferrer" className={link}>
-        Stockfish
+      <a href={NETWORKS_URL} target="_blank" rel="noopener noreferrer" className={link}>
+        {t('platform.credits.networks')}
       </a>{' '}
-      (
-      <a href={ENGINE_LICENCE_URL} target="_blank" rel="noopener noreferrer" className={link} title={t('platform.credits.licence')}>
-        GPLv3
-      </a>
-      )
+      (CC0), {t('platform.credits.searchAfter')}{' '}
+      <a href={SEARCH_URL} target="_blank" rel="noopener noreferrer" className={link}>
+        Web KaTrain
+      </a>{' '}
+      (MIT)
     </p>
   );
 }

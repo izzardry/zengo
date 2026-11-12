@@ -2,26 +2,31 @@
  * One history card (DESIGN 12.2, Ztyle 10 "List card").
  *
  *   ┌───────────────────────────────────────────────┐
- *   │ [thumb]  K7QW2M  Game 3  2 – 1      5 min ago │
- *   │          LEVEL 5 MEDIUM                       │
- *   │          Your move            23 moves · 5+0 ○│
+ *   │ [thumb]  K7QW2M                     5 min ago │
+ *   │          LEVEL 5 MEDIUM  Game 3         2 – 1 │
+ *   │          Your move                  23 moves │
+ *   │          9×9 · JP                      5+7 ○ │
  *   └───────────────────────────────────────────────┘
  *
- * Tap opens the game (resume or review: the caller decides). Swipe left (touch) or the hover ×
- * (mouse; also reachable by keyboard focus, or the Delete key on the card) deletes with a
- * height collapse.
+ * The thumbnail is the board at the end of the stored plies (stones and star points only,
+ * `BoardThumbnail` from the board package). Tap opens the game (resume or review: the caller
+ * decides). Swipe left (touch) or the hover × (mouse; also reachable by keyboard focus, or the
+ * Delete key on the card) deletes with a height collapse.
  */
-import { memo, type KeyboardEvent, type ReactNode } from 'react';
+import { memo, useMemo, type KeyboardEvent, type ReactNode } from 'react';
 import { X } from 'lucide-react';
+import { BoardThumbnail } from '@/components/board';
 import { levelKey, useI18n } from '@/lib/i18n';
-import type { Room, SavedGame } from '@/lib/chessTypes';
+import type { Room, SavedGame } from '@/lib/types';
+import { formatHalf } from '@/lib/zigo';
 import { cn } from '@/lib/utils';
-import { cardState, formatRelativeTime, formatRoomScore, moveCount, plyCount, type CardState } from './history';
+import { cardState, formatRelativeTime, formatRoomScore, gameOf, moveCount, plyCount, sizeLabel, sizeOf, type CardState } from './history';
 import { useSwipeToDelete } from './useSwipeToDelete';
 
-/** Thumbnail edge in px handed to `renderThumbnail`. */
+/** Thumbnail edge in px. */
 export const THUMBNAIL_SIZE = 96;
 
+/** Optional override of the thumbnail (tests, or a caller with its own drawing). */
 export type RenderThumbnail = (game: SavedGame, size: number) => ReactNode;
 
 export interface GameCardProps {
@@ -33,6 +38,7 @@ export interface GameCardProps {
   onOpen: (game: SavedGame) => void;
   /** Called after the collapse animation. */
   onDelete: (game: SavedGame) => void;
+  /** Replaces the default `BoardThumbnail` of the game's position. */
   renderThumbnail?: RenderThumbnail;
   thumbnailSize?: number;
 }
@@ -41,9 +47,11 @@ function GameCardImpl({ game, room, now, onOpen, onDelete, renderThumbnail, thum
   const { t, language } = useI18n();
   const { elRef, wrapperRef, handlers, collapse, consumeSwipeClick } = useSwipeToDelete<HTMLLIElement>(() => onDelete(game));
 
-  const plies = plyCount(game);
-  const moves = moveCount(plies);
-  const state = cardState(game, plies);
+  // Replaying a 19×19 record costs a few ms; the card is memoized and the game object only
+  // changes when the game does.
+  const g = useMemo(() => gameOf(game), [game]);
+  const moves = moveCount(plyCount(game, g));
+  const state = cardState(game, g);
 
   const opponent =
     game.mode === 'computer'
@@ -73,11 +81,13 @@ function GameCardImpl({ game, room, now, onOpen, onDelete, renderThumbnail, thum
           data-testid="history-card"
         >
           <div className="flex gap-4 items-center">
-            {renderThumbnail && (
-              <div className="shrink-0" style={{ width: thumbnailSize, height: thumbnailSize }} aria-hidden="true">
-                {renderThumbnail(game, thumbnailSize)}
-              </div>
-            )}
+            <div className="shrink-0" style={{ width: thumbnailSize, height: thumbnailSize }} aria-hidden="true" data-part="thumbnail">
+              {renderThumbnail ? (
+                renderThumbnail(game, thumbnailSize)
+              ) : (
+                <BoardThumbnail size={sizeOf(game)} board={g.board} className="w-full h-full" />
+              )}
+            </div>
             <div className="flex-1 min-w-0 space-y-1.5">
               {/* The code never shrinks (DESIGN 12.2); the time wraps under it on a narrow card. */}
               <div className="flex flex-wrap items-baseline gap-x-2">
@@ -104,11 +114,16 @@ function GameCardImpl({ game, room, now, onOpen, onDelete, renderThumbnail, thum
               </div>
               <div className="flex items-center justify-between gap-2">
                 <StateLabel state={state} />
-                <span className="flex items-center gap-2 font-mono text-xs text-muted-foreground whitespace-nowrap">
-                  {moves > 0 && (
-                    <span>{moves === 1 ? t('platform.history.oneMove') : t('platform.history.moves', { count: moves })}</span>
-                  )}
-                  {game.tc && <span>{game.tc}</span>}
+                {moves > 0 && (
+                  <span className="font-mono text-xs text-muted-foreground whitespace-nowrap" data-part="moves">
+                    {moves === 1 ? t('platform.history.oneMove') : t('platform.history.moves', { count: moves })}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center justify-between gap-2 font-mono text-xs text-muted-foreground whitespace-nowrap">
+                <span data-part="size">{sizeLabel(game)}</span>
+                <span className="flex items-center gap-2">
+                  {game.tc && <span data-part="tc">{game.tc}</span>}
                   {game.assisted && (
                     <span
                       role="img"
@@ -157,15 +172,19 @@ function StateLabel({ state }: { state: CardState }) {
     case 'toMove':
       return (
         <span className="text-xs">
-          {state.color === 'w' ? t('platform.history.whiteToMove') : t('platform.history.blackToMove')}
+          {state.color === 'W' ? t('platform.history.whiteToMove') : t('platform.history.blackToMove')}
         </span>
       );
+    case 'scoring':
+      return <span className="text-xs font-medium">{t('platform.history.scoring')}</span>;
     case 'won':
-      return <span className="text-xs font-medium text-success">{t('platform.history.won')}</span>;
+      return (
+        <span className="text-xs font-medium text-success">
+          {state.margin2 !== undefined ? t('platform.history.wonBy', { margin: formatHalf(state.margin2) }) : t('platform.history.won')}
+        </span>
+      );
     case 'lost':
       return <span className="text-xs text-muted-foreground">{t('platform.history.lost')}</span>;
-    case 'draw':
-      return <span className="text-xs text-muted-foreground">{t('platform.history.draw')}</span>;
     case 'result':
       return <span className="font-mono text-xs">{state.text}</span>;
   }

@@ -6,10 +6,9 @@ import { DonationPrompt } from './DonationPrompt';
 import { PWAInstallPrompt } from './PWAInstallPrompt';
 import { InstallButton } from './InstallButton';
 import { LanguageSwitcher } from './LanguageSwitcher';
-import { EngineCredit, ENGINE_LICENCE_URL, ENGINE_SOURCE_URL, IzzardryFooter } from './Credits';
+import { EngineCredit, IzzardryFooter, NETWORKS_URL, SEARCH_URL } from './Credits';
 import { SupportButton, SUPPORT_URL } from './SupportButton';
 import { DeleteUndoToasts, type PendingDeletion } from './DeleteUndoToasts';
-import { KnightGlyph } from './KnightGlyph';
 import { renderWithI18n } from './test-utils';
 import { useI18n } from '@/lib/i18n';
 
@@ -107,11 +106,22 @@ describe('LanguageSwitcher', () => {
 });
 
 describe('Credits', () => {
-  it('credits the engine with links to its source and licence', () => {
+  it('credits the networks and the search with links to both (DESIGN 15.2)', () => {
     renderWithI18n(<EngineCredit />);
-    expect(screen.getByText(/computer opponent:/)).toHaveTextContent('computer opponent: Stockfish (GPLv3)');
-    expect(screen.getByRole('link', { name: 'Stockfish' })).toHaveAttribute('href', ENGINE_SOURCE_URL);
-    expect(screen.getByRole('link', { name: 'GPLv3' })).toHaveAttribute('href', ENGINE_LICENCE_URL);
+    expect(screen.getByText(/computer opponent:/)).toHaveTextContent(
+      'computer opponent: KataGo networks (CC0), search after Web KaTrain (MIT)',
+    );
+    expect(NETWORKS_URL).toBe('https://katagoarchive.org/');
+    expect(SEARCH_URL).toBe('https://github.com/Sir-Teo/web-katrain');
+    const nets = screen.getByRole('link', { name: 'KataGo networks' });
+    expect(nets).toHaveAttribute('href', NETWORKS_URL);
+    expect(nets).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(screen.getByRole('link', { name: 'Web KaTrain' })).toHaveAttribute('href', SEARCH_URL);
+  });
+
+  it('translates the credit', () => {
+    renderWithI18n(<EngineCredit />, 'de');
+    expect(screen.getByText(/Computergegner:/)).toHaveTextContent('Computergegner: KataGo-Netze (CC0), Suche nach Web KaTrain (MIT)');
   });
 
   it('signs as an izzardry game', () => {
@@ -161,14 +171,5 @@ describe('DeleteUndoToasts', () => {
     } finally {
       vi.useRealTimers();
     }
-  });
-});
-
-describe('KnightGlyph', () => {
-  it('is decorative unless titled', () => {
-    const { container, rerender } = renderWithI18n(<KnightGlyph />);
-    expect(container.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
-    rerender(<KnightGlyph title="white knight" />);
-    expect(screen.getByRole('img', { name: 'white knight' })).toBeInTheDocument();
   });
 });

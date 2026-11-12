@@ -8,14 +8,13 @@
  */
 import { useCallback, useState } from 'react';
 import { flags } from '@/lib/flags';
-import { store as defaultStore } from '@/lib/storage';
-import type { Store } from '@/lib/chessTypes';
+import { store as defaultStore, type PrefStore } from '@/lib/storage';
 
 export const TUTORIAL_SEEN_KEY = 'tutorial-seen';
 
 export interface UseTutorialOptions {
   /** Where the flag lives; the app store by default (tests pass a memory store). */
-  store?: Store;
+  store?: PrefStore;
   /** Feature flag; `flags.tutorial` by default. When false nothing is ever shown. */
   enabled?: boolean;
 }

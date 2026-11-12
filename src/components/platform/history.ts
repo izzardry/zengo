@@ -1,9 +1,10 @@
 /**
  * Pure helpers behind the history list (DESIGN 12.2, Ztyle 10 "List card"): grouping by time,
- * the facts on each card, relative time and the room score. No React.
+ * the facts on each card (position, side to move, state), relative time and the room score.
+ * No React.
  */
-import { zhess } from '@/lib/zhess';
-import type { Color, Language, Room, SavedGame } from '@/lib/chessTypes';
+import { formatResult, fromRecord, makeSettings, newGame } from '@/lib/zigo';
+import type { Color, Game, Language, Room, SavedGame, Size } from '@/lib/types';
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -37,27 +38,58 @@ export function groupByTime(games: readonly SavedGame[], now: number): { group: 
   return HISTORY_GROUPS.filter((g) => buckets.get(g)!.length > 0).map((group) => ({ group, games: buckets.get(group)! }));
 }
 
-/** Number of plies stored in a game; 0 for an unreadable move string. */
-export function plyCount(game: SavedGame): number {
-  if (!game.moves) return 0;
-  try {
-    return zhess.decodeMoves(game.moves).length;
-  } catch {
-    return Array.isArray(game.ms) ? game.ms.length : 0;
-  }
-}
+const SIZES: readonly Size[] = [9, 13, 19];
 
-/** Full moves started, as the game-over summary counts them (`34 moves`). */
-export function moveCount(plies: number): number {
-  return Math.ceil(plies / 2);
+/** The stored size, or 19 for a record that predates sizes or is damaged. */
+export function sizeOf(game: Pick<SavedGame, 'size'>): Size {
+  return SIZES.includes(game.size) ? game.size : 19;
 }
 
 /**
- * Side to move. `SavedGame` carries no start position, so this assumes the standard start
- * (white first); a game continued from a position (DESIGN 12.3) may be off by one.
+ * The game rebuilt from its record, as the card shows it: the final position (or the position at
+ * the end of the stored plies), the side to move and the number of plies that replayed. Lenient:
+ * a damaged move string stops at the last legal ply; an unreadable record gives the empty board.
  */
-export function sideToMove(plies: number): Color {
-  return plies % 2 === 0 ? 'w' : 'b';
+export function gameOf(game: SavedGame): Game {
+  const size = sizeOf(game);
+  const rules = game.rules === 'territory' ? 'territory' : 'area';
+  const handicap = Number.isFinite(game.handicap) ? game.handicap : 0;
+  try {
+    return fromRecord(
+      {
+        size,
+        rules,
+        handicap,
+        moves: typeof game.moves === 'string' ? game.moves : '',
+        ms: Array.isArray(game.ms) ? game.ms : undefined,
+        scoring: game.scoring,
+        result: game.result,
+      },
+      { lenient: true },
+    );
+  } catch {
+    return newGame(makeSettings(size, rules, 0));
+  }
+}
+
+/** Plies (stones and passes) that replayed from the record. */
+export function plyCount(game: SavedGame, g: Game = gameOf(game)): number {
+  return g.cursor;
+}
+
+/**
+ * Moves as Go counts them: every stone and every pass is one move (the move strip numbers plies,
+ * `34. D4`, and the game-over summary says `54 moves`).
+ */
+export function moveCount(plies: number): number {
+  return Math.max(0, plies);
+}
+
+/** Side to move after `plies` plies: Black first, White first with a handicap of 2 or more. */
+export function sideToMove(plies: number, handicap = 0): Color {
+  const first: Color = handicap >= 2 ? 'W' : 'B';
+  if (plies % 2 === 0) return first;
+  return first === 'B' ? 'W' : 'B';
 }
 
 /** What the state cell of a card says (DESIGN 12.2). */
@@ -65,21 +97,29 @@ export type CardState =
   | { kind: 'yourMove' }
   | { kind: 'theirMove' }
   | { kind: 'toMove'; color: Color }
-  | { kind: 'won' }
+  | { kind: 'scoring' }
+  /** This device won; `margin2` (half points ×2) only for a scored game. */
+  | { kind: 'won'; margin2?: number }
   | { kind: 'lost' }
-  | { kind: 'draw' }
-  | { kind: 'result'; text: '1–0' | '0–1' };
+  /** Pass-and-play: the result as `B+4.5`, `W+R`, `B+T` (`formatResult`, SGF `RE`). */
+  | { kind: 'result'; text: string };
 
-export function cardState(game: SavedGame, plies: number = plyCount(game)): CardState {
-  if (game.result) {
-    if (game.result === '1/2-1/2') return { kind: 'draw' };
-    const winner: Color = game.result === '1-0' ? 'w' : 'b';
-    if (game.mode === 'local') return { kind: 'result', text: winner === 'w' ? '1–0' : '0–1' };
-    return { kind: winner === game.color ? 'won' : 'lost' };
+export function cardState(game: SavedGame, g: Game = gameOf(game)): CardState {
+  const r = game.result;
+  if (r) {
+    if (game.mode === 'local') return { kind: 'result', text: formatResult(r) };
+    if (r.winner !== game.color) return { kind: 'lost' };
+    return r.by === 'score' && typeof r.margin === 'number' ? { kind: 'won', margin2: r.margin } : { kind: 'won' };
   }
-  const turn = sideToMove(plies);
-  if (game.mode === 'local') return { kind: 'toMove', color: turn };
-  return { kind: turn === game.color ? 'yourMove' : 'theirMove' };
+  if (g.scoring || game.scoring) return { kind: 'scoring' };
+  if (game.mode === 'local') return { kind: 'toMove', color: g.turn };
+  return { kind: g.turn === game.color ? 'yourMove' : 'theirMove' };
+}
+
+/** `9×9`, `19×19 · JP` for territory rules (the size pill's label, DESIGN 4.1). */
+export function sizeLabel(game: Pick<SavedGame, 'size' | 'rules'>): string {
+  const n = sizeOf(game);
+  return game.rules === 'territory' ? `${n}×${n} · JP` : `${n}×${n}`;
 }
 
 /** `2`, `1½`, `½` from half points ×2. */

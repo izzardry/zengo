@@ -3,10 +3,11 @@
  * the things they explain, over the live game. Dismissed by tapping or clicking anywhere (or
  * any key). Bubbles enter staggered by 100 ms and fade out together in 400 ms.
  *
- * Content (DESIGN 14.2 plus the Ztyle template): back + saved, the game code, how to move
- * (tap or drag; type SAN on pointer devices), hold to underpromote, the toolbar (shield, bulb
- * tap/hold, flag tap/hold), tap the background to hide the UI. Portrait: 3 rows; mobile
- * landscape: 3 columns. Touch devices get the gesture texts, pointer devices click/type.
+ * Content (DESIGN 14.2 plus the Ztyle template): back + saved, the game code, how to place a
+ * stone (tap; on 13×13 and 19×19 tap the ghost stone again; type `D4` on pointer devices), the
+ * scoring step (after two passes, tap dead groups and Accept), the toolbar (shield, bulb
+ * tap/hold, flag tap pass / hold resign), tap the background to hide the UI. Portrait: 3 rows;
+ * mobile landscape: 3 columns. Touch devices get the gesture texts, pointer devices click/type.
  *
  * Ported from Zudoku `TutorialOverlay.tsx`; fixes: dismiss runs once (Zudoku fired on both
  * touchstart and click), keyboard dismiss, dialog semantics, no hard-coded strings.
@@ -17,9 +18,9 @@ import { ArrowLeft, EyeOff, Flag, Lightbulb, ShieldCheck } from 'lucide-react';
 import { useIsTouchDevice } from '@/hooks/use-mobile';
 import { useIsMobileLandscape } from '@/hooks/use-orientation';
 import { useI18n } from '@/lib/i18n';
-import type { Mode } from '@/lib/types';
+import type { Mode, Size } from '@/lib/types';
 import { cn } from '@/lib/utils';
-import { KnightGlyph } from './KnightGlyph';
+import { StoneGlyph } from '@/components/board';
 
 export const TUTORIAL_EXIT_MS = 400;
 const STAGGER_MS = 100;
@@ -27,8 +28,13 @@ const STAGGER_MS = 100;
 export interface TutorialOverlayProps {
   /** Called once, after the fade-out. Pair with `useTutorial().completeTutorial`. */
   onDismiss: () => void;
-  /** Toolbar contents follow the mode (DESIGN 4.2): no bulb in rooms, flag = resign only in pass-and-play. */
+  /** Toolbar contents follow the mode (DESIGN 4.2): no bulb in rooms. */
   mode?: Mode;
+  /**
+   * Board size of the game: 9×9 places on the first tap, 13×13 and 19×19 confirm on the ghost
+   * stone (DESIGN 6.1). Omitted: both are explained.
+   */
+  size?: Size;
   /** Mobile landscape layout; detected when omitted. */
   isLandscape?: boolean;
   /** Touch texts; detected when omitted. */
@@ -67,34 +73,61 @@ function Row({ icon, text, small }: { icon: ReactNode; text: string; small?: boo
   );
 }
 
-/** A 3 × 3 corner of a board: a knight and the dot of its target (touch). */
-function MoveIllustration() {
-  const cells = Array.from({ length: 9 }, (_, i) => i);
+/** Grid positions (px) of a 3 × 3 board corner in the 54 px illustrations. */
+const GRID = [9, 27, 45];
+
+/** A stone glyph centered on intersection (col, row) of the mini grid. */
+function MiniStone({ col, row, color, className }: { col: number; row: number; color: 'B' | 'W'; className?: string }) {
   return (
-    <div className="mx-auto my-2 grid grid-cols-3 w-[54px] h-[54px] rounded-sm overflow-hidden border border-border" aria-hidden="true">
-      {cells.map((i) => {
-        const r = Math.floor(i / 3);
-        const c = i % 3;
-        const dark = (r + c) % 2 === 1;
-        return (
-          <div
-            key={i}
-            className={cn('relative flex items-center justify-center bg-card', dark && 'bg-foreground/10', i === 6 && 'ring-2 ring-inset ring-foreground/50')}
-          >
-            {i === 6 && <KnightGlyph className="w-3.5 h-3.5 text-foreground" />}
-            {i === 1 && <span className="w-1.5 h-1.5 rounded-full bg-foreground/40" />}
-          </div>
-        );
-      })}
+    <span
+      className={cn('absolute w-4 h-4 -translate-x-1/2 -translate-y-1/2 flex', className)}
+      style={{ left: GRID[col], top: GRID[row] }}
+    >
+      <StoneGlyph color={color} className="w-4 h-4" />
+    </span>
+  );
+}
+
+/** Three lines each way: the corner of a board in thin foreground strokes. */
+function MiniGrid({ children, crosshair }: { children?: ReactNode; crosshair?: { col: number; row: number } }) {
+  return (
+    <div className="relative mx-auto my-2 w-[54px] h-[54px]" aria-hidden="true">
+      <svg viewBox="0 0 54 54" className="absolute inset-0 w-full h-full overflow-visible">
+        <g className="stroke-foreground/40" strokeWidth={1} fill="none">
+          {GRID.map((v) => (
+            <path key={`h${v}`} d={`M${GRID[0]} ${v}H54`} />
+          ))}
+          {GRID.map((v) => (
+            <path key={`v${v}`} d={`M${v} ${GRID[0]}V54`} />
+          ))}
+        </g>
+        {crosshair && (
+          <g className="stroke-foreground/30" strokeWidth={1} strokeDasharray="2 2">
+            <path d={`M0 ${GRID[crosshair.row]}H54`} />
+            <path d={`M${GRID[crosshair.col]} 0V54`} />
+          </g>
+        )}
+      </svg>
+      {children}
     </div>
   );
 }
 
-/** Keycaps for SAN typing (pointer devices). */
+/** Touch: a placed white stone and the black ghost stone with its crosshairs. */
+function MoveIllustration() {
+  return (
+    <MiniGrid crosshair={{ col: 2, row: 1 }}>
+      <MiniStone col={1} row={1} color="W" />
+      <MiniStone col={2} row={1} color="B" className="opacity-45" />
+    </MiniGrid>
+  );
+}
+
+/** Keycaps for typing a point (pointer devices). */
 function KeysIllustration() {
   return (
     <div className="flex justify-center gap-1 mt-2" aria-hidden="true">
-      {['e4', 'Nf3', '↵'].map((k) => (
+      {['D4', '↵'].map((k) => (
         <kbd key={k} className="px-1.5 h-6 min-w-6 rounded border border-border bg-muted flex items-center justify-center font-mono text-xs">
           {k}
         </kbd>
@@ -103,35 +136,29 @@ function KeysIllustration() {
   );
 }
 
-/** A mini promotion dial: Q at 12 o'clock, then R, B, N clockwise; the knight aimed. */
-function DialIllustration() {
-  const items = ['Q', 'R', 'B', 'N'];
-  const radius = 22;
+/** Scoring: a dead white stone (faded, ×) inside black territory (small squares). */
+function ScoringIllustration() {
   return (
-    <div className="relative w-[72px] h-[72px] mx-auto my-1" aria-hidden="true">
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-primary/30" />
-      {items.map((p, i) => {
-        const angle = (i / items.length) * 2 * Math.PI - Math.PI / 2;
-        const x = Math.cos(angle) * radius;
-        const y = Math.sin(angle) * radius;
-        return (
-          <div
-            key={p}
-            className={cn(
-              'absolute w-6 h-6 rounded-full flex items-center justify-center font-mono text-xs font-medium',
-              p === 'N' ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground',
-            )}
-            style={{ left: `calc(50% + ${x}px - 12px)`, top: `calc(50% + ${y}px - 12px)` }}
-          >
-            {p}
-          </div>
-        );
-      })}
-    </div>
+    <MiniGrid>
+      <MiniStone col={0} row={2} color="B" />
+      <MiniStone col={1} row={2} color="B" />
+      <MiniStone col={2} row={1} color="B" />
+      <MiniStone col={1} row={1} color="W" className="opacity-40" />
+      <svg viewBox="0 0 54 54" className="absolute inset-0 w-full h-full overflow-visible">
+        <path d="M24 24l6 6M30 24l-6 6" className="stroke-foreground" strokeWidth={1.25} strokeLinecap="round" />
+        {[
+          [0, 0],
+          [1, 0],
+          [0, 1],
+        ].map(([c, r]) => (
+          <rect key={`${c}${r}`} x={GRID[c] - 2.5} y={GRID[r] - 2.5} width={5} height={5} fill="hsl(var(--ink-dark))" stroke="hsl(var(--foreground))" strokeWidth={0.5} />
+        ))}
+      </svg>
+    </MiniGrid>
   );
 }
 
-export function TutorialOverlay({ onDismiss, mode = 'computer', isLandscape, isTouch }: TutorialOverlayProps) {
+export function TutorialOverlay({ onDismiss, mode = 'computer', size, isLandscape, isTouch }: TutorialOverlayProps) {
   const { t } = useI18n();
   const detectedLandscape = useIsMobileLandscape();
   const detectedTouch = useIsTouchDevice();
@@ -163,7 +190,6 @@ export function TutorialOverlay({ onDismiss, mode = 'computer', isLandscape, isT
   }, [dismiss]);
 
   const showHint = mode !== 'room';
-  const flagText = mode === 'local' ? t('platform.tutorial.flagResign') : t('platform.tutorial.flag');
 
   const back = (
     <div className="flex items-start gap-2">
@@ -180,27 +206,35 @@ export function TutorialOverlay({ onDismiss, mode = 'computer', isLandscape, isT
       <p className="text-muted-foreground text-[10px] mt-0.5">{t('platform.tutorial.codeBody')}</p>
     </div>
   );
+  const touchText =
+    size === 9 ? (
+      t('platform.tutorial.moveTouch')
+    ) : size ? (
+      t('platform.tutorial.moveTouchGhost')
+    ) : (
+      <>
+        {t('platform.tutorial.moveTouch')} {t('platform.tutorial.moveTouchLarge')}
+      </>
+    );
   const move = (
     <div className="text-center">
       <span className="font-medium text-sm">{t('platform.tutorial.moveTitle')}</span>
-      <p className="text-muted-foreground text-xs mt-1">
-        {touch ? t('platform.tutorial.moveTouch') : t('platform.tutorial.movePointer')}
-      </p>
+      <p className="text-muted-foreground text-xs mt-1">{touch ? touchText : t('platform.tutorial.movePointer')}</p>
       {touch ? <MoveIllustration /> : <KeysIllustration />}
     </div>
   );
-  const promote = (
+  const scoring = (
     <div className="text-center">
-      <span className="font-medium text-xs">{t('platform.tutorial.promoteTitle')}</span>
-      <p className="text-muted-foreground text-[10px] mt-1">{t('platform.tutorial.promoteBody')}</p>
-      <DialIllustration />
+      <span className="font-medium text-xs">{t('platform.tutorial.scoringTitle')}</span>
+      <p className="text-muted-foreground text-[10px] mt-1">{t('platform.tutorial.scoringBody')}</p>
+      <ScoringIllustration />
     </div>
   );
   const toolbar = (
     <div className="space-y-1.5">
       <Row icon={<ShieldCheck />} text={t('platform.tutorial.helpers')} small={landscape} />
       {showHint && <Row icon={<Lightbulb />} text={t('platform.tutorial.hint')} small={landscape} />}
-      <Row icon={<Flag />} text={flagText} small={landscape} />
+      <Row icon={<Flag />} text={t('platform.tutorial.flag')} small={landscape} />
     </div>
   );
   const hide = (
@@ -237,7 +271,7 @@ export function TutorialOverlay({ onDismiss, mode = 'computer', isLandscape, isT
               {move}
             </Bubble>
             <Bubble delay={4 * STAGGER_MS} className="max-w-[140px]">
-              {promote}
+              {scoring}
             </Bubble>
           </div>
           <div className="flex justify-between items-end gap-3 px-4 pb-[max(5rem,calc(env(safe-area-inset-bottom)+4rem))]">
@@ -256,7 +290,7 @@ export function TutorialOverlay({ onDismiss, mode = 'computer', isLandscape, isT
               {move}
             </Bubble>
             <Bubble delay={4 * STAGGER_MS} className="max-w-[140px]">
-              {promote}
+              {scoring}
             </Bubble>
           </div>
           <div className="flex flex-col justify-between items-end py-4 pr-[max(1rem,env(safe-area-inset-right))] w-1/4">

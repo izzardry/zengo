@@ -4,16 +4,20 @@ import {
   formatPoints,
   formatRelativeTime,
   formatRoomScore,
+  gameOf,
   groupByTime,
   groupOf,
   moveCount,
   plyCount,
   roomOf,
   sideToMove,
+  sizeLabel,
+  sizeOf,
   sortByRecent,
 } from './history';
 import { savedGame } from './test-utils';
 import type { Room } from '@/lib/types';
+import { fromGtp, pointToIndex } from '@/lib/zigo';
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -51,39 +55,80 @@ describe('grouping', () => {
 });
 
 describe('card facts', () => {
-  it('counts plies and full moves', () => {
-    const g = savedGame({ uci: ['e2e4', 'e7e5', 'g1f3'] });
+  const scoring = { round: 1 as const, rev: 0, dead: [], accepted: [0, 0] as [number, number] };
+
+  it('counts plies, passes included, and a move per ply as Go does', () => {
+    const g = savedGame({ gtp: ['D4', 'E5', 'pass'] });
     expect(plyCount(g)).toBe(3);
-    expect(moveCount(3)).toBe(2);
+    expect(moveCount(3)).toBe(3);
     expect(moveCount(0)).toBe(0);
     expect(plyCount(savedGame())).toBe(0);
   });
 
-  it('falls back to ms length for an unreadable move string', () => {
-    expect(plyCount(savedGame({ moves: '!!', ms: [1, 2, 3] }))).toBe(3);
+  it('replays a damaged move string up to the last readable ply', () => {
+    expect(plyCount(savedGame({ moves: 'dd!!', ms: [1, 2, 3] }))).toBe(1);
+    expect(plyCount(savedGame({ moves: 'dddd', ms: [1, 2] }))).toBe(1); // the second stone is illegal (occupied)
   });
 
-  it('knows the side to move from the ply count', () => {
-    expect(sideToMove(0)).toBe('w');
-    expect(sideToMove(1)).toBe('b');
+  it('rebuilds the position for the thumbnail', () => {
+    const g = gameOf(savedGame({ gtp: ['D4', 'E5'] }));
+    expect(g.board).toHaveLength(81);
+    expect(g.board[pointToIndex(fromGtp('D4', 9)!, 9)]).toBe(1);
+    expect(g.board[pointToIndex(fromGtp('E5', 9)!, 9)]).toBe(2);
+    const h = gameOf(savedGame({ size: 13, handicap: 3 }));
+    expect(h.board).toHaveLength(169);
+    expect([...h.board].filter((v) => v === 1)).toHaveLength(3);
+  });
+
+  it('falls back to 19×19 for a record without a valid size', () => {
+    expect(sizeOf(savedGame({ size: 7 as unknown as 9 }))).toBe(19);
+    expect(gameOf(savedGame({ size: undefined as unknown as 9 })).board).toHaveLength(361);
+  });
+
+  it('knows the side to move: Black first, White first with a handicap', () => {
+    expect(sideToMove(0)).toBe('B');
+    expect(sideToMove(1)).toBe('W');
+    expect(sideToMove(0, 2)).toBe('W');
+    expect(sideToMove(1, 4)).toBe('B');
   });
 
   it('says Your move / Their move for computer and room games', () => {
-    expect(cardState(savedGame({ color: 'w' }))).toEqual({ kind: 'yourMove' });
-    expect(cardState(savedGame({ color: 'b' }))).toEqual({ kind: 'theirMove' });
-    expect(cardState(savedGame({ color: 'b', uci: ['e2e4'], mode: 'room' }))).toEqual({ kind: 'yourMove' });
+    expect(cardState(savedGame({ color: 'B' }))).toEqual({ kind: 'yourMove' });
+    expect(cardState(savedGame({ color: 'W' }))).toEqual({ kind: 'theirMove' });
+    expect(cardState(savedGame({ color: 'W', gtp: ['D4'], mode: 'room' }))).toEqual({ kind: 'yourMove' });
+    // Handicap: White moves first.
+    expect(cardState(savedGame({ color: 'B', size: 13, handicap: 3 }))).toEqual({ kind: 'theirMove' });
   });
 
   it('says whose turn by color in pass-and-play', () => {
-    expect(cardState(savedGame({ mode: 'local', uci: ['e2e4'] }))).toEqual({ kind: 'toMove', color: 'b' });
+    expect(cardState(savedGame({ mode: 'local', gtp: ['D4'] }))).toEqual({ kind: 'toMove', color: 'W' });
+    expect(cardState(savedGame({ mode: 'local', gtp: ['D4', 'pass'] }))).toEqual({ kind: 'toMove', color: 'B' });
   });
 
-  it('says Won / Lost / Draw from this device side, and 1–0 in pass-and-play', () => {
-    expect(cardState(savedGame({ result: '1-0', color: 'w' }))).toEqual({ kind: 'won' });
-    expect(cardState(savedGame({ result: '1-0', color: 'b' }))).toEqual({ kind: 'lost' });
-    expect(cardState(savedGame({ result: '1/2-1/2' }))).toEqual({ kind: 'draw' });
-    expect(cardState(savedGame({ result: '0-1', mode: 'local' }))).toEqual({ kind: 'result', text: '0–1' });
-    expect(cardState(savedGame({ result: '1/2-1/2', mode: 'local' }))).toEqual({ kind: 'draw' });
+  it('says Scoring during the scoring phase', () => {
+    expect(cardState(savedGame({ gtp: ['D4', 'pass', 'pass'], scoring }))).toEqual({ kind: 'scoring' });
+    expect(cardState(savedGame({ mode: 'local', gtp: ['D4', 'pass', 'pass'], scoring }))).toEqual({ kind: 'scoring' });
+  });
+
+  it('says Won (by the margin) / Lost from this device side', () => {
+    expect(cardState(savedGame({ color: 'B', result: { winner: 'B', by: 'score', margin: 9 } }))).toEqual({ kind: 'won', margin2: 9 });
+    expect(cardState(savedGame({ color: 'W', result: { winner: 'W', by: 'resign' } }))).toEqual({ kind: 'won' });
+    expect(cardState(savedGame({ color: 'W', result: { winner: 'B', by: 'time' } }))).toEqual({ kind: 'lost' });
+    // A finished scored game is not "Scoring".
+    expect(
+      cardState(savedGame({ color: 'B', gtp: ['D4', 'pass', 'pass'], scoring, result: { winner: 'B', by: 'score', margin: 1 } })),
+    ).toEqual({ kind: 'won', margin2: 1 });
+  });
+
+  it('gives the result as B+4.5 / W+R / B+T in pass-and-play', () => {
+    expect(cardState(savedGame({ mode: 'local', result: { winner: 'B', by: 'score', margin: 9 } }))).toEqual({ kind: 'result', text: 'B+4.5' });
+    expect(cardState(savedGame({ mode: 'local', result: { winner: 'W', by: 'resign' } }))).toEqual({ kind: 'result', text: 'W+R' });
+    expect(cardState(savedGame({ mode: 'local', result: { winner: 'B', by: 'time' } }))).toEqual({ kind: 'result', text: 'B+T' });
+  });
+
+  it('labels the size as the size pill does', () => {
+    expect(sizeLabel(savedGame())).toBe('9×9');
+    expect(sizeLabel(savedGame({ size: 19, rules: 'territory' }))).toBe('19×19 · JP');
   });
 });
 
