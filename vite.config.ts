@@ -136,6 +136,11 @@ export default defineConfig(() => {
         },
       }),
     ],
+    // The engine worker (src/workers/engine.worker.ts) is a module worker: ES output lets it load the
+    // TF.js backends as separate chunks (WebGPU only where the probe asks for it).
+    worker: {
+      format: "es" as const,
+    },
     define: {
       __GIT_HASH__: JSON.stringify(gitHash),
       __GIT_DATE__: JSON.stringify(gitDate),

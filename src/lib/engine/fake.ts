@@ -7,7 +7,8 @@
  *   and rejects; a later `load()` tries again (call `setLoadResult('ready')` first).
  * - Searches load stage 1 lazily, as the real engine does, and take `delayMs` (0 = microtasks only).
  * - `genmove`: the scripted move (`moves`), else the first legal point (row-major from the top)
- *   that does not fill one of the mover's own one-point eyes, else `tt` (pass).
+ *   that does not fill one of the mover's own one-point eyes and is not in `opts.avoid`, else `tt`
+ *   (pass). It resolves with `move` only (no win rate or candidates).
  * - `evaluate`: the scripted evaluation (`evals`; `null` there simulates no answer), else neutral:
  *   win rate 0.5, score lead 0, ownership all 0, policy uniform over the legal points and pass.
  *   Resolves null when `delayMs > timeoutMs`, after `timeoutMs`.
@@ -19,8 +20,9 @@
  * Scripted records are keyed by `movesKey(pos)`: the plies applied so far joined (`ddeett…`, `''`
  * at the start). The function forms receive the whole position.
  */
-import type { ClockInfo, Color, EngineApi, EngineState, Game, Point, Position } from '../types';
-import { PASS, indexToPoint, isLegal, isPass, newGame, play, pointToIndex, resume } from '../zigo';
+import type { ClockInfo, Color, EngineApi, EngineGenmoveOptions, EngineState, Point, Position } from '../types';
+import { PASS, indexToPoint, isLegal, isPass } from '../zigo';
+import { gameFromPosition } from './position';
 import { EngineAbortError, EngineUnavailableError, type EngineHandle, type EngineSnapshot } from './handle';
 
 export type GenmoveResult = Point | 'resign';
@@ -62,7 +64,7 @@ export interface FakeEngineOptions {
 
 export type FakeCall =
   | { method: 'load'; args: [stage: 1 | 2] }
-  | { method: 'genmove'; args: [pos: Position, level: number, clock?: ClockInfo] }
+  | { method: 'genmove'; args: [pos: Position, level: number, clock?: ClockInfo, opts?: EngineGenmoveOptions] }
   | { method: 'evaluate'; args: [pos: Position, opts: EvaluateOptions, timeoutMs?: number] }
   | { method: 'analyze'; args: [pos: Position, n: number] };
 
@@ -71,26 +73,7 @@ export function movesKey(pos: Position): string {
   return pos.moves.join('');
 }
 
-/**
- * The game a position describes: its setup stones, then its plies (so ko and superko are exact).
- * A position whose plies do not replay falls back to its board and side to move.
- */
-export function gameFromPosition(pos: Position): Game {
-  const settings = { size: pos.size, rules: pos.rules, handicap: 0, komi2: pos.komi2 };
-  try {
-    const board = new Uint8Array(pos.size * pos.size);
-    for (const p of pos.setup.B) board[pointToIndex(p, pos.size)] = 1;
-    for (const p of pos.setup.W) board[pointToIndex(p, pos.size)] = 2;
-    let g = newGame(settings, { board, turn: pos.first });
-    for (const m of pos.moves) {
-      if (g.scoring) g = resume(g);
-      g = play(g, m, 0);
-    }
-    return g;
-  } catch {
-    return newGame(settings, { board: pos.board.slice(), turn: pos.turn });
-  }
-}
+export { gameFromPosition };
 
 /** True when `idx` is empty and every neighbour on the board is a stone of `color`. */
 function ownEye(board: Uint8Array, size: number, idx: number, color: Color): boolean {
@@ -278,14 +261,15 @@ export class FakeEngine implements EngineHandle {
     });
   }
 
-  readonly genmove = (pos: Position, level: number, clock?: ClockInfo): Promise<{ move: GenmoveResult }> => {
-    this.calls.push({ method: 'genmove', args: clock ? [pos, level, clock] : [pos, level] });
+  readonly genmove = (pos: Position, level: number, clock?: ClockInfo, opts?: EngineGenmoveOptions): Promise<{ move: GenmoveResult }> => {
+    this.calls.push({ method: 'genmove', args: opts ? [pos, level, clock, opts] : clock ? [pos, level, clock] : [pos, level] });
     return this.search(
       () => {
         const m = this.opts.moves;
         const scripted = m ? (typeof m === 'function' ? m(pos, level) : lookup(m, movesKey(pos))) : undefined;
         if (scripted !== undefined) return { move: scripted };
-        return { move: sensiblePoints(pos)[0] ?? PASS };
+        const avoid = new Set(opts?.avoid ?? []);
+        return { move: sensiblePoints(pos).find((p) => !avoid.has(p)) ?? PASS };
       },
       () => {
         throw new EngineAbortError();

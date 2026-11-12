@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { FakeEngine, gameFromPosition, isPassMove, movesKey, neutralEval, sensiblePoints } from './fake';
 import { isEngineAbort } from './handle';
 import { fromDiagram, makeSettings, newGame, pass, play, position, replay } from '../zigo';
-import type { Position } from '../types';
+import type { EngineApi, EngineMove, Position } from '../types';
+import type { EngineHandle } from './handle';
 
 const EMPTY9 = position(newGame(makeSettings(9)));
 
@@ -250,5 +251,23 @@ describe('FakeEngine', () => {
     expect(e.state).toBe('idle');
     expect(e.nets).toEqual({ small: false, large: false });
     await expect(e.load(1)).rejects.toThrow();
+  });
+});
+
+describe('FakeEngine and EngineApi', () => {
+  it('satisfies EngineApi and EngineHandle (types and shape)', async () => {
+    const api: EngineApi = new FakeEngine();
+    const handle: EngineHandle = new FakeEngine();
+    expect(api.state).toBe('idle');
+    expect(handle.getSnapshot()).toMatchObject({ state: 'idle', backend: null });
+    const r: EngineMove = await api.genmove(EMPTY9, 3);
+    expect(r.move).toBe('aa');
+  });
+
+  it('genmove honours avoid and records the options', async () => {
+    const fake = new FakeEngine();
+    const r = await fake.genmove(EMPTY9, 3, undefined, { avoid: ['aa', 'ba'] });
+    expect(r.move).toBe('ca');
+    expect(fake.calls[0]).toEqual({ method: 'genmove', args: [EMPTY9, 3, undefined, { avoid: ['aa', 'ba'] }] });
   });
 });

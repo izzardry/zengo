@@ -45,10 +45,15 @@ function gatedFetch() {
 const on = { enabled: true, supported: true, base, delayMs: 0, standalone: () => false, persist: async () => true } as const;
 
 describe('useEngineOffline', () => {
-  it('is off in milestone 1: nothing is checked or downloaded while COMPUTER_ENABLED is false', () => {
-    expect(COMPUTER_ENABLED).toBe(false);
+  it('is on from milestone 2 (COMPUTER_ENABLED)', () => {
+    expect(COMPUTER_ENABLED).toBe(true);
+  });
+
+  it('switched off: nothing is checked or downloaded', () => {
     const fetch = vi.fn();
-    const { result } = renderHook(() => useEngineOffline({ supported: true, base, caches: fakeCaches(), fetch: fetch as never, delayMs: 0 }));
+    const { result } = renderHook(() =>
+      useEngineOffline({ enabled: false, supported: true, base, caches: fakeCaches(), fetch: fetch as never, delayMs: 0 }),
+    );
     expect(result.current.stage1).toEqual({ status: 'unsupported' });
     expect(result.current.stage2).toEqual({ status: 'unsupported' });
     expect(result.current.line).toEqual({ kind: 'none' });
@@ -136,8 +141,13 @@ describe('useEngineOffline', () => {
 
 describe('EngineStatus', () => {
   it('renders nothing while the computer is switched off', () => {
-    const { container } = render(<EngineStatus line={{ kind: 'ready' }} onDownload={() => {}} />, { wrapper: wrap });
+    const { container } = render(<EngineStatus enabled={false} line={{ kind: 'ready' }} onDownload={() => {}} />, { wrapper: wrap });
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it('is shown by default from milestone 2', () => {
+    render(<EngineStatus line={{ kind: 'ready' }} onDownload={() => {}} />, { wrapper: wrap });
+    expect(screen.getByTestId('engine-status')).toHaveAttribute('data-status', 'ready');
   });
 
   it('renders the DESIGN 14 states and retries the right stage', () => {

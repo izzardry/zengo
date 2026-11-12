@@ -13,8 +13,11 @@
  * answers a missing file that way) or a body without the expected magic bytes (`\0asm` for WASM,
  * `1f 8b` for gzip) fails the stage, and nothing of that stage is stored.
  *
- * Framework-free; `hooks/useEngineOffline.ts` drives it. Package 2A may add files to a stage (the
- * worker chunk, for example) by extending `ENGINE_STAGES`.
+ * The engine worker and the TF.js backends' JavaScript are ordinary build chunks under `assets/`,
+ * which the service worker precaches with the app shell; only the WASM binaries and the networks
+ * live here. The worker reads the networks from `engine-cache` itself (src/workers/engine.worker.ts).
+ *
+ * Framework-free; `hooks/useEngineOffline.ts` drives it.
  */
 
 /** Runtime cache shared with the service worker route in vite.config.ts. */

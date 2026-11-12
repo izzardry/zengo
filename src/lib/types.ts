@@ -316,23 +316,99 @@ export interface ScoringApi {
 /** Lifecycle of the lazily loaded engine worker. */
 export type EngineState = 'idle' | 'loading' | 'ready' | 'failed';
 
-/** `hooks/useZigoEngine` — and the FakeEngine used in tests. */
+/** The engine's networks: `small` = b6c96 (stage 1), `large` = b10c128 (stage 2). */
+export type EngineNet = 'small' | 'large';
+
+/** A search or evaluation budget. Without `visits` and `timeMs`: one network evaluation. */
+export interface EngineSearchOptions {
+  readonly visits?: number;
+  readonly timeMs?: number;
+  /** Default `small`. */
+  readonly net?: EngineNet;
+}
+
+/**
+ * One root move as the engine saw it. `winrate` / `scoreLead` are from the perspective of the side
+ * to move in the position searched, after this move; absent for a move the search never visited.
+ */
+export interface EngineCandidate {
+  readonly move: Point;
+  /** Network policy of the move, 0..1. */
+  readonly prior: number;
+  /** Search visits; 0 for the policy-only levels 1–9. */
+  readonly visits: number;
+  readonly winrate?: number;
+  readonly scoreLead?: number;
+}
+
+/** Extra control over `genmove` (package 2C's level rules). */
+export interface EngineGenmoveOptions {
+  /** Points the move must not be (for example a big self-atari); pass is always allowed. */
+  readonly avoid?: readonly Point[];
+  /** Seed of the move pickers (self-play, tests). Default random. */
+  readonly seed?: number;
+}
+
+/**
+ * What `genmove` resolves with. The real engine fills every field; the FakeEngine only `move`.
+ * `move` is legal by `ZigoApi.isLegal` or `tt` (pass); the engine itself never resigns (DESIGN 10.4
+ * is the caller's policy, using `winrate` and `scoreLead`).
+ */
+export interface EngineMove {
+  readonly move: Point | 'resign';
+  /** Win rate 0..1 and score lead in points of the position, for the side to move. */
+  readonly winrate?: number;
+  readonly scoreLead?: number;
+  /**
+   * Root moves best first (search levels: by play selection; policy levels: by policy): every
+   * visited move and every move with a policy of at least 0.1 %, at most 64.
+   */
+  readonly candidates?: readonly EngineCandidate[];
+  /** Visits spent (1 for the policy-only levels). */
+  readonly visits?: number;
+}
+
+/** What `evaluate` resolves with. */
+export interface EngineEvaluation {
+  /** Win rate 0..1 for the side to move in the position (`Position.turn`). */
+  readonly winrate: number;
+  /** Score lead in points for the side to move (negative = behind), komi and handicap compensation included. */
+  readonly scoreLead: number;
+  /** size², row-major from the top, −1..1, +1 = Black (what `scoring.propose` expects). */
+  readonly ownership: Float32Array;
+  /** size² + 1 (last = pass), row-major from the top; 0 for illegal points; sums to 1. */
+  readonly policy: Float32Array;
+}
+
+/**
+ * `hooks/useZigoEngine` — and the FakeEngine used in tests.
+ *
+ * Perspective: every `winrate` and `scoreLead` is from the side to move in the given position;
+ * `ownership` is from Black's (+1 = Black).
+ */
 export interface EngineApi {
   readonly state: EngineState;
-  /** 0..1 while loading. */
+  /** 0..1 while a network loads. */
   readonly progress: number;
   readonly backend: 'webgpu' | 'wasm' | null;
-  /** Which networks are cached: `small` = b6c96 (stage 1), `large` = b10c128 (stage 2). */
+  /** Which networks the engine has loaded: `small` = b6c96 (stage 1), `large` = b10c128 (stage 2). */
   readonly nets: { readonly small: boolean; readonly large: boolean };
+  /** Stage 1 loads the small net; stage 2 also the large one. */
   load(stage: 1 | 2): Promise<void>;
-  genmove(pos: Position, level: number, clock?: ClockInfo): Promise<{ move: Point | 'resign' }>;
-  /** `ownership` and `policy` are size² row-major from the top (policy has one more entry for pass); +1 = Black. */
-  evaluate(
+  /** The computer's move at `level` (DESIGN 10.2); rejects with an `AbortError` after `stop()`. */
+  genmove(pos: Position, level: number, clock?: ClockInfo, opts?: EngineGenmoveOptions): Promise<EngineMove>;
+  /** Never rejects: null on failure, timeout (counted from the call) or `stop()`. */
+  evaluate(pos: Position, opts: EngineSearchOptions, timeoutMs?: number): Promise<EngineEvaluation | null>;
+  /**
+   * The best `n` moves of a short search (default 32 visits within 1.5 s on the small net), best
+   * first; only legal moves, pass included when the search likes it. Rejects with an `AbortError`
+   * after `stop()`.
+   */
+  analyze(
     pos: Position,
-    opts: { visits?: number; timeMs?: number; net?: 'small' | 'large' },
-    timeoutMs?: number,
-  ): Promise<{ winrate: number; scoreLead: number; ownership: Float32Array; policy: Float32Array } | null>;
-  analyze(pos: Position, n: number): Promise<{ move: Point; winrate: number; scoreLead: number }[]>;
+    n: number,
+    opts?: EngineSearchOptions,
+  ): Promise<{ move: Point; winrate: number; scoreLead: number; prior?: number; visits?: number }[]>;
   stop(): void;
 }
 

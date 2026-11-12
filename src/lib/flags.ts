@@ -36,8 +36,8 @@ export const flags: Readonly<Record<FeatureFlag, boolean>> = defaults;
 
 /**
  * Milestone switch, not a failure flag: the computer engine exists from milestone 2 on (package 2A
- * sets this to `true`). While it is `false`, nothing engine-related runs: `useEngineOffline`
+ * set this to `true`). While it is `false`, nothing engine-related runs: `useEngineOffline`
  * downloads nothing and reports `unsupported`, and `EngineStatus` renders nothing. Typed as a
  * plain boolean so code can test it either way.
  */
-export const COMPUTER_ENABLED: boolean = false;
+export const COMPUTER_ENABLED: boolean = true;
