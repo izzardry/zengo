@@ -1,0 +1,160 @@
+import { act, renderHook } from '@testing-library/react';
+import { createElement, type ReactNode } from 'react';
+import { MemoryRouter } from 'react-router-dom';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { createStore, memoryStorage } from '@/lib/storage';
+import type { SavedGame, Store } from '@/lib/types';
+import { useGameState } from './useGameState';
+import { useSavedGames } from './useSavedGames';
+
+const DAY = 86_400_000;
+const NOW = new Date(2026, 10, 11, 12, 0, 0).getTime();
+let store: Store;
+
+function game(id: string, lastPlayedAt: number, extra: Partial<SavedGame> = {}): SavedGame {
+  return {
+    id,
+    code: id,
+    mode: 'local',
+    color: 'w',
+    tc: null,
+    moves: '',
+    ms: [],
+    assisted: false,
+    createdAt: lastPlayedAt,
+    lastPlayedAt,
+    ...extra,
+  };
+}
+
+beforeEach(() => {
+  store = createStore(memoryStorage());
+});
+
+describe('useSavedGames', () => {
+  it('lists newest first with five recent cards and the rest grouped by time', () => {
+    const ids = ['G1', 'G2', 'G3', 'G4', 'G5', 'G6', 'G7', 'G8'];
+    // G1 newest … G8 oldest; G6 today, G7 three days ago, G8 a year and more ago.
+    const ages = [1, 2, 3, 4, 5, 6, 3 * DAY, 400 * DAY];
+    ids.forEach((id, i) => store.saveGame(game(id, NOW - ages[i] * (i < 6 ? 60_000 : 1))));
+    const { result } = renderHook(() => useSavedGames({ store, now: () => NOW }));
+    expect(result.current.games.map((g) => g.id)).toEqual(ids);
+    expect(result.current.recent.map((g) => g.id)).toEqual(['G1', 'G2', 'G3', 'G4', 'G5']);
+    expect(result.current.rest.map((g) => g.id)).toEqual(['G6', 'G7', 'G8']);
+    expect(result.current.groups.map((g) => [g.key, g.games.map((x) => x.id)])).toEqual([
+      ['today', ['G6']],
+      ['week', ['G7']],
+      ['older', ['G8']],
+    ]);
+  });
+
+  it('deletes with a restore path for the undo toast', () => {
+    store.saveGame(game('A', NOW - 1000));
+    store.saveGame(game('B', NOW - 2000));
+    store.saveGame(game('C', NOW - 3000));
+    const { result } = renderHook(() => useSavedGames({ store, now: () => NOW }));
+    let a: SavedGame | undefined;
+    let c: SavedGame | undefined;
+    act(() => {
+      a = result.current.remove('A');
+      c = result.current.remove('C');
+    });
+    expect(a?.id).toBe('A');
+    expect(result.current.games.map((g) => g.id)).toEqual(['B']);
+    expect(store.games().map((g) => g.id)).toEqual(['B']);
+    act(() => {
+      expect(result.current.remove('nope')).toBeUndefined();
+    });
+    act(() => result.current.restore([a!, c!]));
+    expect(result.current.games.map((g) => g.id)).toEqual(['A', 'B', 'C']);
+  });
+
+  it('follows saves made by useGameState', () => {
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(MemoryRouter, { initialEntries: ['/?s=LIVE01&o=l'] }, children);
+    const { result } = renderHook(
+      () => ({ list: useSavedGames({ store }), gs: useGameState({ store, now: () => NOW }) }),
+      { wrapper },
+    );
+    expect(result.current.list.games).toHaveLength(0);
+    act(() => void result.current.gs.start());
+    expect(result.current.list.games.map((g) => g.id)).toEqual(['LIVE01']);
+    act(() => void result.current.gs.move('e2e4', 5));
+    expect(result.current.list.games[0].ms).toEqual([5]);
+
+    // Deleting from the list updates the Start pill of the game state.
+    act(() => result.current.gs.exit());
+    expect(result.current.gs.startPill.label).toBe('resume');
+    act(() => void result.current.list.remove('LIVE01'));
+    expect(result.current.gs.startPill.label).toBe('start');
+  });
+
+  it('refreshes on storage events from other tabs', () => {
+    const { result } = renderHook(() => useSavedGames({ store }));
+    store.saveGame(game('OTHER', NOW));
+    expect(result.current.games).toHaveLength(0);
+    act(() => void window.dispatchEvent(new StorageEvent('storage', { key: 'zhess:games' })));
+    expect(result.current.games.map((g) => g.id)).toEqual(['OTHER']);
+  });
+
+  it('deleting a room game removes the room record too; undo puts both back (DESIGN 9.5)', () => {
+    const room = { code: 'RM0001', key: 'k'.repeat(22), seat: 1 as const, createdAt: NOW, lastSeenAt: NOW, score: [2, 0] as [number, number], games: ['RM0001.1', 'RM0001.2'] };
+    store.saveRoom(room);
+    store.saveGame(game('RM0001.1', NOW - 2, { code: 'RM0001', mode: 'room', result: '1-0', by: 'resign', room: { n: 1, epoch: 0 } }));
+    store.saveGame(game('RM0001.2', NOW - 1, { code: 'RM0001', mode: 'room', room: { n: 2, epoch: 0 } }));
+    const { result } = renderHook(() => useSavedGames({ store }));
+    expect(result.current.rooms).toEqual([room]);
+
+    let removed: SavedGame | undefined;
+    act(() => {
+      removed = result.current.remove('RM0001.2');
+    });
+    expect(removed?.id).toBe('RM0001.2');
+    expect(store.rooms()).toEqual([]);
+    expect(result.current.rooms).toEqual([]);
+    // The other game of the room stays in history.
+    expect(result.current.games.map((g) => g.id)).toEqual(['RM0001.1']);
+
+    act(() => result.current.restore(removed!));
+    expect(store.rooms()).toEqual([room]);
+    expect(result.current.rooms).toEqual([room]);
+    expect(result.current.games.map((g) => g.id)).toEqual(['RM0001.2', 'RM0001.1']);
+  });
+
+  it('undoing any game deleted from a room brings its record back, not only the first one deleted', () => {
+    const room = { code: 'RM0003', key: 'c'.repeat(22), seat: 0 as const, createdAt: NOW, lastSeenAt: NOW, score: [2, 0] as [number, number], games: ['RM0003.1', 'RM0003.2'] };
+    store.saveRoom(room);
+    store.saveGame(game('RM0003.1', NOW - 2, { code: 'RM0003', mode: 'room', result: '1-0', by: 'resign', room: { n: 1, epoch: 0 } }));
+    store.saveGame(game('RM0003.2', NOW - 1, { code: 'RM0003', mode: 'room', room: { n: 2, epoch: 0 } }));
+    const { result } = renderHook(() => useSavedGames({ store }));
+    let first: SavedGame | undefined;
+    let second: SavedGame | undefined;
+    act(() => {
+      first = result.current.remove('RM0003.1');
+    });
+    act(() => {
+      second = result.current.remove('RM0003.2');
+    });
+    expect(first?.id).toBe('RM0003.1');
+    expect(store.rooms()).toEqual([]);
+    // Only the second deletion is undone: the room's record comes back with it.
+    act(() => result.current.restore(second!));
+    expect(store.rooms()).toEqual([room]);
+    expect(result.current.games.map((g) => g.id)).toEqual(['RM0003.2']);
+  });
+
+  it('undo does not overwrite a room started again under the same code', () => {
+    const old = { code: 'RM0002', key: 'a'.repeat(22), seat: 0 as const, createdAt: NOW, lastSeenAt: NOW, score: [0, 0] as [number, number], games: ['RM0002.1'] };
+    store.saveRoom(old);
+    store.saveGame(game('RM0002.1', NOW, { code: 'RM0002', mode: 'room', room: { n: 1, epoch: 0 } }));
+    const { result } = renderHook(() => useSavedGames({ store }));
+    let removed: SavedGame | undefined;
+    act(() => {
+      removed = result.current.remove('RM0002.1');
+    });
+    const fresh = { ...old, key: 'b'.repeat(22), lastSeenAt: 0 };
+    store.saveRoom(fresh);
+    act(() => result.current.restore(removed!));
+    expect(store.rooms()).toEqual([fresh]);
+  });
+});
