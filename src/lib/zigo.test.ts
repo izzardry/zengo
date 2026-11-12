@@ -4,6 +4,7 @@ import zigo, {
   PASS,
   boardFromDiagram,
   boardToDiagram,
+  byoyomiPeriodsLeft,
   byoyomiStep,
   decodeMoves,
   defaultKomi2,
@@ -748,6 +749,25 @@ describe('clocks (DESIGN 11, Fischer)', () => {
     const g3 = playAll(g2, ['fd'], [30_000]);
     expect(clocks(g3, by).B).toEqual({ mainMs: 0, periodMs: 0, periods: 0 }); // out of time
     expect(byoyomiStep({ mainMs: 0, periodMs: 0, periods: 0 }, { periodMs: 10_000 }, 1)).toEqual({ mainMs: 0, periodMs: 0, periods: 0 });
+  });
+
+  it('byo-yomi periods: kept inside a period, one per full period overrun, out when the last reads zero', () => {
+    expect(byoyomiPeriodsLeft(3, 10_000, 0)).toBe(3);
+    expect(byoyomiPeriodsLeft(3, 10_000, 9_999)).toBe(3);
+    expect(byoyomiPeriodsLeft(3, 10_000, 10_000)).toBe(3); // read down to zero, moved then: kept
+    expect(byoyomiPeriodsLeft(3, 10_000, 10_001)).toBe(2);
+    expect(byoyomiPeriodsLeft(3, 10_000, 20_001)).toBe(1);
+    expect(byoyomiPeriodsLeft(3, 10_000, 29_999)).toBe(1);
+    expect(byoyomiPeriodsLeft(3, 10_000, 30_000)).toBe(0); // the last period read zero: out
+    expect(byoyomiPeriodsLeft(1, 30_000, 30_000)).toBe(0);
+    expect(byoyomiPeriodsLeft(0, 10_000, 0)).toBe(0);
+    expect(byoyomiPeriodsLeft(3, 0, 0)).toBe(0);
+    expect(byoyomiPeriodsLeft(3, 10_000, -5)).toBe(3);
+    // The log step: main time first, the overflow into the periods.
+    const s = { mainMs: 4_000, periodMs: 10_000, periods: 3 };
+    expect(byoyomiStep(s, { periodMs: 10_000 }, 4_000)).toEqual({ mainMs: 0, periodMs: 10_000, periods: 3 });
+    expect(byoyomiStep(s, { periodMs: 10_000 }, 24_001)).toEqual({ mainMs: 0, periodMs: 10_000, periods: 1 });
+    expect(byoyomiStep(s, { periodMs: 10_000 }, 34_000)).toEqual({ mainMs: 0, periodMs: 0, periods: 0 });
   });
 });
 

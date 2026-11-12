@@ -9,9 +9,10 @@
  * truth and a new position starts a new turn.
  *
  * The page passes `clock.elapsed()` as the `ms` of each stone or pass, and `onFlag` ends the game on
- * time; it fires once per turn.
+ * time; it fires once per turn. Inside the i18n provider the byo-yomi faces carry their spoken
+ * reading (`label`, DESIGN 14.1: `24 seconds, 3 periods`) for the strip's `role="timer"`.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import {
   clockView,
   initialFace,
@@ -23,9 +24,11 @@ import {
   timerReset,
   timerSet,
   toTimeControl,
+  withSpokenLabels,
   type ClockView,
   type TurnTimer,
 } from '@/lib/clock';
+import { I18nContext } from '@/lib/i18n/context';
 import type { Color, Game, Now, TcString, TimeControl } from '@/lib/types';
 
 /** A running turn measured elsewhere (room controller, DESIGN 9.7): `RoomSnapshot.clock`. */
@@ -129,6 +132,8 @@ export function useClock(game: Game | null, tcIn: TimeControl | TcString | null,
   const onFlagRef = useRef(onFlag);
   onFlagRef.current = onFlag;
 
+  // Optional: the hook also works outside the provider (tests, tools), without spoken labels.
+  const i18n = useContext(I18nContext);
   const [hidden, setHidden] = useState(documentHidden);
   const [, setTick] = useState(0);
 
@@ -193,7 +198,8 @@ export function useClock(game: Game | null, tcIn: TimeControl | TcString | null,
 
   /* ---- view ---- */
   const turnMs = elapsed();
-  const view = game ? clockView(game, tc, turnMs, { live: ticking }) : emptyView(tc);
+  const plain = game ? clockView(game, tc, turnMs, { live: ticking }) : emptyView(tc);
+  const view = i18n ? withSpokenLabels(plain, i18n.t) : plain;
 
   /* ---- flag: once per turn ---- */
   let flagNow: Color | null = null;

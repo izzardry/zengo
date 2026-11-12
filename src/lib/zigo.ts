@@ -933,34 +933,45 @@ export function clockRunning(g: Game): boolean {
 }
 
 /**
- * Applies one timed move of `spent` ms to a byo-yomi clock: main time first, then periods.
- * A move finished inside a period keeps it; every full period overrun uses one up.
+ * Japanese byo-yomi (DESIGN 11): the periods left of `periods` after `over` ms spent in byo-yomi
+ * (past the main time); 0 = out of time. A move made inside a period keeps it; overrunning a period
+ * uses it up, one for each full period overrun; time is up the moment the last period reads zero
+ * (as the flag, `remaining() <= 0`).
+ *
+ * `over` exactly one period: kept, unless it was the last one. The same rule drives the log
+ * (`byoyomiStep`) and the running turn (`liveClock` in lib/clock.ts), so they always agree.
+ */
+export function byoyomiPeriodsLeft(periods: number, periodMs: number, over: number): number {
+  if (periods <= 0 || periodMs <= 0) return 0;
+  const t = Math.max(0, over);
+  if (t >= periods * periodMs) return 0;
+  const used = t <= 0 ? 0 : Math.ceil(t / periodMs) - 1;
+  return periods - used;
+}
+
+const OUT: ClockState = Object.freeze({ mainMs: 0, periodMs: 0, periods: 0 });
+
+/**
+ * Applies one timed move of `spent` ms to a byo-yomi clock: main time first, then periods
+ * (`byoyomiPeriodsLeft`). The next turn starts with a full period. Out of time is all zeros.
  */
 export function byoyomiStep(
   s: ClockState,
   tc: { readonly periodMs: number },
   spent: number,
 ): ClockState {
-  let main = s.mainMs;
-  let periods = s.periods;
-  let over = Math.max(0, spent);
-  if (main > 0) {
-    if (over <= main) return { mainMs: main - over, periodMs: tc.periodMs, periods };
-    over -= main;
-    main = 0;
-  }
-  if (periods <= 0) return { mainMs: 0, periodMs: 0, periods: 0 };
-  // `over` ms spent in byo-yomi: within one period keeps it; each further full period costs one.
-  const used = over <= tc.periodMs ? 0 : Math.ceil(over / tc.periodMs) - 1;
-  periods = Math.max(0, periods - used);
-  return periods > 0 ? { mainMs: 0, periodMs: tc.periodMs, periods } : { mainMs: 0, periodMs: 0, periods: 0 };
+  const t = Math.max(0, spent);
+  const main = Math.max(0, s.mainMs);
+  if (main > 0 && t <= main) return { mainMs: main - t, periodMs: tc.periodMs, periods: s.periods };
+  const periods = byoyomiPeriodsLeft(s.periods, tc.periodMs, t - main);
+  return periods > 0 ? { mainMs: 0, periodMs: tc.periodMs, periods } : OUT;
 }
 
 /**
  * Each side's clock at the cursor, excluding the running turn. Each side's first move is
  * untimed (it starts that side's clock). Fischer: every counted move subtracts its ms and adds the
  * increment. Byo-yomi: `byoyomiStep`. Clock off: time used per side in `mainMs`.
- * Package 2B owns the clock and may replace the byo-yomi part.
+ * Derived from the per-ply `ms` log alone, so undo, redo, review and both devices of a room agree.
  */
 export function clocks(g: Game, tc: TimeControl): Record<Color, ClockState> {
   if (!tc) {

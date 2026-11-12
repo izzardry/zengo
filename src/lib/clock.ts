@@ -10,12 +10,15 @@
  *
  * Clocks stop during scoring (DESIGN 8.4) and after the end.
  *
- * Byo-yomi: the log derivation is `byoyomiStep` of `lib/zigo.ts` (phase 0b); `liveClock` applies the
- * running turn the same way. Package 2B owns both and may refine them.
+ * Japanese byo-yomi (DESIGN 11): main time, then P periods of S seconds. A move made inside a period
+ * keeps it, each full period overrun uses one up, and time is up when the last period reads zero.
+ * One rule (`byoyomiPeriodsLeft` in `lib/zigo.ts`) drives both the log (`byoyomiStep`, via
+ * `zigo.clocks`) and the running turn (`liveClock`), so the live face, the flag and the clock after
+ * the move always agree. `clock.test.ts` checks this against a tick-by-tick simulation.
  */
 import { formatClock, formatElapsed, isLowTime } from './timeUtils';
-import type { ClockState, Color, Game, TcString, TimeControl } from './types';
-import { clockRunning, clocks, encodeMoves, toTc } from './zigo';
+import type { ClockInfo, ClockState, Color, Game, TcString, TimeControl } from './types';
+import { byoyomiPeriodsLeft, clockRunning, clocks, encodeMoves, toTc } from './zigo';
 
 const other = (c: Color): Color => (c === 'B' ? 'W' : 'B');
 
@@ -110,18 +113,20 @@ export function budgetMs(s: ClockState, tc: NonNullable<TimeControl>): number {
 /**
  * One side's clock `spent` ms into its running turn, from its state at the start of the turn.
  * Fischer: main time minus `spent` (negative past the flag). Byo-yomi: main time first, then the
- * periods; `periodMs` is what is left of the current period and `periods` counts it; out of time is
- * all zeros.
+ * periods (`byoyomiPeriodsLeft`); `periodMs` is what is left of the current period and `periods`
+ * counts it; out of time is all zeros.
  */
 export function liveClock(base: ClockState, tc: NonNullable<TimeControl>, spent: number): ClockState {
   const t = Math.max(0, spent);
   if (tc.kind === 'fischer') return { mainMs: base.mainMs - t, periodMs: 0, periods: 0 };
-  if (t <= base.mainMs) return { mainMs: base.mainMs - t, periodMs: base.periods > 0 ? tc.periodMs : 0, periods: base.periods };
-  const over = t - Math.max(0, base.mainMs);
-  const used = Math.floor(over / tc.periodMs);
-  const periods = base.periods - used;
+  const main = Math.max(0, base.mainMs);
+  if (t <= main && base.periods > 0) return { mainMs: main - t, periodMs: tc.periodMs, periods: base.periods };
+  const over = t - main;
+  const periods = byoyomiPeriodsLeft(base.periods, tc.periodMs, over);
   if (periods <= 0) return { mainMs: 0, periodMs: 0, periods: 0 };
-  return { mainMs: 0, periodMs: tc.periodMs - (over - used * tc.periodMs), periods };
+  // Periods used so far end at (used) × S; the current one ends one period later.
+  const used = base.periods - periods;
+  return { mainMs: 0, periodMs: (used + 1) * tc.periodMs - over, periods };
 }
 
 /**
@@ -200,6 +205,11 @@ export interface ClockFace {
   readonly periods: number | null;
   /** Byo-yomi: the side is in its periods (main time used up). */
   readonly overtime: boolean;
+  /**
+   * Spoken reading for `role="timer"` (DESIGN 14.1), e.g. `24 seconds, 3 periods`; set by
+   * `withSpokenLabels` (byo-yomi only). `PlayerStrip` reads it instead of the abbreviated text.
+   */
+  readonly label?: string;
 }
 
 /** Both clocks plus what the page needs to act on them. */
@@ -237,14 +247,15 @@ export function faceOf(s: ClockState, tc: TimeControl): ClockFace {
   if (s.mainMs > 0) {
     return { text: formatClock(s.mainMs), running: false, low: isLowTime(s.mainMs), flagged: false, untimed: false, ms: s.mainMs, periods: s.periods, overtime: false };
   }
-  if (s.periods <= 0 || s.periodMs <= 0) return { ...FLAGGED_FACE, flagged: false, running: false, periods: 0, overtime: true };
+  if (s.periods <= 0) return { ...FLAGGED_FACE, flagged: false, running: false, periods: 0, overtime: true };
+  const ms = Math.max(0, s.periodMs);
   return {
-    text: `${formatClock(s.periodMs)} ·${s.periods}`,
+    text: `${formatClock(ms)} ·${s.periods}`,
     running: false,
-    low: isLowTime(s.periodMs),
+    low: isLowTime(ms),
     flagged: false,
     untimed: false,
-    ms: s.periodMs,
+    ms,
     periods: s.periods,
     overtime: true,
   };
@@ -288,69 +299,50 @@ export function tickInterval(tc: TimeControl): number {
 }
 
 /* ---------------------------------------------------------------------------------------------- */
-/* Custom time control (the clock dial)                                                            */
+/* Spoken readings (DESIGN 14.1)                                                                   */
+/* ---------------------------------------------------------------------------------------------- */
+
+/** The translator `withSpokenLabels` needs: `t` of `useI18n`, limited to the clock table. */
+export type ClockTranslate = (
+  key: 'clock.seconds' | 'clock.secondOne' | 'clock.periods' | 'clock.lastPeriod' | 'clock.spoken',
+  vars?: Record<string, string | number>,
+) => string;
+
+/**
+ * What a screen reader says for a byo-yomi face: in the periods `24 seconds, 3 periods` (the
+ * countdown in whole seconds, as shown, and the periods left), `7 seconds, last period`; in the
+ * main time `4:31, 3 periods`. Undefined where the text reads well as it is (Fischer, clock off,
+ * out of time).
+ */
+export function spokenClock(face: ClockFace, t: ClockTranslate): string | undefined {
+  if (face.periods === null || face.flagged || face.untimed || face.periods <= 0) return undefined;
+  const periods = face.periods === 1 ? t('clock.lastPeriod') : t('clock.periods', { n: face.periods });
+  if (!face.overtime) return t('clock.spoken', { time: face.text, periods });
+  const secs = Math.floor(Math.max(0, face.ms) / 1000);
+  const time = secs === 1 ? t('clock.secondOne') : t('clock.seconds', { n: secs });
+  return t('clock.spoken', { time, periods });
+}
+
+/** `view` with the spoken reading on both faces (`ClockFace.label`). */
+export function withSpokenLabels<V extends ClockView>(view: V, t: ClockTranslate): V {
+  const label = (f: ClockFace): ClockFace => {
+    const spoken = spokenClock(f, t);
+    return spoken === f.label ? f : { ...f, label: spoken };
+  };
+  return { ...view, B: label(view.B), W: label(view.W) };
+}
+
+/* ---------------------------------------------------------------------------------------------- */
+/* The engine's clock                                                                              */
 /* ---------------------------------------------------------------------------------------------- */
 
 /**
- * Minutes on the custom dial, clockwise from 12 o'clock. Nine items: the Ztyle radial dial holds
- * at most nine values (Ztyle 08).
+ * What the computer is told about its own clock when it moves for the side to move
+ * (`EngineApi.genmove`): the clock at the start of the turn from the log. Undefined without a
+ * clock, before that side's first move (untimed), during scoring and after the end.
  */
-export const DIAL_MINUTES: readonly number[] = Object.freeze([1, 2, 3, 5, 10, 15, 20, 30, 60]);
-
-/** Increment seconds on the custom dial (Fischer), clockwise from 12 o'clock. */
-export const DIAL_INCREMENTS: readonly number[] = Object.freeze([0, 1, 2, 3, 5, 10, 15, 20, 30]);
-
-/** Byo-yomi periods on the custom dial (DESIGN 11). */
-export const DIAL_PERIODS: readonly number[] = Object.freeze([1, 3, 5, 10]);
-
-/** `5`, `3` → `5+3`; the TcString of a custom Fischer pick. */
-export function customTc(minutes: number, incrementSeconds: number): TcString {
-  return `${minutes}+${incrementSeconds}`;
-}
-
-/** `20`, `5`, `30` → `20m5x30`; the TcString of a custom byo-yomi pick. */
-export function customByoyomiTc(minutes: number, periods: number, periodSeconds: number): TcString {
-  return `${minutes}m${periods}x${periodSeconds}`;
-}
-
-/** Index in `list` of the value closest to `v` (ties: the smaller), for the dial's start aim. */
-export function nearestIndex(list: readonly number[], v: number): number {
-  let best = 0;
-  for (let i = 1; i < list.length; i++) if (Math.abs(list[i] - v) < Math.abs(list[best] - v)) best = i;
-  return best;
-}
-
-/**
- * Ztyle radial dial distances (Ztyle 08): centre < 25 px, dead ring to 40 px, aim 40–55 px,
- * commit ≥ 55 px.
- */
-export const DIAL_GEOMETRY = Object.freeze({
-  radius: 60,
-  popRadius: 105,
-  center: 25,
-  aim: 40,
-  commit: 55,
-  /** Radius + half an item: how far the dial reaches from its centre. */
-  reach: 80,
-});
-
-export type DialZone = 'center' | 'none' | 'aim' | 'commit';
-
-/** What a pointer offset from the dial's start point selects on an `n`-item dial (item 0 at 12 o'clock, clockwise). */
-export function dialAim(dx: number, dy: number, n: number): { zone: DialZone; index: number | null } {
-  const d = Math.hypot(dx, dy);
-  if (d < DIAL_GEOMETRY.center) return { zone: 'center', index: null };
-  if (d <= DIAL_GEOMETRY.aim || n <= 0) return { zone: 'none', index: null };
-  let a = Math.atan2(dy, dx) + Math.PI / 2 + Math.PI / n;
-  a = ((a % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
-  const index = Math.floor((a / (2 * Math.PI)) * n) % n;
-  return { zone: d >= DIAL_GEOMETRY.commit ? 'commit' : 'aim', index };
-}
-
-/** Position of item `i` of `n` at radius `r` around the centre (12 o'clock first, clockwise). */
-export function dialItemOffset(i: number, n: number, r: number): { x: number; y: number } {
-  const angle = (i / n) * 2 * Math.PI - Math.PI / 2;
-  // Rounded to 1/100 px so 12 o'clock is exactly (0, -r).
-  const round = (v: number) => Math.round(v * 100) / 100 || 0;
-  return { x: round(Math.cos(angle) * r), y: round(Math.sin(angle) * r) };
+export function engineClock(g: Game, tc: TimeControl | TcString | null | undefined): ClockInfo | undefined {
+  const t = toTimeControl(tc);
+  if (!t || !isCounting(g, t)) return undefined;
+  return { tc: t, left: clocks(g, t)[g.turn] };
 }

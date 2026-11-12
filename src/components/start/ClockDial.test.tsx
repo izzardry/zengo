@@ -4,7 +4,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { I18nProvider } from '@/lib/i18n';
 import type { Language, TimeControl } from '@/lib/types';
 import { ClockDial, DIAL_INCREMENTS, DIAL_MINUTES, DIAL_PERIOD_SECONDS, DIAL_PERIODS, type ClockDialProps } from './ClockDial';
+import { formatTc, parseTc } from '@/lib/zigo';
 import { DIAL_GEOMETRY } from './dialGeometry';
+import { byoyomiTc, fischerTc } from './options';
 import { captionSide, clampCenter, DIAL_EXTENT, DIAL_MARGIN } from './dialPlacement';
 
 const wrap = (ui: ReactElement, language: Language = 'en') => render(<I18nProvider language={language}>{ui}</I18nProvider>);
@@ -301,6 +303,54 @@ describe('ClockDial (DESIGN 11: system, minutes, then increment or period and pe
     down(item(30));
     expect(screen.getByTestId('tc')).toHaveTextContent('1+30');
     expect(screen.queryByTestId('clock-dial')).toBeNull();
+  });
+});
+
+describe('custom dial values (DESIGN 11)', () => {
+  it('every Fischer and byo-yomi pick is a valid stored time control that reads back the same', () => {
+    expect(DIAL_MINUTES.length).toBeLessThanOrEqual(9);
+    expect(DIAL_INCREMENTS.length).toBeLessThanOrEqual(9);
+    expect(DIAL_PERIOD_SECONDS.length).toBeLessThanOrEqual(9);
+    for (const m of DIAL_MINUTES) {
+      for (const i of DIAL_INCREMENTS) {
+        const tc = fischerTc(m, i);
+        expect(parseTc(tc)).toEqual(fischer(m, i));
+        expect(formatTc(parseTc(tc))).toBe(tc);
+      }
+      for (const s of DIAL_PERIOD_SECONDS) {
+        for (const p of DIAL_PERIODS) {
+          const tc = byoyomiTc(m, p, s);
+          expect(tc).toBe(`${m}m${p}x${s}`);
+          expect(parseTc(tc)).toEqual(byoyomi(m, p, s));
+          expect(formatTc(parseTc(tc))).toBe(tc);
+        }
+      }
+    }
+    expect(fischerTc(20, 5)).toBe('20+5');
+  });
+
+  it('the dial hands out the stored form for both systems, from any corner of its lists', () => {
+    const a = mount();
+    down(item('byoyomi'));
+    down(item(1));
+    down(item(5));
+    down(item(1));
+    expect(a.onPick).toHaveBeenCalledWith('1m1x5');
+    expect(parseTc(a.onPick.mock.calls[0][0])).toEqual(byoyomi(1, 1, 5));
+    a.unmount();
+    const b = mount();
+    down(item('byoyomi'));
+    down(item(60));
+    down(item(120));
+    down(item(10));
+    expect(parseTc(b.onPick.mock.calls[0][0])).toEqual(byoyomi(60, 10, 120));
+    b.unmount();
+    const c = mount();
+    down(item('fischer'));
+    down(item(1));
+    down(item(0));
+    expect(c.onPick).toHaveBeenCalledWith('1+0');
+    expect(parseTc(c.onPick.mock.calls[0][0])).toEqual(fischer(1, 0));
   });
 });
 

@@ -1,5 +1,8 @@
-import { act, renderHook } from '@testing-library/react';
+import { act, render, renderHook, screen } from '@testing-library/react';
+import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { PlayerStrip } from '@/components/game/PlayerStrip';
+import { I18nProvider } from '@/lib/i18n';
 import type { Game, TcString, TimeControl } from '@/lib/types';
 import zigo, { makeSettings } from '@/lib/zigo';
 import { useClock, type UseClockOptions } from './useClock';
@@ -240,6 +243,75 @@ describe('useClock', () => {
     const g = playAll([['gg', 35_000], ['cg', 0]], opened);
     const { result } = mount(g, '0.5m3x10');
     expect(result.current.B).toMatchObject({ text: '0:10 ·3', overtime: true });
+  });
+
+  it('byo-yomi 1m 3×10s: main time runs out, a move inside a period keeps it, the last period loses', () => {
+    const onFlag = vi.fn();
+    const { result, rerender } = mount(opened, '1m3x10', { onFlag });
+    advance(59_000);
+    expect(result.current.B).toMatchObject({ text: '1.0', low: true, overtime: false, periods: 3 });
+    advance(1_000);
+    expect(result.current.B).toMatchObject({ text: '0:10 ·3', overtime: true, periods: 3 });
+    advance(6_000);
+    expect(result.current.B.text).toBe('4.0 ·3');
+    // Black moves 6 s into the first period: the period is kept and refills.
+    const g1 = zigo.play(opened, 'gg', result.current.elapsed());
+    rerender({ game: g1, tc: '1m3x10', opts: { onFlag } });
+    expect(result.current.B).toMatchObject({ text: '0:10 ·3', running: false });
+    const g2 = zigo.play(g1, 'cg', result.current.elapsed());
+    rerender({ game: g2, tc: '1m3x10', opts: { onFlag } });
+    advance(12_000);
+    expect(result.current.B).toMatchObject({ text: '8.0 ·2', running: true });
+    advance(17_900);
+    expect(result.current.B.text).toBe('0.1 ·1');
+    expect(onFlag).not.toHaveBeenCalled();
+    advance(100);
+    expect(onFlag).toHaveBeenCalledTimes(1);
+    expect(onFlag).toHaveBeenCalledWith('B');
+    expect(result.current.B).toMatchObject({ text: '0.0', flagged: true });
+    // Undo restores the clock from the log: the side to move is White, Black's periods are back.
+    rerender({ game: zigo.undo(g2, 1), tc: '1m3x10', opts: { onFlag } });
+    expect(result.current.B).toMatchObject({ text: '0:10 ·3', flagged: false });
+  });
+
+  it('pauses byo-yomi periods while the tab is hidden (solo)', () => {
+    const { result } = mount(opened, '0m3x10');
+    advance(4_000);
+    expect(result.current.B.text).toBe('6.0 ·3');
+    setVisibility('hidden');
+    advance(60_000);
+    expect(result.current.B.text).toBe('6.0 ·3');
+    setVisibility('visible');
+    advance(7_000);
+    expect(result.current.B.text).toBe('9.0 ·2');
+  });
+
+  it('inside the i18n provider the byo-yomi faces carry their spoken reading', () => {
+    const wrapper = ({ children }: { children: ReactNode }) => <I18nProvider language="de">{children}</I18nProvider>;
+    const { result } = renderHook(() => useClock(opened, '0m5x30', { now }), { wrapper });
+    advance(6_000);
+    expect(result.current.B).toMatchObject({ text: '0:24 ·5', label: '24 Sekunden, 5 Perioden' });
+    expect(result.current.W.label).toBe('30 Sekunden, 5 Perioden');
+    // Without the provider (and for Fischer) there is no label.
+    expect(mount(opened, '0m5x30').result.current.B.label).toBeUndefined();
+    expect(renderHook(() => useClock(opened, ONE_MIN, { now }), { wrapper }).result.current.B.label).toBeUndefined();
+  });
+
+  it('the strip reads the spoken label inside role="timer"', () => {
+    function Strip() {
+      const c = useClock(opened, '0m5x30', { now });
+      return <PlayerStrip color="B" prisoners={0} clock={c.B} active />;
+    }
+    render(
+      <I18nProvider language="en">
+        <Strip />
+      </I18nProvider>,
+    );
+    advance(6_000);
+    const timer = screen.getByRole('timer');
+    expect(timer).toHaveTextContent('0:24 ·5');
+    expect(timer).toHaveTextContent('24 seconds, 5 periods');
+    expect(timer.getAttribute('data-ms')).toBe('24000');
   });
 
   it('stops during scoring', () => {
