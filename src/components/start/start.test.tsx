@@ -3,12 +3,12 @@ import userEvent from '@testing-library/user-event';
 import { useState, type ReactElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { I18nProvider } from '@/lib/i18n';
-import { createStore, memoryStorage } from '@/lib/storage';
-import type { ColorChoice, Language, Opponent, TimeControl } from '@/lib/chessTypes';
+import type { ColorChoice, Language, Opponent, Rules, SavedGame, Size, TimeControl } from '@/lib/types';
 import { BackToTop } from './BackToTop';
 import { BoardPreview } from './BoardPreview';
 import { NO_FIT, PREVIEW_GAP, PREVIEW_MIN_SCALE, previewFit } from './previewFit';
 import { CLOCK_HOLD_MS, ClockPill } from './ClockPill';
+import { SizePill } from './SizePill';
 import { CodeSelector } from './CodeSelector';
 import { ColorPill } from './ColorPill';
 import { OpponentSelector } from './OpponentSelector';
@@ -19,12 +19,7 @@ import { VersionStamp } from './VersionStamp';
 import { StartHeader, StickyHeader } from './Wordmark';
 import { useScrolled } from './useScrolled';
 
-const wrap = (ui: ReactElement, language: Language = 'en') =>
-  render(
-    <I18nProvider language={language} store={createStore(memoryStorage())}>
-      {ui}
-    </I18nProvider>,
-  );
+const wrap = (ui: ReactElement, language: Language = 'en') => render(<I18nProvider language={language}>{ui}</I18nProvider>);
 
 /** Deterministic rng: always picks the same alphabet index. */
 const constRng = (idx: number) => () => idx / 36;
@@ -218,6 +213,19 @@ describe('OpponentSelector', () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
+  it('keeps a faint rank slot that shows a calibrated rank for computer levels only (DESIGN 4.1)', () => {
+    const { rerender } = wrap(<OpponentSelector value={{ mode: 'computer', level: 5 }} onChange={() => {}} />);
+    expect(screen.getByTestId('opponent-rank')).toBeEmptyDOMElement();
+    const again = (ui: ReactElement) => rerender(<I18nProvider language="en">{ui}</I18nProvider>);
+    again(<OpponentSelector value={{ mode: 'computer', level: 5 }} rank="≈12k" onChange={() => {}} />);
+    expect(screen.getByTestId('opponent-rank')).toHaveTextContent('≈12k');
+    again(<OpponentSelector value={{ mode: 'local' }} rank="≈12k" onChange={() => {}} />);
+    expect(screen.getByTestId('opponent-rank')).toBeEmptyDOMElement();
+    // Landscape drops the empty slot to save height.
+    again(<OpponentSelector value={{ mode: 'computer', level: 5 }} landscape onChange={() => {}} />);
+    expect(screen.queryByTestId('opponent-rank')).toBeNull();
+  });
+
   it('is translated', () => {
     wrap(<OpponentSelector value={{ mode: 'computer', level: 12 }} onChange={() => {}} />, 'fr');
     expect(text()).toBe('Ordinateur · Niveau 12 | Dément');
@@ -227,11 +235,13 @@ describe('OpponentSelector', () => {
 /* ---------------------------------------------------------------------------------------------- */
 
 describe('ColorPill', () => {
-  function Harness({ onChange = vi.fn() }: { onChange?: ReturnType<typeof vi.fn> }) {
+  function Harness({ onChange = vi.fn(), onLongPress, handicap = 0 }: { onChange?: ReturnType<typeof vi.fn>; onLongPress?: ReturnType<typeof vi.fn>; handicap?: number }) {
     const [v, setV] = useState<ColorChoice>('random');
     return (
       <ColorPill
         value={v}
+        handicap={handicap}
+        onLongPress={onLongPress}
         onChange={(c) => {
           onChange(c);
           setV(c);
@@ -240,26 +250,149 @@ describe('ColorPill', () => {
     );
   }
 
-  it('cycles random → white → black → random', async () => {
+  it('cycles random → black → white → random', async () => {
     wrap(<Harness />);
     const pill = screen.getByTestId('color-pill');
-    expect(pill).toHaveAccessibleName('Your color: Random. Tap to change');
+    expect(pill).toHaveAccessibleName('Your color: Random, no handicap. Tap to change the color, hold for the handicap');
     const seen: string[] = [];
     for (let i = 0; i < 4; i++) {
       seen.push(`${pill.getAttribute('data-value')}:${pill.textContent}`);
       await userEvent.click(pill);
     }
-    expect(seen).toEqual(['random:Random', 'w:White', 'b:Black', 'random:Random']);
+    expect(seen).toEqual(['random:Random', 'B:Black', 'W:White', 'random:Random']);
   });
 
-  it('is dimmed and inert for a room joiner', async () => {
-    const onChange = vi.fn();
-    wrap(<ColorPill value="b" onChange={onChange} disabled />);
+  it('reads "black · H3" with a handicap (DESIGN 4.1)', () => {
+    wrap(<ColorPill value="B" handicap={3} onChange={() => {}} />);
     const pill = screen.getByTestId('color-pill');
+    expect(pill).toHaveTextContent('Black· H3');
+    expect(pill.className).toContain('lowercase');
+    expect(pill).toHaveAttribute('data-handicap', '3');
+    expect(pill).toHaveAccessibleName('Your color: Black, 3 handicap stones. Tap to change the color, hold for the handicap');
+  });
+
+  it('a 500 ms hold calls onLongPress and swallows the click', () => {
+    vi.useFakeTimers();
+    try {
+      const onLongPress = vi.fn();
+      const onChange = vi.fn();
+      wrap(<Harness onLongPress={onLongPress} onChange={onChange} />);
+      const pill = screen.getByTestId('color-pill');
+      fireEvent.pointerDown(pill, { pointerType: 'touch' });
+      act(() => vi.advanceTimersByTime(CLOCK_HOLD_MS));
+      expect(onLongPress).toHaveBeenCalledTimes(1);
+      expect(onLongPress.mock.calls[0][0]).toEqual(expect.objectContaining({ source: 'pointer' }));
+      fireEvent.pointerUp(pill);
+      fireEvent.click(pill);
+      expect(onChange).not.toHaveBeenCalled();
+      fireEvent.keyDown(pill, { key: 'Enter', shiftKey: true });
+      expect(onLongPress).toHaveBeenCalledTimes(2);
+      expect(onLongPress.mock.calls[1][0]).toEqual(expect.objectContaining({ source: 'keyboard' }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('in pass-and-play the color is dimmed and fixed, but the hold still sets the handicap', async () => {
+    vi.useFakeTimers();
+    try {
+      const onChange = vi.fn();
+      const onLongPress = vi.fn();
+      wrap(<ColorPill value="random" handicap={2} colorFixed onChange={onChange} onLongPress={onLongPress} />);
+      const pill = screen.getByTestId('color-pill');
+      expect(pill).toBeEnabled();
+      expect(pill).toHaveAccessibleName('Two players, 2 handicap stones. Hold for the handicap');
+      expect(pill.querySelector('[data-part="color"]')!.className).toContain('opacity-50');
+      fireEvent.click(pill);
+      expect(onChange).not.toHaveBeenCalled();
+      fireEvent.pointerDown(pill, { pointerType: 'touch' });
+      act(() => vi.advanceTimersByTime(CLOCK_HOLD_MS));
+      expect(onLongPress).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('is dimmed and inert for a room joiner, and has no hold', async () => {
+    vi.useFakeTimers();
+    try {
+      const onChange = vi.fn();
+      const onLongPress = vi.fn();
+      wrap(<ColorPill value="B" onChange={onChange} onLongPress={onLongPress} disabled />);
+      const pill = screen.getByTestId('color-pill');
+      expect(pill).toBeDisabled();
+      expect(pill.className).toContain('opacity-50');
+      expect(pill).toHaveAccessibleName('Your color: Black, no handicap. Set by the room or the game');
+      fireEvent.click(pill);
+      fireEvent.pointerDown(pill, { pointerType: 'touch' });
+      act(() => vi.advanceTimersByTime(1000));
+      expect(onChange).not.toHaveBeenCalled();
+      expect(onLongPress).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('is translated, with the glossary word for handicap', () => {
+    wrap(<ColorPill value="W" handicap={4} onChange={() => {}} />, 'de');
+    const pill = screen.getByTestId('color-pill');
+    expect(pill).toHaveTextContent('Weiß· V4');
+    expect(pill).toHaveAccessibleName('Deine Farbe: Weiß, 4 Vorgabesteine. Tippen ändert die Farbe, halten für die Vorgabe');
+  });
+});
+
+/* ---------------------------------------------------------------------------------------------- */
+
+describe('SizePill', () => {
+  function Harness({ onLongPress, rules = 'area' }: { onLongPress?: ReturnType<typeof vi.fn>; rules?: Rules }) {
+    const [v, setV] = useState<Size>(9);
+    return <SizePill size={v} rules={rules} onChange={setV} onLongPress={onLongPress} />;
+  }
+
+  it('cycles 9×9 → 13×13 → 19×19 → 9×9', async () => {
+    wrap(<Harness />);
+    const pill = screen.getByTestId('size-pill');
+    expect(pill).toHaveAccessibleName('Board 9×9, area scoring. Tap to change the size, hold for the rules');
+    const seen: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      seen.push(pill.textContent ?? '');
+      await userEvent.click(pill);
+    }
+    expect(seen).toEqual(['9×9', '13×13', '19×19', '9×9']);
+  });
+
+  it('shows · JP for territory rules', () => {
+    wrap(<Harness rules="territory" />);
+    const pill = screen.getByTestId('size-pill');
+    expect(pill).toHaveTextContent('9×9 · JP');
+    expect(pill).toHaveAttribute('data-rules', 'territory');
+    expect(pill).toHaveAccessibleName('Board 9×9, territory scoring. Tap to change the size, hold for the rules');
+  });
+
+  it('a 500 ms hold opens the rules (onLongPress) and swallows the click', () => {
+    vi.useFakeTimers();
+    try {
+      const onLongPress = vi.fn();
+      wrap(<Harness onLongPress={onLongPress} />);
+      const pill = screen.getByTestId('size-pill');
+      fireEvent.pointerDown(pill, { pointerType: 'touch' });
+      act(() => vi.advanceTimersByTime(CLOCK_HOLD_MS - 1));
+      expect(onLongPress).not.toHaveBeenCalled();
+      act(() => vi.advanceTimersByTime(1));
+      expect(onLongPress).toHaveBeenCalledTimes(1);
+      fireEvent.pointerUp(pill);
+      fireEvent.click(pill);
+      expect(pill).toHaveTextContent('9×9');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('is dimmed when locked and translated', () => {
+    wrap(<SizePill size={13} rules="territory" onChange={() => {}} disabled />, 'fr');
+    const pill = screen.getByTestId('size-pill');
     expect(pill).toBeDisabled();
-    expect(pill.className).toContain('opacity-50');
-    await userEvent.click(pill);
-    expect(onChange).not.toHaveBeenCalled();
+    expect(pill).toHaveAccessibleName('Goban de cette partie : 13×13, décompte par territoire');
   });
 });
 
@@ -273,20 +406,31 @@ describe('ClockPill', () => {
     vi.useRealTimers();
   });
 
-  function Harness({ onLongPress }: { onLongPress?: ReturnType<typeof vi.fn> }) {
+  function Harness({ onLongPress, size = 9 }: { onLongPress?: ReturnType<typeof vi.fn>; size?: Size }) {
     const [v, setV] = useState<TimeControl>(null);
-    return <ClockPill value={v} onChange={setV} onLongPress={onLongPress} />;
+    return <ClockPill size={size} value={v} onChange={setV} onLongPress={onLongPress} />;
   }
 
-  it('cycles off · 1+0 · 3+2 · 5+0 · 10+0 · 15+10 · 30+0 · off', async () => {
+  it('cycles the 9×9 presets off · 2+7 · 3+10 · 5m 5×30s · off (DESIGN 11)', async () => {
     wrap(<Harness />);
     const pill = screen.getByTestId('clock-pill');
     const seen: string[] = [];
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 5; i++) {
       seen.push(pill.textContent ?? '');
       await userEvent.click(pill);
     }
-    expect(seen).toEqual(['Off', '1+0', '3+2', '5+0', '10+0', '15+10', '30+0', 'Off']);
+    expect(seen).toEqual(['Off', '2+7', '3+10', '5m 5×30s', 'Off']);
+  });
+
+  it('cycles the 19×19 presets', async () => {
+    wrap(<Harness size={19} />);
+    const pill = screen.getByTestId('clock-pill');
+    const seen: string[] = [];
+    for (let i = 0; i < 6; i++) {
+      seen.push(`${pill.textContent}|${pill.getAttribute('data-value')}`);
+      await userEvent.click(pill);
+    }
+    expect(seen).toEqual(['Off|off', '5+7|5+7', '10+10|10+10', '20m 5×30s|20m5x30', '30m 5×60s|30m5x60', 'Off|off']);
   });
 
   it('a 500 ms hold calls onLongPress and swallows the click', () => {
@@ -312,7 +456,7 @@ describe('ClockPill', () => {
     act(() => vi.advanceTimersByTime(100));
     fireEvent.pointerUp(pill);
     fireEvent.click(pill);
-    expect(pill).toHaveTextContent('1+0');
+    expect(pill).toHaveTextContent('2+7');
     expect(onLongPress).toHaveBeenCalledTimes(1);
   });
 
@@ -343,15 +487,15 @@ describe('ClockPill', () => {
     act(() => vi.advanceTimersByTime(1000));
     fireEvent.pointerUp(pill);
     fireEvent.click(pill);
-    expect(pill).toHaveTextContent('1+0');
+    expect(pill).toHaveTextContent('2+7');
   });
 
   it('shows a custom value and is dimmed when locked', () => {
-    wrap(<ClockPill value={{ baseMs: 7 * 60000, incMs: 5000 }} onChange={() => {}} disabled />);
+    wrap(<ClockPill size={13} value={{ kind: 'byoyomi', baseMs: 7 * 60000, periods: 3, periodMs: 20_000 }} onChange={() => {}} disabled />);
     const pill = screen.getByTestId('clock-pill');
-    expect(pill).toHaveTextContent('7+5');
+    expect(pill).toHaveTextContent('7m 3×20s');
     expect(pill).toBeDisabled();
-    expect(pill).toHaveAccessibleName('Clock of this game: 7+5');
+    expect(pill).toHaveAccessibleName('Clock of this game: 7m 3×20s');
   });
 });
 
@@ -617,9 +761,33 @@ describe('StartChrome', () => {
     onOpponentChange: () => {},
     color: 'random' as ColorChoice,
     onColorChange: () => {},
+    size: 9 as Size,
+    onSizeChange: () => {},
+    rules: 'area' as Rules,
+    onRulesChange: () => {},
+    handicap: 0,
+    onHandicapChange: () => {},
     clock: null as TimeControl,
     onClockChange: () => {},
   };
+
+  const savedGame = (over: Partial<SavedGame> = {}): SavedGame => ({
+    id: 'K7QW2M',
+    code: 'K7QW2M',
+    mode: 'computer',
+    level: 9,
+    color: 'W',
+    size: 19,
+    rules: 'territory',
+    handicap: 4,
+    tc: '20m5x30',
+    moves: 'ddpp',
+    ms: [1000, 1000],
+    assisted: false,
+    createdAt: 1,
+    lastPlayedAt: 1,
+    ...over,
+  });
 
   it('renders header, footer and stamp on the idle start screen', () => {
     wrap(<StartChrome {...base} visible />);
@@ -630,9 +798,32 @@ describe('StartChrome', () => {
     expect(screen.getByTestId('code-roll')).toHaveTextContent('K7QW2M');
     expect(screen.getByTestId('opponent-name')).toHaveTextContent('Medium');
     expect(screen.getByTestId('color-pill')).toBeEnabled();
+    expect(screen.getByTestId('size-pill')).toHaveTextContent('9×9');
     expect(screen.getByTestId('clock-pill')).toBeEnabled();
     expect(screen.getByTestId('scroll-chevron')).toBeInTheDocument();
     expect(screen.getByTestId('version-stamp')).toBeInTheDocument();
+  });
+
+  it('puts color, size and clock in one row that may wrap on a narrow phone (DESIGN 4.1)', () => {
+    wrap(<StartChrome {...base} visible />);
+    const row = screen.getByTestId('start-pills');
+    expect([...row.children].map((c) => c.getAttribute('data-testid'))).toEqual(['color-pill', 'size-pill', 'clock-pill']);
+    expect(row.className).toContain('flex-wrap');
+    // The footer is fixed: the board's layout box never moves; the preview shrinks instead.
+    expect(screen.getByTestId('start-footer').className).toContain('fixed');
+    expect(screen.getByTestId('start-footer')).toHaveAttribute('data-start-edge', 'bottom');
+  });
+
+  it('shows the faint rank line only when a rank is known, keeping its slot', () => {
+    const { rerender } = wrap(<StartChrome {...base} visible />);
+    expect(screen.getByTestId('opponent-rank')).toBeEmptyDOMElement();
+    rerender(
+      <I18nProvider language="en">
+        <StartChrome {...base} visible opponentRank="≈12k" />
+      </I18nProvider>,
+    );
+    expect(screen.getByTestId('opponent-rank')).toHaveTextContent('≈12k');
+    expect(screen.getByTestId('opponent-rank').className).toContain('text-foreground/40');
   });
 
   it('swaps to the sticky header and FAB when scrolled', () => {
@@ -654,17 +845,39 @@ describe('StartChrome', () => {
     const { unmount } = wrap(<StartChrome {...base} visible settingsLocked />);
     expect(screen.getByRole('button', { name: 'Next opponent' })).toBeDisabled();
     expect(screen.getByTestId('color-pill')).toBeDisabled();
+    expect(screen.getByTestId('size-pill')).toBeDisabled();
     expect(screen.getByTestId('clock-pill')).toBeDisabled();
     unmount();
     wrap(<StartChrome {...base} opponent={{ mode: 'room' }} visible colorLocked />);
     expect(screen.getByTestId('color-pill')).toBeDisabled();
+    expect(screen.getByTestId('size-pill')).toBeEnabled();
     expect(screen.getByTestId('clock-pill')).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Next opponent' })).toBeEnabled();
   });
 
-  it('dims the color pill in pass-and-play', () => {
+  it('a code with a saved game shows its opponent, color, size, rules, handicap and clock, dimmed (DESIGN 4.1)', () => {
+    wrap(<StartChrome {...base} visible saved={savedGame()} />);
+    expect(screen.getByTestId('opponent-kind')).toHaveTextContent('Computer · Level 9');
+    expect(screen.getByTestId('opponent-name')).toHaveTextContent('Tough');
+    expect(screen.getByRole('button', { name: 'Next opponent' })).toBeDisabled();
+    const color = screen.getByTestId('color-pill');
+    expect(color).toHaveAttribute('data-value', 'W');
+    expect(color).toHaveTextContent('White· H4');
+    expect(color).toBeDisabled();
+    const size = screen.getByTestId('size-pill');
+    expect(size).toHaveTextContent('19×19 · JP');
+    expect(size).toBeDisabled();
+    const clock = screen.getByTestId('clock-pill');
+    expect(clock).toHaveTextContent('20m 5×30s');
+    expect(clock).toBeDisabled();
+    for (const pill of [color, size, clock]) expect(pill.className).toContain('opacity-50');
+  });
+
+  it('pass-and-play keeps the handicap hold but fixes the color', () => {
     wrap(<StartChrome {...base} opponent={{ mode: 'local' }} visible />);
-    expect(screen.getByTestId('color-pill')).toBeDisabled();
+    const pill = screen.getByTestId('color-pill');
+    expect(pill).toBeEnabled();
+    expect(pill).toHaveAccessibleName('Two players, no handicap. Hold for the handicap');
   });
 
   it('drops the chevron in landscape and when there is no history', () => {
@@ -678,6 +891,7 @@ describe('StartChrome', () => {
   it('wires every selector to its callback', async () => {
     const onOpponentChange = vi.fn();
     const onColorChange = vi.fn();
+    const onSizeChange = vi.fn();
     const onClockChange = vi.fn();
     const onCodeChange = vi.fn();
     wrap(
@@ -687,6 +901,7 @@ describe('StartChrome', () => {
         rng={constRng(1)}
         onOpponentChange={onOpponentChange}
         onColorChange={onColorChange}
+        onSizeChange={onSizeChange}
         onClockChange={onClockChange}
         onCodeChange={onCodeChange}
         footerExtra={<span>install</span>}
@@ -694,12 +909,93 @@ describe('StartChrome', () => {
     );
     await userEvent.click(screen.getByRole('button', { name: 'Previous opponent' }));
     await userEvent.click(screen.getByTestId('color-pill'));
+    await userEvent.click(screen.getByTestId('size-pill'));
     await userEvent.click(screen.getByTestId('clock-pill'));
     await userEvent.click(screen.getByTestId('code-roll'));
     expect(onOpponentChange).toHaveBeenCalledWith({ mode: 'computer', level: 4 });
-    expect(onColorChange).toHaveBeenCalledWith('w');
-    expect(onClockChange).toHaveBeenCalledWith({ baseMs: 60000, incMs: 0 });
+    expect(onColorChange).toHaveBeenCalledWith('B');
+    expect(onSizeChange).toHaveBeenCalledWith(13);
+    expect(onClockChange).toHaveBeenCalledWith({ kind: 'fischer', baseMs: 120_000, incMs: 7000 });
     expect(onCodeChange).toHaveBeenCalledWith('111111', 'random');
     expect(screen.getByText('install')).toBeInTheDocument();
+  });
+
+  it('the clock pill cycles the presets of the selected size', async () => {
+    const onClockChange = vi.fn();
+    wrap(<StartChrome {...base} size={19} visible onClockChange={onClockChange} />);
+    await userEvent.click(screen.getByTestId('clock-pill'));
+    expect(onClockChange).toHaveBeenCalledWith({ kind: 'fischer', baseMs: 300_000, incMs: 7000 });
+  });
+
+  describe('dials on the 500 ms holds (DESIGN 6.3)', () => {
+    const hold = (el: HTMLElement) => {
+      fireEvent.pointerDown(el, { pointerType: 'touch' });
+      act(() => vi.advanceTimersByTime(CLOCK_HOLD_MS));
+      fireEvent.pointerUp(el);
+      fireEvent.click(el);
+    };
+
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it('holding the color pill opens the handicap dial of the selected size', () => {
+      const onHandicapChange = vi.fn();
+      const onColorChange = vi.fn();
+      wrap(<StartChrome {...base} size={13} visible onHandicapChange={onHandicapChange} onColorChange={onColorChange} />);
+      hold(screen.getByTestId('color-pill'));
+      expect(onColorChange).not.toHaveBeenCalled();
+      const dial = screen.getByTestId('handicap-dial');
+      expect(dial).toHaveAccessibleName('Handicap on 13×13');
+      fireEvent.click(dial.querySelector('[data-value="3"]')!, { detail: 0 });
+      expect(onHandicapChange).toHaveBeenCalledWith(3);
+      expect(screen.queryByTestId('handicap-dial')).toBeNull();
+    });
+
+    it('holding the size pill opens the rules dial', () => {
+      const onRulesChange = vi.fn();
+      const onSizeChange = vi.fn();
+      wrap(<StartChrome {...base} visible onRulesChange={onRulesChange} onSizeChange={onSizeChange} />);
+      hold(screen.getByTestId('size-pill'));
+      expect(onSizeChange).not.toHaveBeenCalled();
+      const dial = screen.getByTestId('rules-dial');
+      fireEvent.click(dial.querySelector('[data-value="territory"]')!, { detail: 0 });
+      expect(onRulesChange).toHaveBeenCalledWith('territory');
+      expect(screen.queryByTestId('rules-dial')).toBeNull();
+    });
+
+    it('holding the clock pill opens the custom clock and hands back a time control', () => {
+      const onClockChange = vi.fn();
+      wrap(<StartChrome {...base} visible onClockChange={onClockChange} />);
+      hold(screen.getByTestId('clock-pill'));
+      const dial = () => screen.getByTestId('clock-dial');
+      for (const v of ['byoyomi', '10', '30', '3']) fireEvent.click(dial().querySelector(`[data-value="${v}"]`)!, { detail: 0 });
+      expect(onClockChange).toHaveBeenCalledWith({ kind: 'byoyomi', baseMs: 600_000, periods: 3, periodMs: 30_000 });
+      expect(screen.queryByTestId('clock-dial')).toBeNull();
+    });
+
+    it('Escape closes a dial without a change; leaving the start screen closes it too', () => {
+      const onHandicapChange = vi.fn();
+      const { rerender } = wrap(<StartChrome {...base} visible onHandicapChange={onHandicapChange} />);
+      hold(screen.getByTestId('color-pill'));
+      fireEvent.keyDown(screen.getByTestId('handicap-dial'), { key: 'Escape' });
+      expect(screen.queryByTestId('handicap-dial')).toBeNull();
+      hold(screen.getByTestId('color-pill'));
+      expect(screen.getByTestId('handicap-dial')).toBeInTheDocument();
+      rerender(
+        <I18nProvider language="en">
+          <StartChrome {...base} visible={false} onHandicapChange={onHandicapChange} />
+        </I18nProvider>,
+      );
+      expect(screen.queryByTestId('handicap-dial')).toBeNull();
+      expect(onHandicapChange).not.toHaveBeenCalled();
+    });
+
+    it('a locked screen opens no dial', () => {
+      wrap(<StartChrome {...base} visible saved={savedGame()} />);
+      hold(screen.getByTestId('color-pill'));
+      hold(screen.getByTestId('size-pill'));
+      hold(screen.getByTestId('clock-pill'));
+      expect(document.querySelector('[data-zigo-dial]')).toBeNull();
+    });
   });
 });

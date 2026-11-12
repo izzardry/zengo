@@ -1,8 +1,8 @@
 /**
- * Where the custom clock dial (`ClockDial.tsx`) opens: its centre, clamped so the dial, its caption
+ * Where a start-screen dial (`RadialDial.tsx`) opens: its centre, clamped so the dial, its caption
  * and a committed item popped out at 6 o'clock stay inside the viewport (DESIGN 4.1, Ztyle 08).
  */
-import { DIAL_GEOMETRY } from '@/lib/clock';
+import { DIAL_GEOMETRY } from './dialGeometry';
 
 /** Gap between the dial's items and the caption below it. */
 export const CAPTION_GAP = 36;

@@ -4,7 +4,11 @@
  *
  *   ‹   COMPUTER · LEVEL 5   ›
  *            Medium
+ *             ≈12k
  *
+ * The third line is a faint slot for the level's approximate rank (DESIGN 4.1, 10.2). It shows
+ * only for levels whose rank has been calibrated (`rank`), but always keeps its height in portrait
+ * so the pills below never jump while stepping.
  * Ends do not wrap and their chevron fades to 30 % (Ztyle stepper). ArrowLeft / ArrowRight step
  * while focus is inside the selector. `disabled` shows a resumed game's opponent, dimmed.
  */
@@ -23,10 +27,12 @@ export interface OpponentSelectorProps {
   disabled?: boolean;
   /** Tighter spacing for mobile landscape. */
   landscape?: boolean;
+  /** Calibrated rank of the shown level, e.g. `≈12k`; empty or absent shows nothing. */
+  rank?: string | null;
   className?: string;
 }
 
-export function OpponentSelector({ value, onChange, disabled = false, landscape = false, className }: OpponentSelectorProps) {
+export function OpponentSelector({ value, onChange, disabled = false, landscape = false, rank, className }: OpponentSelectorProps) {
   const { t } = useI18n();
   const { kind, name } = useOpponentText(value);
   const canPrev = !disabled && canStepOpponent(value, -1);
@@ -76,6 +82,11 @@ export function OpponentSelector({ value, onChange, disabled = false, landscape 
         <div className={cn('font-mono font-medium', landscape ? 'text-base' : 'text-lg')} data-testid="opponent-name">
           {name}
         </div>
+        {(!landscape || rank) && (
+          <div className="h-4 font-mono text-xs leading-4 text-foreground/40" data-testid="opponent-rank">
+            {value.mode === 'computer' && rank ? rank : null}
+          </div>
+        )}
       </div>
 
       <button

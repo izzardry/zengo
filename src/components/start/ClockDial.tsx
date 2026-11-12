@@ -1,41 +1,39 @@
 /**
- * Custom time control dial (DESIGN 4.1, 6.4): opens on the 500 ms hold of the clock pill and picks
- * minutes, then increment, with the Ztyle radial dial (chapter 08) in the look of the promotion
- * dial (`components/board/PromotionDial.tsx`): 40 px items on a 60 px radius from 12 o'clock
- * clockwise, centre `×`, aim zone 40–55 px (accent, scale 1.6), commit zone ≥ 55 px (pops out to
- * 105 px and inverts), rubber band from the start point, portaled to `body`, clamped inside the
- * viewport. The current value of each step carries the "noted" ring.
+ * Custom time control dial (DESIGN 4.1, 6.3, 11): opens on the 500 ms hold of the clock pill. The
+ * radial dial (`RadialDial`) walks through the steps:
  *
- * Gestures:
- * - Still holding after the pill's hold: drag and release on an item (aim or commit zone) picks it.
- *   Releasing where the hold started keeps the dial open for taps.
- * - Tap an item to pick it; press the centre and drag to aim again. Tap `×`, tap outside or press
- *   Escape to cancel.
- * - After the minutes the same dial shows the increments; the second pick calls `onPick`.
+ *   system (Fischer · byo-yomi) → minutes → increment seconds          → `5+3`
+ *                                         → period seconds → periods   → `20m5x30`
  *
- * Keyboard: focus moves into the dial; arrows aim (clockwise / counter-clockwise), Home / End,
- * Enter or Space confirm, Backspace returns to the minutes, Escape cancels. Focus goes back to
- * where it was on close.
+ * Backspace goes one step back; the step that is left is aimed again. The current clock is marked
+ * on every step it matches.
  */
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
-import { createPortal } from 'react-dom';
-import { CAPTION_GAP, captionSide, clampCenter } from './dialPlacement';
-import {
-  DIAL_GEOMETRY,
-  DIAL_INCREMENTS,
-  DIAL_MINUTES,
-  customTc,
-  dialAim,
-  dialItemOffset,
-  nearestIndex,
-  type DialZone,
-} from '@/lib/clock';
+import { useState } from 'react';
 import { useI18n } from '@/lib/i18n';
-import type { TcString, TimeControl } from '@/lib/chessTypes';
-import { cn } from '@/lib/utils';
+import type { TcString, TimeControl } from '@/lib/types';
+import { nearestIndex } from './dialGeometry';
+import { byoyomiTc, fischerTc } from './options';
+import { RadialDial, type DialItem, type DialStep } from './RadialDial';
+
+/**
+ * Minutes on the custom dial, clockwise from 12 o'clock. Nine items: the Ztyle radial dial holds
+ * at most nine values (Ztyle 08). The same list serves as Fischer base and byo-yomi main time.
+ */
+export const DIAL_MINUTES: readonly number[] = Object.freeze([1, 2, 3, 5, 10, 15, 20, 30, 60]);
+/** Fischer increment seconds. */
+export const DIAL_INCREMENTS: readonly number[] = Object.freeze([0, 1, 2, 3, 5, 10, 15, 20, 30]);
+/** Byo-yomi period seconds. */
+export const DIAL_PERIOD_SECONDS: readonly number[] = Object.freeze([5, 10, 15, 20, 30, 45, 60, 90, 120]);
+/** Byo-yomi periods (DESIGN 11). */
+export const DIAL_PERIODS: readonly number[] = Object.freeze([1, 3, 5, 10]);
+/** The systems, item 0 at 9 o'clock, item 1 at 3 o'clock. */
+export const DIAL_SYSTEMS = Object.freeze(['fischer', 'byoyomi'] as const);
+
+type System = (typeof DIAL_SYSTEMS)[number];
+type StepId = 'system' | 'minutes' | 'increment' | 'period' | 'periods';
 
 export interface ClockDialProps {
-  /** Where the hold happened, in viewport coordinates (`ClockPillAnchor.x / .y`). */
+  /** Where the hold happened, in viewport coordinates (`PillAnchor.x / .y`). */
   readonly x: number;
   readonly y: number;
   /**
@@ -43,307 +41,153 @@ export interface ClockDialProps {
    * mouse). False when opened from the keyboard.
    */
   readonly dragging?: boolean;
-  /** The current clock; its minutes and increment are marked and aimed first from the keyboard. */
+  /** The current clock; its values are marked and aimed first from the keyboard. */
   readonly value?: TimeControl;
-  /** The custom time control was chosen, e.g. `20+5`. */
+  /** The custom time control was chosen, e.g. `20+5` or `20m5x30`. */
   readonly onPick: (tc: TcString) => void;
   /** Closed without a choice. */
   readonly onCancel: () => void;
 }
 
-type Step = 'minutes' | 'increment';
-
-interface Drag {
-  /** Start point of the gesture (offsets are measured from here). */
-  readonly ox: number;
-  readonly oy: number;
-  /** Started by the pill's hold (a release without moving keeps the dial open). */
-  readonly fromHold: boolean;
-  /** The pointer has left the centre at some point. */
-  moved: boolean;
+interface Picks {
+  system?: System;
+  minutes?: number;
+  period?: number;
 }
+
+const exact = (list: readonly number[], v: number | null) => (v === null ? null : list.findIndex((x) => Math.abs(x - v) < 1e-9));
+const orNull = (i: number | null) => (i === null || i < 0 ? null : i);
+const near = (list: readonly number[], v: number | null) => (v === null ? null : nearestIndex(list, v));
 
 export function ClockDial({ x, y, dragging = false, value = null, onPick, onCancel }: ClockDialProps) {
   const { t } = useI18n();
-  const [step, setStep] = useState<Step>('minutes');
-  const [minutes, setMinutes] = useState<number | null>(null);
-  const [aim, setAim] = useState<{ zone: DialZone; index: number | null }>({ zone: 'center', index: null });
-  const [band, setBand] = useState<{ dx: number; dy: number }>({ dx: 0, dy: 0 });
-  const [center] = useState(() => clampCenter(x, y));
-  const [caption] = useState(() => captionSide({ y }, center));
-  const drag = useRef<Drag | null>(dragging ? { ox: x, oy: y, fromHold: true, moved: false } : null);
-  const menu = useRef<HTMLDivElement>(null);
+  const [stepId, setStepId] = useState<StepId>('system');
+  const [picks, setPicks] = useState<Picks>({});
+  const [aimBack, setAimBack] = useState<number | null>(null);
 
-  const items = step === 'minutes' ? DIAL_MINUTES : DIAL_INCREMENTS;
-  const n = items.length;
-  const currentMinutes = value ? value.baseMs / 60000 : null;
-  const currentInc = value ? value.incMs / 1000 : null;
-  const noted = step === 'minutes' ? currentMinutes : currentInc;
+  const curMinutes = value ? value.baseMs / 60_000 : null;
+  const curInc = value?.kind === 'fischer' ? value.incMs / 1000 : null;
+  const curPeriod = value?.kind === 'byoyomi' ? value.periodMs / 1000 : null;
+  const curPeriods = value?.kind === 'byoyomi' ? value.periods : null;
 
-  // Latest values for the window listeners.
-  const live = useRef({ step, minutes, onPick, onCancel });
-  live.current = { step, minutes, onPick, onCancel };
+  const numbered = (list: readonly number[], text: (v: number) => string, label: (v: number) => string): DialItem[] =>
+    list.map((v) => ({ value: String(v), text: text(v), label: label(v) }));
 
-  const choose = useCallback((index: number) => {
-    const { step: s, minutes: m, onPick: pick } = live.current;
-    drag.current = null;
-    setBand({ dx: 0, dy: 0 });
-    if (s === 'minutes') {
-      setMinutes(DIAL_MINUTES[index]);
-      setStep('increment');
-      setAim({ zone: 'center', index: null });
-      return;
-    }
-    if (m !== null) pick(customTc(m, DIAL_INCREMENTS[index]));
-  }, []);
-
-  const cancel = useCallback(() => {
-    drag.current = null;
-    live.current.onCancel();
-  }, []);
-
-  /* ---- focus in on open, back out on close ---- */
-  useLayoutEffect(() => {
-    const before = typeof document !== 'undefined' ? (document.activeElement as HTMLElement | null) : null;
-    menu.current?.focus({ preventScroll: true });
-    return () => {
-      if (before && typeof before.focus === 'function' && before.isConnected) before.focus({ preventScroll: true });
-    };
-  }, []);
-
-  /* ---- drag-to-aim on the window (the pill's pointer may be captured by the pill) ---- */
-  useEffect(() => {
-    const move = (e: globalThis.PointerEvent | MouseEvent) => {
-      const d = drag.current;
-      if (!d) return;
-      const dx = e.clientX - d.ox;
-      const dy = e.clientY - d.oy;
-      const a = dialAim(dx, dy, live.current.step === 'minutes' ? DIAL_MINUTES.length : DIAL_INCREMENTS.length);
-      if (a.zone !== 'center') d.moved = true;
-      setAim(a);
-      setBand({ dx, dy });
-    };
-    const up = (e: globalThis.PointerEvent | MouseEvent) => {
-      const d = drag.current;
-      if (!d) return;
-      const a = dialAim(e.clientX - d.ox, e.clientY - d.oy, live.current.step === 'minutes' ? DIAL_MINUTES.length : DIAL_INCREMENTS.length);
-      if (a.index !== null && (a.zone === 'aim' || a.zone === 'commit')) {
-        choose(a.index);
-        return;
+  const step = ((): DialStep => {
+    const m = picks.minutes ?? '';
+    switch (stepId) {
+      case 'system': {
+        const noted = value ? DIAL_SYSTEMS.indexOf(value.kind) : null;
+        return {
+          id: 'system',
+          title: t('start.dial.systemTitle'),
+          caption: t('start.dial.systemCaption'),
+          rotation: -0.25,
+          noted,
+          items: [
+            { value: 'fischer', text: 'm+s', label: t('start.dial.fischer'), caption: t('start.dial.fischerCaption') },
+            { value: 'byoyomi', text: 'byo', label: t('start.dial.byoyomi'), caption: t('start.dial.byoyomiCaption') },
+          ],
+        };
       }
-      drag.current = null;
-      setBand({ dx: 0, dy: 0 });
-      setAim({ zone: 'center', index: null });
-      // Back on the centre after leaving it, or a tap on `×`: cancel. A plain hold release keeps it open.
-      if (a.zone === 'center' && (d.moved || !d.fromHold)) cancel();
-    };
-    const stop = () => {
-      drag.current = null;
-      setBand({ dx: 0, dy: 0 });
-    };
-    // While aiming on touch, the page must not scroll (a scroll would cancel the pointer).
-    const noScroll = (e: TouchEvent) => {
-      if (drag.current && e.cancelable) e.preventDefault();
-    };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
-    window.addEventListener('pointercancel', stop);
-    window.addEventListener('touchmove', noScroll, { passive: false });
-    return () => {
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
-      window.removeEventListener('pointercancel', stop);
-      window.removeEventListener('touchmove', noScroll);
-    };
-  }, [choose, cancel]);
-
-  /* ---- keyboard ---- */
-  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    const start = noted !== null ? nearestIndex(items, noted) : 0;
-    const at = aim.index;
-    let next: number | null = null;
-    switch (e.key) {
-      case 'ArrowRight':
-      case 'ArrowDown':
-        next = at === null ? start : (at + 1) % n;
-        break;
-      case 'ArrowLeft':
-      case 'ArrowUp':
-        next = at === null ? start : (at - 1 + n) % n;
-        break;
-      case 'Home':
-        next = 0;
-        break;
-      case 'End':
-        next = n - 1;
-        break;
-      case 'Enter':
-      case ' ':
-        e.preventDefault();
-        e.stopPropagation();
-        choose(at ?? start);
-        return;
-      case 'Backspace':
-        e.preventDefault();
-        if (step === 'increment') {
-          setStep('minutes');
-          setAim({ zone: 'aim', index: minutes !== null ? DIAL_MINUTES.indexOf(minutes) : null });
-        }
-        return;
-      case 'Escape':
-        e.preventDefault();
-        e.stopPropagation();
-        cancel();
-        return;
-      case 'Tab':
-        // Focus stays in the dial while it is open.
-        e.preventDefault();
-        return;
-      default:
-        return;
+      case 'minutes':
+        return {
+          id: 'minutes',
+          title: t('start.dial.minutesTitle'),
+          caption: t('start.dial.minutesCaption'),
+          noted: orNull(exact(DIAL_MINUTES, curMinutes)),
+          start: near(DIAL_MINUTES, curMinutes),
+          items: numbered(DIAL_MINUTES, String, (v) => (v === 1 ? t('start.dial.minuteOne') : t('start.dial.minutes', { n: v }))),
+        };
+      case 'increment':
+        return {
+          id: 'increment',
+          title: t('start.dial.incrementTitle', { minutes: m }),
+          caption: `${m}+ · ${t('start.dial.incrementCaption')}`,
+          noted: orNull(exact(DIAL_INCREMENTS, curInc)),
+          start: near(DIAL_INCREMENTS, curInc),
+          items: numbered(
+            DIAL_INCREMENTS,
+            (v) => `+${v}`,
+            (v) =>
+              v === 0 ? t('start.dial.incrementNone') : v === 1 ? t('start.dial.incrementOne') : t('start.dial.increment', { n: v }),
+          ),
+        };
+      case 'period':
+        return {
+          id: 'period',
+          title: t('start.dial.periodTitle', { minutes: m }),
+          caption: `${m}m · ${t('start.dial.periodCaption')}`,
+          noted: orNull(exact(DIAL_PERIOD_SECONDS, curPeriod)),
+          start: near(DIAL_PERIOD_SECONDS, curPeriod),
+          items: numbered(DIAL_PERIOD_SECONDS, (v) => `${v}s`, (v) => t('start.dial.period', { n: v })),
+        };
+      case 'periods':
+        return {
+          id: 'periods',
+          title: t('start.dial.periodsTitle', { seconds: picks.period ?? '' }),
+          caption: `${m}m ${picks.period ?? ''}s · ${t('start.dial.periodsCaption')}`,
+          noted: orNull(exact(DIAL_PERIODS, curPeriods)),
+          start: near(DIAL_PERIODS, curPeriods),
+          items: numbered(
+            DIAL_PERIODS,
+            (v) => `×${v}`,
+            (v) => (v === 1 ? t('start.dial.periodOne') : t('start.dial.periods', { n: v })),
+          ),
+        };
     }
-    e.preventDefault();
-    setAim({ zone: 'aim', index: next });
+  })();
+
+  const go = (next: StepId, aim: number | null = null) => {
+    setAimBack(aim);
+    setStepId(next);
   };
 
-  /* ---- pointer on the dial ---- */
-  const onCenterDown = (e: PointerEvent<HTMLButtonElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    drag.current = { ox: e.clientX, oy: e.clientY, fromHold: false, moved: false };
-    setAim({ zone: 'center', index: null });
+  const onChoose = (i: number) => {
+    switch (stepId) {
+      case 'system':
+        setPicks({ system: DIAL_SYSTEMS[i] });
+        return go('minutes');
+      case 'minutes':
+        setPicks((p) => ({ ...p, minutes: DIAL_MINUTES[i] }));
+        return go(picks.system === 'byoyomi' ? 'period' : 'increment');
+      case 'increment':
+        return onPick(fischerTc(picks.minutes ?? DIAL_MINUTES[0], DIAL_INCREMENTS[i]));
+      case 'period':
+        setPicks((p) => ({ ...p, period: DIAL_PERIOD_SECONDS[i] }));
+        return go('periods');
+      case 'periods':
+        return onPick(byoyomiTc(picks.minutes ?? DIAL_MINUTES[0], DIAL_PERIODS[i], picks.period ?? DIAL_PERIOD_SECONDS[0]));
+    }
   };
 
-  const onItemDown = (index: number) => (e: PointerEvent<HTMLButtonElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    choose(index);
+  const onBack = () => {
+    const idx = (list: readonly number[], v: number | undefined) => (v === undefined ? null : orNull(list.indexOf(v)));
+    switch (stepId) {
+      case 'minutes':
+        return go('system', picks.system ? DIAL_SYSTEMS.indexOf(picks.system) : null);
+      case 'increment':
+      case 'period':
+        return go('minutes', idx(DIAL_MINUTES, picks.minutes));
+      case 'periods':
+        return go('period', idx(DIAL_PERIOD_SECONDS, picks.period));
+      default:
+        return undefined;
+    }
   };
 
-  if (typeof document === 'undefined') return null;
-
-  const label = (v: number): string =>
-    step === 'minutes'
-      ? v === 1
-        ? t('clock.minuteOne')
-        : t('clock.minutes', { n: v })
-      : v === 0
-        ? t('clock.incrementNone')
-        : v === 1
-          ? t('clock.incrementOne')
-          : t('clock.increment', { n: v });
-  const title = step === 'minutes' ? t('clock.dialMinutesTitle') : t('clock.dialIncrementTitle', { minutes: minutes ?? '' });
-  const { radius, popRadius } = DIAL_GEOMETRY;
-  // The band is drawn from the gesture start; in the dial's frame that is the start minus the centre.
-  const d = drag.current;
-  const bx = d ? d.ox - center.x : 0;
-  const by = d ? d.oy - center.y : 0;
-
-  return createPortal(
-    <>
-      <div
-        aria-hidden
-        data-testid="clock-dial-backdrop"
-        className="fixed inset-0 z-overlay touch-none"
-        onPointerDown={(e) => {
-          e.preventDefault();
-          if (!drag.current) cancel();
-        }}
-      />
-      <div
-        ref={menu}
-        role="menu"
-        aria-label={title}
-        aria-description={t('clock.dialKeys')}
-        aria-activedescendant={aim.index !== null ? `zigo-clock-dial-${step}-${aim.index}` : undefined}
-        tabIndex={-1}
-        onKeyDown={onKeyDown}
-        data-testid="clock-dial"
-        data-step={step}
-        data-zigo-dial=""
-        className="fixed z-overlay touch-none select-none outline-none animate-scale-in"
-        style={{ left: center.x, top: center.y, width: 0, height: 0 }}
-      >
-        {(band.dx !== 0 || band.dy !== 0) && (
-          <svg
-            className="pointer-events-none absolute text-foreground"
-            style={{ left: bx, top: by, overflow: 'visible' }}
-            width="1"
-            height="1"
-            aria-hidden
-          >
-            <line x1="0" y1="0" x2={band.dx} y2={band.dy} stroke="currentColor" strokeWidth="2" strokeOpacity="0.3" strokeLinecap="round" />
-          </svg>
-        )}
-        <span
-          aria-hidden
-          data-part="caption"
-          data-side={caption}
-          className="pointer-events-none absolute whitespace-nowrap rounded-full border border-foreground/10 bg-card/90 px-3 py-1 font-mono text-[10px] font-semibold uppercase tracking-widest text-muted-foreground shadow-sm"
-          style={
-            caption === 'below'
-              ? { left: 0, top: radius + CAPTION_GAP, transform: 'translateX(-50%)' }
-              : { left: 0, top: -(radius + CAPTION_GAP), transform: 'translate(-50%, -100%)' }
-          }
-        >
-          {step === 'minutes' ? t('clock.dialMinutesCaption') : `${minutes}+ · ${t('clock.dialIncrementCaption')}`}
-        </span>
-        <button
-          type="button"
-          role="menuitem"
-          tabIndex={-1}
-          aria-label={t('clock.dialCancel')}
-          data-part="cancel"
-          onPointerDown={onCenterDown}
-          onClick={(e) => {
-            // Keyboard or assistive-technology activation only (detail 0); pointers use the drag path.
-            if (e.detail === 0) cancel();
-          }}
-          className={cn('dial-item cursor-pointer font-mono', aim.zone === 'center' && drag.current && 'dial-item--commit')}
-          style={{ left: -20, top: -20 }}
-        >
-          <span aria-hidden>×</span>
-        </button>
-        {items.map((v, i) => {
-          const hovered = aim.index === i && aim.zone !== 'center' && aim.zone !== 'none';
-          const commit = hovered && aim.zone === 'commit';
-          const pos = dialItemOffset(i, n, commit ? popRadius : radius);
-          const isNoted = noted !== null && Math.abs(noted - v) < 1e-9;
-          return (
-            <button
-              // A new key per step: the pointerdown that picked the minutes must not click an increment.
-              key={`${step}-${v}`}
-              id={`zigo-clock-dial-${step}-${i}`}
-              type="button"
-              role="menuitemradio"
-              aria-checked={isNoted}
-              tabIndex={-1}
-              aria-label={label(v)}
-              data-value={v}
-              data-aimed={hovered || undefined}
-              onPointerDown={onItemDown(i)}
-              onClick={(e) => {
-                if (e.detail === 0) choose(i);
-              }}
-              className={cn(
-                'dial-item cursor-pointer font-mono tabular-nums',
-                isNoted && !hovered && 'dial-item--noted',
-                hovered && !commit && 'dial-item--aim',
-                commit && 'dial-item--commit',
-              )}
-              style={{
-                left: pos.x - 20,
-                top: pos.y - 20,
-                transform: hovered ? 'scale(1.6)' : 'scale(1)',
-                zIndex: hovered ? 1 : undefined,
-              }}
-            >
-              {step === 'minutes' ? v : `+${v}`}
-            </button>
-          );
-        })}
-      </div>
-    </>,
-    document.body,
+  return (
+    <RadialDial
+      x={x}
+      y={y}
+      dragging={dragging}
+      step={{ ...step, aim: aimBack }}
+      onChoose={onChoose}
+      onBack={onBack}
+      onCancel={onCancel}
+      keysHint={t('start.dial.keys')}
+      cancelLabel={t('start.dial.cancel')}
+      testId="clock-dial"
+    />
   );
 }

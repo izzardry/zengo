@@ -1,95 +1,42 @@
 /**
- * Clock pill (DESIGN 4.1, 11): tap cycles off · 1+0 · 3+2 · 5+0 · 10+0 · 15+10 · 30+0.
+ * Clock pill (DESIGN 4.1, 11): tap cycles the presets of the current board size, e.g. on 9×9
+ * off · 2+7 · 3+10 · 5m 5×30s. Remembered per size by the caller.
  *
- * A 500 ms hold calls `onLongPress` (milestone 2 opens its custom dial there; this package does
- * not implement the dial). The hold suppresses the click that follows release (Ztyle 08 ladder).
- * Keyboard path for the hold: Shift+Enter, Shift+F10 or the ContextMenu key.
+ * A 500 ms hold calls `onLongPress` (the custom clock dial). The hold suppresses the click that
+ * follows release (Ztyle 08 ladder). Keyboard path for the hold: Shift+Enter, Shift+F10 or the
+ * ContextMenu key.
  */
-import { useCallback, useEffect, useRef, type KeyboardEvent, type PointerEvent } from 'react';
 import { Timer } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
-import type { TimeControl } from '@/lib/chessTypes';
+import type { Size, TimeControl } from '@/lib/types';
 import { cn } from '@/lib/utils';
-import { formatTc } from '@/lib/zhess';
+import { formatTc } from '@/lib/zigo';
 import { nextClock } from './options';
 import { useClockText } from './text';
+import { HOLD_MS, useHold, type PillAnchor } from './useHold';
 
 /** Hold time that opens the custom dial (Ztyle long-press ladder, 500 ms tier). */
-export const CLOCK_HOLD_MS = 500;
+export const CLOCK_HOLD_MS = HOLD_MS;
 
-/** Where the hold happened, so the dial can open at the finger. */
-export interface ClockPillAnchor {
-  /** Viewport coordinates of the pointer (or of the pill's center for the keyboard path). */
-  x: number;
-  y: number;
-  /** The pill's bounding rectangle. */
-  rect: DOMRect;
-  /**
-   * How the hold happened: `pointer` (the finger or mouse is still down, so the dial aims by
-   * dragging) or `keyboard` (Shift+Enter, Shift+F10, ContextMenu).
-   */
-  source: 'pointer' | 'keyboard';
-}
+/** Where the hold happened (the same anchor every start pill reports). */
+export type ClockPillAnchor = PillAnchor;
 
 export interface ClockPillProps {
+  /** Board size: picks the presets the tap cycles through. */
+  size: Size;
   value: TimeControl;
   onChange: (value: TimeControl) => void;
   /** Called after a 500 ms hold. When omitted, the pill has no hold behavior. */
-  onLongPress?: (anchor: ClockPillAnchor) => void;
+  onLongPress?: (anchor: PillAnchor) => void;
   /** Dimmed and not changeable (RESUME / REVIEW). */
   disabled?: boolean;
   className?: string;
 }
 
-export function ClockPill({ value, onChange, onLongPress, disabled = false, className }: ClockPillProps) {
+export function ClockPill({ size, value, onChange, onLongPress, disabled = false, className }: ClockPillProps) {
   const { t } = useI18n();
   const text = useClockText(value);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const held = useRef(false);
-  const button = useRef<HTMLButtonElement>(null);
-
-  const clear = useCallback(() => {
-    if (timer.current) {
-      clearTimeout(timer.current);
-      timer.current = null;
-    }
-  }, []);
-
-  useEffect(() => clear, [clear]);
-
-  const anchorAt = (source: ClockPillAnchor['source'], x?: number, y?: number): ClockPillAnchor => {
-    const rect = button.current?.getBoundingClientRect() ?? new DOMRect();
-    return { x: x ?? rect.left + rect.width / 2, y: y ?? rect.top + rect.height / 2, rect, source };
-  };
-
-  const onPointerDown = (e: PointerEvent<HTMLButtonElement>) => {
-    held.current = false;
-    if (!onLongPress || disabled || (e.pointerType === 'mouse' && e.button !== 0)) return;
-    clear();
-    const { clientX, clientY } = e;
-    timer.current = setTimeout(() => {
-      timer.current = null;
-      held.current = true;
-      onLongPress(anchorAt('pointer', clientX, clientY));
-    }, CLOCK_HOLD_MS);
-  };
-
-  const onClick = () => {
-    if (held.current) {
-      // The click that ends a hold is not a tap.
-      held.current = false;
-      return;
-    }
-    if (!disabled) onChange(nextClock(value));
-  };
-
-  const onKeyDown = (e: KeyboardEvent<HTMLButtonElement>) => {
-    if (!onLongPress || disabled) return;
-    if (e.key === 'ContextMenu' || (e.shiftKey && (e.key === 'Enter' || e.key === 'F10'))) {
-      e.preventDefault();
-      onLongPress(anchorAt('keyboard'));
-    }
-  };
+  const hold = useHold(onLongPress, () => onChange(nextClock(size, value)), disabled);
 
   const label = disabled
     ? t('start.clockLockedAria', { value: text })
@@ -99,15 +46,8 @@ export function ClockPill({ value, onChange, onLongPress, disabled = false, clas
 
   return (
     <button
-      ref={button}
       type="button"
-      onPointerDown={onPointerDown}
-      onPointerUp={clear}
-      onPointerLeave={clear}
-      onPointerCancel={clear}
-      onContextMenu={(e) => onLongPress && e.preventDefault()}
-      onClick={onClick}
-      onKeyDown={onKeyDown}
+      {...hold}
       disabled={disabled}
       aria-label={label}
       data-testid="clock-pill"
@@ -119,7 +59,7 @@ export function ClockPill({ value, onChange, onLongPress, disabled = false, clas
       )}
     >
       <Timer aria-hidden="true" />
-      <span className="tabular-nums">{text}</span>
+      <span className="whitespace-nowrap tabular-nums">{text}</span>
     </button>
   );
 }

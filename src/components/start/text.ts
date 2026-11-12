@@ -3,8 +3,8 @@
  * integrator (e.g. for toasts or the info pill). Kept apart from the components for fast refresh.
  */
 import { levelKey, useI18n } from '@/lib/i18n';
-import type { ColorChoice, Opponent, TimeControl } from '@/lib/chessTypes';
-import { formatTc } from '@/lib/zhess';
+import type { ColorChoice, Opponent, Rules, TimeControl } from '@/lib/types';
+import { clockLabel } from './options';
 
 /** Overline (`kind`) and value (`name`) of an opponent, e.g. `Computer · Level 5` / `Medium`. */
 export function useOpponentText(value: Opponent): { kind: string; name: string } {
@@ -14,16 +14,28 @@ export function useOpponentText(value: Opponent): { kind: string; name: string }
   return { kind: t('start.kind.computer', { level: value.level }), name: t(levelKey(value.level)) };
 }
 
-/** `Random`, `White` or `Black`, translated. */
+/** `Random`, `Black` or `White`, translated. */
 export function useColorName(value: ColorChoice): string {
   const { t } = useI18n();
-  return value === 'random' ? t('start.colorRandom') : value === 'w' ? t('white') : t('black');
+  return value === 'random' ? t('start.colorRandom') : value === 'W' ? t('white') : t('black');
 }
 
-/** `5+0`, or the translated `Off`. */
+/** `2+7`, `5m 5×30s`, or the translated `Off`. */
 export function useClockText(value: TimeControl): string {
   const { t } = useI18n();
-  return value ? (formatTc(value) ?? '') : t('start.clockOff');
+  return clockLabel(value) ?? t('start.clockOff');
+}
+
+/** The handicap spoken in a sentence: `no handicap`, `3 handicap stones`. */
+export function useHandicapText(n: number): string {
+  const { t } = useI18n();
+  return n >= 2 ? t('start.handicapStones', { n }) : t('start.handicapNone');
+}
+
+/** `area scoring` / `territory scoring`, translated. */
+export function useRulesName(rules: Rules): string {
+  const { t } = useI18n();
+  return rules === 'territory' ? t('start.rules.territory') : t('start.rules.area');
 }
 
 /** Copies text to the clipboard; false when the Clipboard API is missing or refuses. */

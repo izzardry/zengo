@@ -1,9 +1,11 @@
 /**
- * Bottom block of the start screen (DESIGN 4.1): opponent stepper, then the color and clock
+ * Bottom block of the start screen (DESIGN 4.1): opponent stepper, then the color, size and clock
  * pills, the computer's offline state, an optional extra (the install pill), and the bounce chevron.
  *
  * Portrait stacks them; mobile landscape puts them in one row and drops the chevron, as Zudoku
- * does, so the short viewport keeps the board clear.
+ * does, so the short viewport keeps the board clear. The pills row may wrap to two lines on a
+ * 320 px phone; the footer is fixed, so the board's layout box never moves, and `BoardPreview`
+ * shrinks the blurred preview to the space that is left (`previewFit`).
  */
 import { useRef, type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
@@ -14,7 +16,7 @@ export interface StartFooterProps {
   landscape?: boolean;
   /** The `OpponentSelector`. */
   selector: ReactNode;
-  /** The `ColorPill` and `ClockPill`. */
+  /** The `ColorPill`, `SizePill` and `ClockPill`. */
   pills?: ReactNode;
   /** Offline state of the computer (`EngineStatus`), under the pills. */
   status?: ReactNode;
@@ -45,7 +47,7 @@ export function StartFooter({ visible, landscape = false, selector, pills, statu
     >
       {selector}
       {pills && (
-        <div className={cn('flex items-center justify-center gap-2', !landscape && 'mt-3')} data-testid="start-pills">
+        <div className={cn('flex max-w-full flex-wrap items-center justify-center gap-2', !landscape && 'mt-3')} data-testid="start-pills">
           {pills}
         </div>
       )}

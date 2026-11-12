@@ -4,22 +4,35 @@
  * `StartPill` as its overlay) and this component next to it.
  *
  *   StartHeader   wordmark, tagline, CodeSelector          (idle start screen)
- *   StartFooter   OpponentSelector, ColorPill, ClockPill,   (idle start screen)
+ *   StartFooter   OpponentSelector (with the rank slot),   (idle start screen)
+ *                 ColorPill, SizePill, ClockPill,
  *                 engineStatus, footerExtra, ScrollChevron
  *   StickyHeader  small wordmark bar                        (scrolled past 50 px)
  *   BackToTop     FAB                                       (scrolled past 50 px)
  *   VersionStamp                                            (start screen)
+ *   Dials         HandicapDial (hold the color pill), RulesDial (hold the size pill),
+ *                 ClockDial (hold the clock pill); open only on the idle start screen
+ *
+ * A code that refers to a saved game (`saved`) shows that game's opponent, color, size, rules,
+ * handicap and clock, dimmed and locked (DESIGN 4.1).
  */
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { flags } from '@/lib/flags';
-import type { ColorChoice, Opponent, Rng, TimeControl } from '@/lib/chessTypes';
+import type { ColorChoice, Opponent, Rng, Rules, SavedGame, Size, TimeControl } from '@/lib/types';
+import { parseTc } from '@/lib/zigo';
 import { BackToTop } from './BackToTop';
-import { ClockPill, type ClockPillAnchor } from './ClockPill';
+import { ClockDial } from './ClockDial';
+import { ClockPill } from './ClockPill';
 import { CodeSelector, type CodeSource } from './CodeSelector';
 import { ColorPill } from './ColorPill';
+import { HandicapDial } from './HandicapDial';
 import { OpponentSelector } from './OpponentSelector';
+import { settingsOfGame } from './options';
+import { RulesDial } from './RulesDial';
 import { ScrollChevron } from './ScrollChevron';
+import { SizePill } from './SizePill';
 import { StartFooter } from './StartFooter';
+import type { PillAnchor } from './useHold';
 import { VersionStamp } from './VersionStamp';
 import { StartHeader, StickyHeader } from './Wordmark';
 
@@ -38,16 +51,26 @@ export interface StartChromeProps {
 
   opponent: Opponent;
   onOpponentChange: (value: Opponent) => void;
+  /** Calibrated rank of the selected computer level (`≈12k`); absent until calibrated. */
+  opponentRank?: string | null;
   color: ColorChoice;
   onColorChange: (value: ColorChoice) => void;
+  size: Size;
+  onSizeChange: (value: Size) => void;
+  rules: Rules;
+  onRulesChange: (value: Rules) => void;
+  /** Handicap of the selected size (0 or 2 … 9). */
+  handicap: number;
+  onHandicapChange: (value: number) => void;
+  /** Clock of the selected size. */
   clock: TimeControl;
   onClockChange: (value: TimeControl) => void;
-  /** 500 ms hold on the clock pill (milestone 2's custom dial). */
-  onClockLongPress?: (anchor: ClockPillAnchor) => void;
 
-  /** RESUME / REVIEW: the selectors show the saved game's settings, dimmed and disabled. */
+  /** The saved game the code refers to (RESUME / REVIEW): its settings are shown dimmed and locked. */
+  saved?: SavedGame | null;
+  /** Locks every selector without a saved game to show (the values passed are shown dimmed). */
   settingsLocked?: boolean;
-  /** Room joiner: the color pill is dimmed because the creator's choice applies. */
+  /** Room joiner: the color pill (and its handicap) is dimmed because the creator's choice applies. */
   colorLocked?: boolean;
   /** Blocks the code field during the start transition. */
   busy?: boolean;
@@ -62,6 +85,8 @@ export interface StartChromeProps {
   onVersionTap?: () => void;
 }
 
+type OpenDial = { kind: 'handicap' | 'rules' | 'clock'; x: number; y: number; dragging: boolean };
+
 export function StartChrome({
   visible,
   scrolled = false,
@@ -71,11 +96,18 @@ export function StartChrome({
   rng,
   opponent,
   onOpponentChange,
+  opponentRank,
   color,
   onColorChange,
+  size,
+  onSizeChange,
+  rules,
+  onRulesChange,
+  handicap,
+  onHandicapChange,
   clock,
   onClockChange,
-  onClockLongPress,
+  saved,
   settingsLocked = false,
   colorLocked = false,
   busy = false,
@@ -85,8 +117,19 @@ export function StartChrome({
   onVersionTap,
 }: StartChromeProps) {
   const idle = visible && !scrolled;
-  // Pass-and-play has no "your color": both sides sit at this device.
-  const colorDisabled = settingsLocked || colorLocked || opponent.mode === 'local';
+  const locked = settingsLocked || !!saved;
+  const shown = saved
+    ? settingsOfGame(saved)
+    : { opponent, color, size, rules, handicap, clock };
+  // Pass-and-play has no "your color": both sides sit at this device. The handicap still applies.
+  const colorFixed = shown.opponent.mode === 'local';
+
+  const [dial, setDial] = useState<OpenDial | null>(null);
+  const open = (kind: OpenDial['kind']) => (a: PillAnchor) => setDial({ kind, x: a.x, y: a.y, dragging: a.source === 'pointer' });
+  const close = () => setDial(null);
+  useEffect(() => {
+    if (!idle || locked) setDial(null);
+  }, [idle, locked]);
 
   return (
     <>
@@ -101,13 +144,33 @@ export function StartChrome({
         visible={idle}
         landscape={landscape}
         selector={
-          <OpponentSelector value={opponent} onChange={onOpponentChange} disabled={settingsLocked} landscape={landscape} />
+          <OpponentSelector
+            value={shown.opponent}
+            onChange={onOpponentChange}
+            disabled={locked}
+            landscape={landscape}
+            rank={locked ? null : opponentRank}
+          />
         }
         pills={
           <>
-            <ColorPill value={color} onChange={onColorChange} disabled={colorDisabled} />
+            <ColorPill
+              value={shown.color}
+              onChange={onColorChange}
+              handicap={shown.handicap}
+              onLongPress={open('handicap')}
+              disabled={locked || colorLocked}
+              colorFixed={colorFixed}
+            />
+            <SizePill size={shown.size} rules={shown.rules} onChange={onSizeChange} onLongPress={open('rules')} disabled={locked} />
             {flags.clock && (
-              <ClockPill value={clock} onChange={onClockChange} onLongPress={onClockLongPress} disabled={settingsLocked} />
+              <ClockPill
+                size={shown.size}
+                value={shown.clock}
+                onChange={onClockChange}
+                onLongPress={open('clock')}
+                disabled={locked}
+              />
             )}
           </>
         }
@@ -117,6 +180,47 @@ export function StartChrome({
       />
 
       <VersionStamp visible={visible} onTap={onVersionTap} />
+
+      {dial?.kind === 'handicap' && (
+        <HandicapDial
+          x={dial.x}
+          y={dial.y}
+          dragging={dial.dragging}
+          size={size}
+          value={handicap}
+          onPick={(n) => {
+            close();
+            onHandicapChange(n);
+          }}
+          onCancel={close}
+        />
+      )}
+      {dial?.kind === 'rules' && (
+        <RulesDial
+          x={dial.x}
+          y={dial.y}
+          dragging={dial.dragging}
+          value={rules}
+          onPick={(r) => {
+            close();
+            onRulesChange(r);
+          }}
+          onCancel={close}
+        />
+      )}
+      {dial?.kind === 'clock' && (
+        <ClockDial
+          x={dial.x}
+          y={dial.y}
+          dragging={dial.dragging}
+          value={clock}
+          onPick={(tc) => {
+            close();
+            onClockChange(parseTc(tc));
+          }}
+          onCancel={close}
+        />
+      )}
     </>
   );
 }

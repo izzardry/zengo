@@ -1,12 +1,14 @@
 /**
- * Start-screen values and their cycling rules (DESIGN 4.1). Pure, no React.
+ * Start-screen values and their cycling rules (DESIGN 4.1, 8.2, 11). Pure, no React.
  *
  * - Opponent stepper: ROOM · TWO PLAYERS · COMPUTER 1 … COMPUTER 12 (ends do not wrap).
- * - Color pill: random → white → black → random.
- * - Clock pill: off · 1+0 · 3+2 · 5+0 · 10+0 · 15+10 · 30+0 → off.
+ * - Color pill: random → black → white → random; hold: handicap 0, 2 … 9 (2 … 5 on 9×9).
+ * - Size pill: 9×9 → 13×13 → 19×19 → 9×9; hold: rules, area or territory (`· JP`).
+ * - Clock pill: the presets of the current size (DESIGN 11), then off again.
  * - Start pill label: START / RESUME / REVIEW from the code's saved game.
  */
-import type { ColorChoice, Opponent, SavedGame, TimeControl } from '@/lib/chessTypes';
+import type { ColorChoice, Opponent, Rules, SavedGame, Size, TcString, TimeControl } from '@/lib/types';
+import { maxHandicap, normalizeHandicap, parseTc } from '@/lib/zigo';
 
 /* ---------------------------------------------------------------------------------------------- */
 /* Opponent                                                                                        */
@@ -65,65 +67,135 @@ export function sameOpponent(a: Opponent, b: Opponent): boolean {
 }
 
 /* ---------------------------------------------------------------------------------------------- */
-/* Color                                                                                           */
+/* Color and handicap                                                                              */
 /* ---------------------------------------------------------------------------------------------- */
 
-export const COLOR_CHOICES: readonly ColorChoice[] = Object.freeze(['random', 'w', 'b'] as const);
+/** Cycle order of the color pill: Black moves first in Go, so black comes before white. */
+export const COLOR_CHOICES: readonly ColorChoice[] = Object.freeze(['random', 'B', 'W'] as const);
 export const DEFAULT_COLOR: ColorChoice = 'random';
 
 export function isColorChoice(v: unknown): v is ColorChoice {
-  return v === 'random' || v === 'w' || v === 'b';
+  return v === 'random' || v === 'B' || v === 'W';
 }
 
-/** random → white → black → random. */
+/** random → black → white → random. */
 export function nextColor(c: ColorChoice): ColorChoice {
   const i = COLOR_CHOICES.indexOf(c);
   return COLOR_CHOICES[(i + 1) % COLOR_CHOICES.length];
+}
+
+/** The handicap dial's values for a size: 0 (none), then 2 … max (DESIGN 4.1, 8.2). */
+export function handicapOptions(size: Size): number[] {
+  return [0, ...Array.from({ length: maxHandicap(size) - 1 }, (_, i) => i + 2)];
+}
+
+/* ---------------------------------------------------------------------------------------------- */
+/* Size and rules                                                                                  */
+/* ---------------------------------------------------------------------------------------------- */
+
+export const SIZE_CHOICES: readonly Size[] = Object.freeze([9, 13, 19] as Size[]);
+export const DEFAULT_SIZE: Size = 9;
+
+export function isSize(v: unknown): v is Size {
+  return v === 9 || v === 13 || v === 19;
+}
+
+/** 9×9 → 13×13 → 19×19 → 9×9. */
+export function nextSize(s: Size): Size {
+  const i = SIZE_CHOICES.indexOf(s);
+  return SIZE_CHOICES[(i + 1) % SIZE_CHOICES.length];
+}
+
+/** The rules dial's values: area (default) and territory. */
+export const RULES_CHOICES: readonly Rules[] = Object.freeze(['area', 'territory'] as Rules[]);
+export const DEFAULT_RULES: Rules = 'area';
+
+export function isRules(v: unknown): v is Rules {
+  return v === 'area' || v === 'territory';
+}
+
+/** `9×9`, or `9×9 · JP` for territory rules (DESIGN 4.1). Not translated. */
+export function sizeLabel(size: Size, rules: Rules): string {
+  const s = `${size}×${size}`;
+  return rules === 'territory' ? `${s} · JP` : s;
+}
+
+/** Komi of a rule set without handicap, as shown on the rules dial (`7.5`, `6.5`). */
+export function rulesKomi(rules: Rules): string {
+  return rules === 'territory' ? '6.5' : '7.5';
 }
 
 /* ---------------------------------------------------------------------------------------------- */
 /* Clock                                                                                           */
 /* ---------------------------------------------------------------------------------------------- */
 
-const tc = (min: number, inc: number): TimeControl => Object.freeze({ baseMs: min * 60_000, incMs: inc * 1000 });
+const fischer = (min: number, inc: number): TimeControl =>
+  Object.freeze({ kind: 'fischer', baseMs: min * 60_000, incMs: inc * 1000 });
+const byoyomi = (min: number, periods: number, sec: number): TimeControl =>
+  Object.freeze({ kind: 'byoyomi', baseMs: min * 60_000, periods, periodMs: sec * 1000 });
 
-/** The pill's presets in cycle order; `null` = off (DESIGN 4.1, 11). */
-export const CLOCK_PRESETS: readonly TimeControl[] = Object.freeze([
-  null,
-  tc(1, 0),
-  tc(3, 2),
-  tc(5, 0),
-  tc(10, 0),
-  tc(15, 10),
-  tc(30, 0),
-]);
+/** The clock pill's presets per size in cycle order; `null` = off (DESIGN 11). */
+export const CLOCK_PRESETS: Readonly<Record<Size, readonly TimeControl[]>> = Object.freeze({
+  9: Object.freeze([null, fischer(2, 7), fischer(3, 10), byoyomi(5, 5, 30)]),
+  13: Object.freeze([null, fischer(3, 7), fischer(5, 10), byoyomi(10, 5, 30)]),
+  19: Object.freeze([null, fischer(5, 7), fischer(10, 10), byoyomi(20, 5, 30), byoyomi(30, 5, 60)]),
+});
 
 export function sameClock(a: TimeControl, b: TimeControl): boolean {
   if (a === null || b === null) return a === b;
-  return a.baseMs === b.baseMs && a.incMs === b.incMs;
+  if (a.kind === 'fischer') return b.kind === 'fischer' && a.baseMs === b.baseMs && a.incMs === b.incMs;
+  return b.kind === 'byoyomi' && a.baseMs === b.baseMs && a.periods === b.periods && a.periodMs === b.periodMs;
 }
 
-/** True when `t` is one of the cycling presets (false for a custom dial value). */
-export function isPresetClock(t: TimeControl): boolean {
-  return CLOCK_PRESETS.some((p) => sameClock(p, t));
+/** True when `t` is one of the size's cycling presets (false for a custom dial value). */
+export function isPresetClock(size: Size, t: TimeControl): boolean {
+  return CLOCK_PRESETS[size].some((p) => sameClock(p, t));
+}
+
+/** Overtime of a time control in ms, for ordering: the increment, or all periods together. */
+function extraMs(t: NonNullable<TimeControl>): number {
+  return t.kind === 'fischer' ? t.incMs : t.periods * t.periodMs;
 }
 
 /**
- * The next preset after `t`. A custom value (from the M2 dial) moves to the first preset that is
- * longer (by base, then increment), or back to off when none is.
+ * The next preset of `size` after `t`. A custom value (from the dial, or a preset of another size)
+ * moves to the first preset that is longer (by main time, then overtime), or back to off.
  */
-export function nextClock(t: TimeControl): TimeControl {
-  const i = CLOCK_PRESETS.findIndex((p) => sameClock(p, t));
-  if (i >= 0) return CLOCK_PRESETS[(i + 1) % CLOCK_PRESETS.length];
-  if (t === null) return CLOCK_PRESETS[1];
-  const later = CLOCK_PRESETS.find(
-    (p) => p !== null && (p.baseMs > t.baseMs || (p.baseMs === t.baseMs && p.incMs > t.incMs)),
+export function nextClock(size: Size, t: TimeControl): TimeControl {
+  const presets = CLOCK_PRESETS[size];
+  const i = presets.findIndex((p) => sameClock(p, t));
+  if (i >= 0) return presets[(i + 1) % presets.length];
+  if (t === null) return presets[1];
+  const later = presets.find(
+    (p) => p !== null && (p.baseMs > t.baseMs || (p.baseMs === t.baseMs && extraMs(p) > extraMs(t))),
   );
   return later ?? null;
 }
 
+const num = (v: number) => String(Math.round(v * 100) / 100);
+
+/**
+ * The pill's text of a time control (DESIGN 11): `2+7`, `5m 5×30s`; null for off (the pill
+ * translates "off"). Units are not translated.
+ */
+export function clockLabel(t: TimeControl): string | null {
+  if (!t) return null;
+  if (t.kind === 'fischer') return `${num(t.baseMs / 60_000)}+${num(t.incMs / 1000)}`;
+  return `${num(t.baseMs / 60_000)}m ${t.periods}×${num(t.periodMs / 1000)}s`;
+}
+
+/** The custom dial's Fischer value: `5`, `3` → `5+3`. */
+export function fischerTc(minutes: number, incrementSeconds: number): TcString {
+  return `${minutes}+${incrementSeconds}`;
+}
+
+/** The custom dial's byo-yomi value: `20`, `5`, `30` → `20m5x30`. */
+export function byoyomiTc(minutes: number, periods: number, periodSeconds: number): TcString {
+  return `${minutes}m${periods}x${periodSeconds}`;
+}
+
 /* ---------------------------------------------------------------------------------------------- */
-/* Start pill                                                                                      */
+/* Start pill and saved games                                                                      */
 /* ---------------------------------------------------------------------------------------------- */
 
 /** What the one primary action does (DESIGN 4.1 table). */
@@ -154,4 +226,27 @@ export function opponentOfGame(g: SavedGame): Opponent {
   if (g.mode === 'local') return OPPONENTS[1];
   const level = typeof g.level === 'number' ? g.level : DEFAULT_LEVEL;
   return OPPONENTS[opponentIndex({ mode: 'computer', level })];
+}
+
+/** Everything the start screen's selectors show. */
+export interface StartSettings {
+  readonly opponent: Opponent;
+  readonly color: ColorChoice;
+  readonly size: Size;
+  readonly rules: Rules;
+  readonly handicap: number;
+  readonly clock: TimeControl;
+}
+
+/** The settings of a saved game, shown dimmed while the code refers to it (DESIGN 4.1). */
+export function settingsOfGame(g: SavedGame): StartSettings {
+  const size: Size = isSize(g.size) ? g.size : DEFAULT_SIZE;
+  return {
+    opponent: opponentOfGame(g),
+    color: isColorChoice(g.color) ? g.color : DEFAULT_COLOR,
+    size,
+    rules: isRules(g.rules) ? g.rules : DEFAULT_RULES,
+    handicap: normalizeHandicap(size, g.handicap),
+    clock: parseTc(g.tc),
+  };
 }

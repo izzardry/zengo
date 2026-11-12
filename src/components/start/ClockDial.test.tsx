@@ -1,19 +1,13 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { useState, type ReactElement } from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { DIAL_GEOMETRY, DIAL_INCREMENTS, DIAL_MINUTES } from '@/lib/clock';
 import { I18nProvider } from '@/lib/i18n';
-import { createStore, memoryStorage } from '@/lib/storage';
-import type { Language, TimeControl } from '@/lib/chessTypes';
-import { ClockDial, type ClockDialProps } from './ClockDial';
+import type { Language, TimeControl } from '@/lib/types';
+import { ClockDial, DIAL_INCREMENTS, DIAL_MINUTES, DIAL_PERIOD_SECONDS, DIAL_PERIODS, type ClockDialProps } from './ClockDial';
+import { DIAL_GEOMETRY } from './dialGeometry';
 import { captionSide, clampCenter, DIAL_EXTENT, DIAL_MARGIN } from './dialPlacement';
 
-const wrap = (ui: ReactElement, language: Language = 'en') =>
-  render(
-    <I18nProvider language={language} store={createStore(memoryStorage())}>
-      {ui}
-    </I18nProvider>,
-  );
+const wrap = (ui: ReactElement, language: Language = 'en') => render(<I18nProvider language={language}>{ui}</I18nProvider>);
 
 const X = 500;
 const Y = 400;
@@ -29,7 +23,16 @@ const down = (el: Element, x = X, y = Y) =>
   });
 
 const dial = () => screen.getByTestId('clock-dial');
-const item = (v: number) => dial().querySelector<HTMLElement>(`[data-value="${v}"]`)!;
+const item = (v: number | string) => dial().querySelector<HTMLElement>(`[data-value="${v}"]`)!;
+const values = () => [...dial().querySelectorAll('[data-value]')].map((e) => e.getAttribute('data-value'));
+
+const fischer = (min: number, inc: number): TimeControl => ({ kind: 'fischer', baseMs: min * 60_000, incMs: inc * 1000 });
+const byoyomi = (min: number, periods: number, sec: number): TimeControl => ({
+  kind: 'byoyomi',
+  baseMs: min * 60_000,
+  periods,
+  periodMs: sec * 1000,
+});
 
 function mount(props: Partial<ClockDialProps> = {}, language: Language = 'en') {
   const onPick = vi.fn();
@@ -38,13 +41,28 @@ function mount(props: Partial<ClockDialProps> = {}, language: Language = 'en') {
   return { ...utils, onPick, onCancel };
 }
 
-describe('ClockDial', () => {
-  it('shows nine minute values clockwise from 12 o’clock, with the current one noted', () => {
-    mount({ value: { baseMs: 5 * 60_000, incMs: 0 } });
-    expect(dial()).toHaveAttribute('data-step', 'minutes');
+describe('ClockDial (DESIGN 11: system, minutes, then increment or period and periods)', () => {
+  it('opens on the system: Fischer at 9 o’clock, byo-yomi at 3 o’clock, the current one noted', () => {
+    mount({ value: byoyomi(5, 5, 30) });
+    expect(dial()).toHaveAttribute('data-step', 'system');
     expect(dial()).toHaveAttribute('role', 'menu');
-    const values = [...dial().querySelectorAll('[data-value]')].map((e) => Number(e.getAttribute('data-value')));
-    expect(values).toEqual([...DIAL_MINUTES]);
+    expect(dial()).toHaveAccessibleName('Custom clock: system');
+    expect(values()).toEqual(['fischer', 'byoyomi']);
+    expect(item('fischer')).toHaveAccessibleName('Fischer: minutes, plus seconds per move');
+    expect(item('byoyomi')).toHaveAccessibleName('Byo-yomi: main time, then periods');
+    expect(item('byoyomi')).toHaveClass('dial-item--noted');
+    expect(item('fischer')).toHaveAttribute('aria-checked', 'false');
+    // 9 and 3 o'clock: clear of the pill under the finger.
+    expect(item('fischer').style.left).toBe(`${-DIAL_GEOMETRY.radius - 20}px`);
+    expect(item('fischer').style.top).toBe('-20px');
+    expect(item('byoyomi').style.left).toBe(`${DIAL_GEOMETRY.radius - 20}px`);
+  });
+
+  it('shows nine minute values clockwise from 12 o’clock, with the current one noted', () => {
+    mount({ value: fischer(5, 0) });
+    down(item('fischer'));
+    expect(dial()).toHaveAttribute('data-step', 'minutes');
+    expect(values().map(Number)).toEqual([...DIAL_MINUTES]);
     expect(item(5)).toHaveClass('dial-item--noted');
     expect(item(5)).toHaveAttribute('aria-checked', 'true');
     expect(item(10)).toHaveAttribute('aria-checked', 'false');
@@ -55,31 +73,60 @@ describe('ClockDial', () => {
     expect(item(DIAL_MINUTES[0]).style.top).toBe('-80px');
   });
 
-  it('drag from the hold picks minutes, then a tap picks the increment', () => {
+  it('drag from the hold picks the system, then taps pick the minutes and the increment', () => {
     const { onPick, onCancel } = mount({ dragging: true });
-    // Straight right of the start point, 60 px: commit zone on item 2 (3 minutes).
-    winPointer('pointermove', X + 45, Y);
-    expect(item(DIAL_MINUTES[2])).toHaveClass('dial-item--aim');
-    winPointer('pointermove', X + 60, Y);
-    expect(item(DIAL_MINUTES[2])).toHaveClass('dial-item--commit');
-    winPointer('pointerup', X + 60, Y);
+    // Straight left of the start point: Fischer, aim then commit.
+    winPointer('pointermove', X - 45, Y);
+    expect(item('fischer')).toHaveClass('dial-item--aim');
+    expect(dial().querySelector('[data-part="caption"]')).toHaveTextContent('Fischer');
+    winPointer('pointermove', X - 60, Y);
+    expect(item('fischer')).toHaveClass('dial-item--commit');
+    winPointer('pointerup', X - 60, Y);
+    expect(dial()).toHaveAttribute('data-step', 'minutes');
+    down(item(3));
     expect(dial()).toHaveAttribute('data-step', 'increment');
-    const incs = [...dial().querySelectorAll('[data-value]')].map((e) => Number(e.getAttribute('data-value')));
-    expect(incs).toEqual([...DIAL_INCREMENTS]);
+    expect(values().map(Number)).toEqual([...DIAL_INCREMENTS]);
     expect(item(2)).toHaveAccessibleName('Plus 2 seconds per move');
     expect(item(0)).toHaveAccessibleName('No increment');
     expect(item(0).textContent).toBe('+0');
+    expect(dial().querySelector('[data-part="caption"]')).toHaveTextContent('3+ · Increment');
     down(item(2));
     expect(onPick).toHaveBeenCalledWith('3+2');
     expect(onCancel).not.toHaveBeenCalled();
   });
 
+  it('byo-yomi: minutes, period seconds, then periods 1 · 3 · 5 · 10', () => {
+    const { onPick } = mount();
+    down(item('byoyomi'));
+    down(item(20));
+    expect(dial()).toHaveAttribute('data-step', 'period');
+    expect(dial()).toHaveAccessibleName('Custom clock: period after 20 min');
+    expect(values().map(Number)).toEqual([...DIAL_PERIOD_SECONDS]);
+    expect(item(30)).toHaveTextContent('30s');
+    expect(item(30)).toHaveAccessibleName('30 seconds per period');
+    down(item(30));
+    expect(dial()).toHaveAttribute('data-step', 'periods');
+    expect(values().map(Number)).toEqual([...DIAL_PERIODS]);
+    expect(DIAL_PERIODS).toEqual([1, 3, 5, 10]);
+    expect(item(5)).toHaveTextContent('×5');
+    expect(item(1)).toHaveAccessibleName('1 period');
+    expect(item(5)).toHaveAccessibleName('5 periods');
+    expect(dial().querySelector('[data-part="caption"]')).toHaveTextContent('20m 30s · Periods');
+    down(item(5));
+    expect(onPick).toHaveBeenCalledWith('20m5x30');
+  });
+
   it('releasing in the aim zone also picks (the dial has no secondary action)', () => {
     const { onPick } = mount({ dragging: true });
+    winPointer('pointermove', X - 45, Y);
+    winPointer('pointerup', X - 45, Y);
+    expect(dial()).toHaveAttribute('data-step', 'minutes');
+    // Second gesture: press the centre, drag up to the first minute value, release in the aim zone.
+    down(dial().querySelector('[data-part="cancel"]')!, X, Y);
     winPointer('pointermove', X, Y - 45);
     winPointer('pointerup', X, Y - 45);
     expect(dial()).toHaveAttribute('data-step', 'increment');
-    // Second gesture: press the centre, drag down-left to item 6 (+15 at 240°), release.
+    // Third gesture: drag down-left to item 6 (+15 at 240°), release.
     down(dial().querySelector('[data-part="cancel"]')!, X, Y);
     const a = (240 * Math.PI) / 180;
     winPointer('pointermove', X + Math.sin(a) * 70, Y - Math.cos(a) * 70);
@@ -91,6 +138,7 @@ describe('ClockDial', () => {
     const { onPick, onCancel } = mount({ dragging: true });
     winPointer('pointerup', X + 3, Y + 2);
     expect(onCancel).not.toHaveBeenCalled();
+    down(item('fischer'));
     down(item(10));
     down(item(5));
     expect(onPick).toHaveBeenCalledWith('10+5');
@@ -117,8 +165,9 @@ describe('ClockDial', () => {
     expect(c.onCancel).toHaveBeenCalledTimes(1);
   });
 
-  it('the pointerdown that picks minutes does not also pick an increment', () => {
+  it('the pointerdown that picks a step does not also pick on the next one', () => {
     const { onPick } = mount();
+    down(item('fischer'));
     const el = item(DIAL_MINUTES[0]);
     down(el);
     // The trailing click of that press lands on whatever is now at that spot.
@@ -132,9 +181,12 @@ describe('ClockDial', () => {
     const before = document.createElement('button');
     document.body.appendChild(before);
     before.focus();
-    const value: TimeControl = { baseMs: 5 * 60_000, incMs: 0 };
-    const { onPick, onCancel, unmount } = mount({ value });
+    const { onPick, onCancel, unmount } = mount({ value: fischer(5, 0) });
     expect(document.activeElement).toBe(dial());
+    // System: the first arrow aims at the current one (Fischer), Enter takes it.
+    fireEvent.keyDown(dial(), { key: 'ArrowRight' });
+    expect(item('fischer')).toHaveClass('dial-item--aim');
+    fireEvent.keyDown(dial(), { key: 'Enter' });
     expect(dial()).toHaveAccessibleName('Custom clock: minutes');
     // First arrow aims at the current value, the next moves clockwise.
     fireEvent.keyDown(dial(), { key: 'ArrowRight' });
@@ -164,19 +216,48 @@ describe('ClockDial', () => {
     before.remove();
   });
 
+  it('Backspace walks back through the byo-yomi steps to the system', () => {
+    mount();
+    down(item('byoyomi'));
+    down(item(10));
+    down(item(30));
+    expect(dial()).toHaveAttribute('data-step', 'periods');
+    fireEvent.keyDown(dial(), { key: 'Backspace' });
+    expect(dial()).toHaveAttribute('data-step', 'period');
+    expect(item(30)).toHaveClass('dial-item--aim');
+    fireEvent.keyDown(dial(), { key: 'Backspace' });
+    expect(dial()).toHaveAttribute('data-step', 'minutes');
+    expect(item(10)).toHaveClass('dial-item--aim');
+    fireEvent.keyDown(dial(), { key: 'Backspace' });
+    expect(dial()).toHaveAttribute('data-step', 'system');
+    expect(item('byoyomi')).toHaveClass('dial-item--aim');
+    // Backspace on the first step does nothing.
+    fireEvent.keyDown(dial(), { key: 'Backspace' });
+    expect(dial()).toHaveAttribute('data-step', 'system');
+  });
+
   it('Escape cancels; Enter without an aim takes the current value', () => {
     const a = mount();
     fireEvent.keyDown(dial(), { key: 'Escape' });
     expect(a.onCancel).toHaveBeenCalledTimes(1);
     a.unmount();
-    const b = mount({ value: { baseMs: 3 * 60_000, incMs: 2000 } });
-    fireEvent.keyDown(dial(), { key: 'Enter' });
-    fireEvent.keyDown(dial(), { key: 'Enter' });
+    const b = mount({ value: fischer(3, 2) });
+    for (let i = 0; i < 3; i++) fireEvent.keyDown(dial(), { key: 'Enter' });
     expect(b.onPick).toHaveBeenCalledWith('3+2');
+    b.unmount();
+    const c = mount({ value: byoyomi(20, 5, 30) });
+    for (let i = 0; i < 4; i++) fireEvent.keyDown(dial(), { key: 'Enter' });
+    expect(c.onPick).toHaveBeenCalledWith('20m5x30');
+    c.unmount();
+    // A value off the dial starts at the nearest item.
+    const d = mount({ value: fischer(4, 4) });
+    for (let i = 0; i < 3; i++) fireEvent.keyDown(dial(), { key: 'Enter' });
+    expect(d.onPick).toHaveBeenCalledWith('3+3');
   });
 
   it('assistive-technology clicks (detail 0) work on items', () => {
     const { onPick } = mount();
+    fireEvent.click(item('fischer'), { detail: 0 });
     fireEvent.click(item(20), { detail: 0 });
     fireEvent.click(item(10), { detail: 0 });
     expect(onPick).toHaveBeenCalledWith('20+10');
@@ -184,9 +265,11 @@ describe('ClockDial', () => {
 
   it('is translated', () => {
     mount({}, 'de');
+    expect(dial()).toHaveAccessibleName('Eigene Bedenkzeit: System');
+    expect(screen.getByRole('menuitem', { name: 'Abbrechen' })).toBeInTheDocument();
+    down(item('fischer'));
     expect(dial()).toHaveAccessibleName('Eigene Bedenkzeit: Minuten');
     expect(item(2)).toHaveAccessibleName('2 Minuten');
-    expect(screen.getByRole('menuitem', { name: 'Abbrechen' })).toBeInTheDocument();
   });
 
   it('works as a controlled flow from a pill hold', () => {
@@ -212,8 +295,9 @@ describe('ClockDial', () => {
       );
     }
     wrap(<Harness />);
-    winPointer('pointermove', X, Y - 70);
-    winPointer('pointerup', X, Y - 70);
+    winPointer('pointermove', X - 70, Y);
+    winPointer('pointerup', X - 70, Y);
+    down(item(1));
     down(item(30));
     expect(screen.getByTestId('tc')).toHaveTextContent('1+30');
     expect(screen.queryByTestId('clock-dial')).toBeNull();
