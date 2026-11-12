@@ -8,7 +8,7 @@ Zigo is the sibling of [Zhess](https://github.com/izzardry/zhess), the izzardry 
 
 - **Status:** agreed design, nothing implemented yet
 - **Date:** 2026-11-12
-- **House style:** [Ztyle](https://github.com/izzardry/ztyle) at rev `61047cb` or later, which already teaches the rules learned from Zhess. Where this document is silent, do what Zhess does (`~/Workspace/zhess`, rev `a6458ff`, its `DESIGN.md` and code); where Zhess is silent, do what Ztyle says.
+- **House style:** [Ztyle](https://github.com/izzardry/ztyle) at rev `61047cb` or later (pushed 2026-11-12), which already teaches the rules learned from Zhess. Where this document is silent, do what Zhess does (`~/Workspace/zhess`, rev `a6458ff`, its `DESIGN.md` and code); where Zhess is silent, do what Ztyle says.
 - **Research:** [docs/research/engines.md](docs/research/engines.md) (Go engines in the browser) and [docs/research/go-rules-and-ux.md](docs/research/go-rules-and-ux.md) (rules, formats, clocks, UX, terminology). Facts marked **[V]** there were verified against sources on 2026-11-12.
 
 Decisions marked **(interview)** were chosen explicitly by the owner. Decisions marked **(derived)** follow from those choices, from Zhess, from Ztyle or from the research, and were filled in while writing; they are open to correction. Decisions marked **(Zhess)** are carried over from Zhess unchanged.
@@ -730,7 +730,7 @@ Removed from Zhess: `chess.js`, the Stockfish files, `premove.ts`, `drawOffer.ts
 **Risks**
 
 1. **TF.js maintenance.** No release since 4.22.0 (2024-10-21). Pin it and self-host; ONNX Runtime Web is plan B at a larger download.
-2. **WebGPU on iOS.** WebGPU in a worker inside an installed iOS PWA is listed as supported from Safari 26 but unconfirmed; the WASM fallback must carry iPhones that cannot run iOS 26. Verify on a device.
+2. **WebGPU on iOS.** WebGPU in a worker inside an installed iOS PWA is listed as supported from Safari 26 but unconfirmed; the WASM fallback must carry iPhones that cannot run iOS 26. **Accepted for now (owner, 2026-11-12):** assume GPU acceleration is sufficient, implement first, and adjust the level table and backend choice after testing on real devices.
 3. **Low-end Android.** The 10-block net on CPU may take 0.5–0.8 s per evaluation, which slows levels 10–12. Levels cap by time, not visits.
 4. **Engine numerics differ by device.** WebGPU and WASM do not produce identical floats. This is harmless only because no result is ever computed from a device's own engine output (8.1, 9.5); every test of the scoring protocol must keep it that way.
 5. **Blunder guard accuracy and latency.** A raw 6-block evaluation is noisy, and 150 ms on a low-end phone is unproven. The guard prefers missing a blunder to a false bounce and lets the stone through on timeout.
