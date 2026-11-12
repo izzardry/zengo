@@ -1,13 +1,13 @@
 /** Test helpers for the room UI (not shipped: only imported by tests). A fake controller and a toaster. */
 import { render, type RenderOptions } from '@testing-library/react';
-import type { ReactElement, ReactNode } from 'react';
+import type { ComponentProps, ReactElement, ReactNode } from 'react';
 import { vi } from 'vitest';
 import { Toaster } from '@/components/ui/sonner';
 import { I18nProvider } from '@/lib/i18n';
 import type { RoomControllerApi, RoomControllerOptions, RoomState } from '@/lib/room';
 import { createStore, memoryStorage } from '@/lib/storage';
-import type { Language, RoomNotice, RoomNoticeKind, RequestKind } from '@/lib/chessTypes';
-import zhess from '@/lib/zhess';
+import type { Language, RoomNotice, RoomNoticeKind, RequestKind } from '@/lib/types';
+import zigo, { makeSettings } from '@/lib/zigo';
 
 // Radix measures with ResizeObserver, which jsdom lacks.
 if (typeof globalThis.ResizeObserver === 'undefined') {
@@ -37,8 +37,8 @@ export function fakeRoomState(patch: Partial<RoomState> = {}): RoomState {
     score: [0, 0],
     n: 1,
     epoch: 0,
-    game: zhess.newGame(),
-    color: 'w',
+    game: zigo.newGame(makeSettings(9)),
+    color: 'B',
     tc: null,
     requests: {},
     locked: null,
@@ -51,7 +51,10 @@ export function fakeRoomState(patch: Partial<RoomState> = {}): RoomState {
     logs: [],
     myTurn: true,
     canMove: true,
-    canAsk: { takeback: false, draw: false, rematch: false },
+    canMark: false,
+    canAccept: false,
+    canResume: false,
+    canAsk: { takeback: false, rematch: false },
     failureKind: null,
     lastSeenAt: 0,
   };
@@ -64,6 +67,10 @@ export interface FakeController extends RoomControllerApi {
   set(patch: Partial<RoomState>): void;
   notify(kind: RoomNoticeKind, request?: RequestKind): void;
   readonly move: ReturnType<typeof vi.fn> & RoomControllerApi['move'];
+  readonly pass: ReturnType<typeof vi.fn> & RoomControllerApi['pass'];
+  readonly mark: ReturnType<typeof vi.fn> & RoomControllerApi['mark'];
+  readonly accept: ReturnType<typeof vi.fn> & RoomControllerApi['accept'];
+  readonly resume: ReturnType<typeof vi.fn> & RoomControllerApi['resume'];
   readonly ask: ReturnType<typeof vi.fn> & RoomControllerApi['ask'];
   readonly reply: ReturnType<typeof vi.fn> & RoomControllerApi['reply'];
   readonly resign: ReturnType<typeof vi.fn> & RoomControllerApi['resign'];
@@ -99,6 +106,10 @@ export function createFakeController(opts: RoomControllerOptions, init: Partial<
       return () => noticeSubs.delete(cb);
     },
     move: vi.fn(() => true),
+    pass: vi.fn(() => true),
+    mark: vi.fn(() => true),
+    accept: vi.fn(() => true),
+    resume: vi.fn(() => true),
     ask: vi.fn(() => true),
     reply: vi.fn(() => true),
     resign: vi.fn(() => true),
@@ -126,7 +137,8 @@ export function createFakeController(opts: RoomControllerOptions, init: Partial<
 
 /** Renders with i18n and a sonner Toaster placed as in App.tsx. */
 export function renderRoom(ui: ReactElement, lang: Language = 'en', options?: RenderOptions) {
-  const store = createStore(memoryStorage());
+  // The provider only reads and writes the language preference; any store shape will do.
+  const store = createStore(memoryStorage()) as unknown as ComponentProps<typeof I18nProvider>['store'];
   const Wrapper = ({ children }: { children: ReactNode }) => (
     <I18nProvider language={lang} store={store}>
       {/* Before the page, as in App.tsx: the toaster subscribes before the page's effects toast. */}

@@ -3,7 +3,7 @@
  * harness that runs several devices over 3B's memory network (PLAN 7: room logic is tested only
  * over the memory transport). Used by tests only; never imported by the app.
  */
-import type { Message, RoomNotice, Rng, Store } from '../chessTypes';
+import type { Message, RoomNotice, Rng, Store } from '../types';
 import { createStore, memoryStorage, type StorageLike } from '../storage';
 import type { Timers } from '../transport/common';
 import { createMemoryNetwork, createMemoryPair, type MemoryNetwork, type MemoryOptions, type MemoryPair, type MemoryTransport } from '../transport/memory';

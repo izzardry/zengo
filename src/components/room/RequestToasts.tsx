@@ -1,11 +1,11 @@
 /**
- * Request toasts (DESIGN 9.5, 9.7, 8.3): the quiet pattern of all room requests.
+ * Request toasts (DESIGN 9.4): the quiet pattern of all room requests.
  *
- * - Incoming takeback, draw, rematch: an undo-style toast with Decline and Accept. Rejoin from a
+ * - Incoming takeback or rematch (Go has no draw offers): an undo-style toast with Decline and Accept. Rejoin from a
  *   new device: Decline and Allow. It stays until answered and disappears by itself when the
  *   request lapses (the requester moved, the opponent moved, the game changed, the peer left).
  * - Outgoing: no toast. The requester sees the pending state on the button that asked (DESIGN
- *   9.7): the undo button (takeback), the flag (draw) and the overlay's Rematch. A toast here
+ *   9.4): the undo button (takeback) and the overlay's Rematch. A toast here
  *   would sit on the toolbar at phone width for as long as the request is open.
  *
  * Toasts go through sonner (`toast.custom`) under one slot (`toastSlot.ts`): the same request is
@@ -18,7 +18,7 @@
 import { useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 import { useI18n } from '@/lib/i18n';
-import type { RequestKind } from '@/lib/chessTypes';
+import type { RequestKind } from '@/lib/types';
 import { requestKey } from './text';
 import { createToastSlot } from './toastSlot';
 

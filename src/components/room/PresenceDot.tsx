@@ -1,5 +1,5 @@
 /**
- * Presence dot next to the code in the info pill (DESIGN 9.10): solid when the opponent is
+ * Presence dot next to the code in the info pill (DESIGN 9): solid when the opponent is
  * connected; hollow and pulsing while waiting, connecting or reconnecting. Tapping it opens the
  * invite sheet again.
  */

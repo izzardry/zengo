@@ -1,5 +1,5 @@
 /**
- * Strings owned by package 3D "room UI" (see PLAN.md): presence, transition toasts, requests,
+ * Strings of the room UI (package 1G now, 3C in milestone 3) (see PLAN.md): presence, transition toasts, requests,
  * invite sheet, manual connection, tab guard and the calm failure messages of DESIGN 9.
  * EN is the source of truth; DE du, FR vous, ES tú. Every key is prefixed `room.`.
  * Shared words (Accept, Decline, Allow, Share, Close, Link copied, Room) come from `common.ts`.
@@ -9,7 +9,7 @@ import { defineTable } from './define';
 
 export default defineTable({
   en: {
-    // Presence dot (DESIGN 9.10)
+    // Presence dot (DESIGN 9)
     'room.presence.connected': 'Opponent connected',
     'room.presence.waiting': 'Waiting for opponent',
     'room.presence.connecting': 'Connecting',
@@ -18,7 +18,7 @@ export default defineTable({
     'room.score': 'Score: you {mine}, opponent {theirs}',
     'room.paused': 'Paused',
 
-    // Transition and sync toasts (DESIGN 9.5, 9.10, 9.11)
+    // Transition and sync toasts (DESIGN 9)
     'room.notice.opponentJoined': 'Opponent joined',
     'room.notice.opponentConnected': 'Opponent connected',
     'room.notice.opponentDisconnected': 'Opponent disconnected',
@@ -29,7 +29,6 @@ export default defineTable({
     'room.notice.rejoinDenied': 'Your opponent did not let this device in',
     'room.notice.challengeFailed': 'A device without this room’s key tried to connect',
     'room.notice.declined.takeback': 'Takeback declined',
-    'room.notice.declined.draw': 'Draw declined',
     'room.notice.declined.rematch': 'Rematch declined',
     'room.notice.iceFailed': 'Could not reach your opponent directly. Try another network.',
     'room.notice.brokerUnreachable': 'Could not reach the connection service.',
@@ -37,17 +36,15 @@ export default defineTable({
     'room.reload': 'Reload',
     'room.connectManually': 'Connect manually',
 
-    // Requests (DESIGN 9.7): incoming with Accept / Decline, outgoing pending
+    // Requests (DESIGN 9): incoming with Accept / Decline, outgoing pending
     'room.request.takeback': 'Your opponent asks for a takeback',
-    'room.request.draw': 'Your opponent offers a draw',
     'room.request.rematch': 'Your opponent wants a rematch',
     'room.request.rejoin': 'Opponent is rejoining from a new device',
     'room.pending.takeback': 'Takeback requested',
-    'room.pending.draw': 'Draw offered',
     'room.pending.rematch': 'Rematch requested',
     'room.pending.waiting': 'Waiting for your opponent',
 
-    // Invite sheet (DESIGN 9.2)
+    // Invite sheet (DESIGN 9)
     'room.invite.title': 'Invite your opponent',
     'room.invite.body': 'Send this link, or let them type the code with Room selected.',
     'room.invite.qr': 'QR code of the link',
@@ -55,7 +52,7 @@ export default defineTable({
     'room.invite.copy': 'Copy link',
     'room.invite.noQr': 'This link is too long for a QR code. Send it as a message.',
 
-    // Manual connection (DESIGN 9.9)
+    // Manual connection (DESIGN 9)
     'room.manual.title': 'Connect manually',
     'room.manual.intro': 'Swap two links with your opponent, by message or QR code.',
     'room.manual.step': 'Step {n} of 2',
@@ -85,7 +82,7 @@ export default defineTable({
     'room.manual.error.webrtc': 'This browser cannot open a direct connection.',
     'room.manual.error.ice-failed': 'Could not reach your opponent directly. Try another network.',
 
-    // Tab guard and locked states (DESIGN 9.12, 9.5, 9.11)
+    // Tab guard and locked states (DESIGN 9)
     'room.otherTab': 'This room is open in another tab',
     'room.takeOver': 'Use here',
     'room.joining': 'Asking your opponent for a seat…',
@@ -111,7 +108,6 @@ export default defineTable({
     'room.notice.rejoinDenied': 'Dein Gegner hat dieses Gerät nicht zugelassen',
     'room.notice.challengeFailed': 'Ein Gerät ohne den Schlüssel dieses Raums wollte sich verbinden',
     'room.notice.declined.takeback': 'Zugrücknahme abgelehnt',
-    'room.notice.declined.draw': 'Remis abgelehnt',
     'room.notice.declined.rematch': 'Revanche abgelehnt',
     'room.notice.iceFailed': 'Dein Gegner ist direkt nicht erreichbar. Versuch es in einem anderen Netz.',
     'room.notice.brokerUnreachable': 'Der Verbindungsdienst ist nicht erreichbar.',
@@ -120,11 +116,9 @@ export default defineTable({
     'room.connectManually': 'Manuell verbinden',
 
     'room.request.takeback': 'Dein Gegner bittet um eine Zugrücknahme',
-    'room.request.draw': 'Dein Gegner bietet Remis an',
     'room.request.rematch': 'Dein Gegner will eine Revanche',
     'room.request.rejoin': 'Dein Gegner kommt mit einem neuen Gerät zurück',
     'room.pending.takeback': 'Zugrücknahme angefragt',
-    'room.pending.draw': 'Remis angeboten',
     'room.pending.rematch': 'Revanche angefragt',
     'room.pending.waiting': 'Warte auf deinen Gegner',
 
@@ -189,7 +183,6 @@ export default defineTable({
     'room.notice.rejoinDenied': 'Votre adversaire n’a pas accepté cet appareil',
     'room.notice.challengeFailed': 'Un appareil sans la clé de ce salon a tenté de se connecter',
     'room.notice.declined.takeback': 'Reprise refusée',
-    'room.notice.declined.draw': 'Nulle refusée',
     'room.notice.declined.rematch': 'Revanche refusée',
     'room.notice.iceFailed': 'Impossible de joindre votre adversaire directement. Essayez un autre réseau.',
     'room.notice.brokerUnreachable': 'Le service de connexion est injoignable.',
@@ -198,11 +191,9 @@ export default defineTable({
     'room.connectManually': 'Connexion manuelle',
 
     'room.request.takeback': 'Votre adversaire demande une reprise',
-    'room.request.draw': 'Votre adversaire propose la nulle',
     'room.request.rematch': 'Votre adversaire veut une revanche',
     'room.request.rejoin': 'L’adversaire revient depuis un nouvel appareil',
     'room.pending.takeback': 'Reprise demandée',
-    'room.pending.draw': 'Nulle proposée',
     'room.pending.rematch': 'Revanche demandée',
     'room.pending.waiting': 'En attente de votre adversaire',
 
@@ -267,7 +258,6 @@ export default defineTable({
     'room.notice.rejoinDenied': 'Tu rival no ha dejado entrar a este dispositivo',
     'room.notice.challengeFailed': 'Un dispositivo sin la clave de esta sala intentó conectarse',
     'room.notice.declined.takeback': 'Deshacer rechazado',
-    'room.notice.declined.draw': 'Tablas rechazadas',
     'room.notice.declined.rematch': 'Revancha rechazada',
     'room.notice.iceFailed': 'No se pudo llegar a tu rival directamente. Prueba otra red.',
     'room.notice.brokerUnreachable': 'No se pudo llegar al servicio de conexión.',
@@ -276,11 +266,9 @@ export default defineTable({
     'room.connectManually': 'Conectar a mano',
 
     'room.request.takeback': 'Tu rival pide deshacer la jugada',
-    'room.request.draw': 'Tu rival ofrece tablas',
     'room.request.rematch': 'Tu rival quiere la revancha',
     'room.request.rejoin': 'Tu rival vuelve desde un dispositivo nuevo',
     'room.pending.takeback': 'Deshacer pedido',
-    'room.pending.draw': 'Tablas ofrecidas',
     'room.pending.rematch': 'Revancha pedida',
     'room.pending.waiting': 'Esperando a tu rival',
 

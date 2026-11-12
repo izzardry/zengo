@@ -33,7 +33,7 @@ describe('codes', () => {
   it('normalizes typed codes (Ztyle chapter 11)', () => {
     expect(normalizeCode('k7qw2m')).toBe('K7QW2M');
     expect(normalizeCode(' k7-qw 2m! ')).toBe('K7QW2M');
-    expect(normalizeCode('izzardry-chess')).toBe('IZZARDRY');
+    expect(normalizeCode('izzardry-go')).toBe('IZZARDRY');
     expect(normalizeCode('äöü')).toBe('');
     expect(normalize('ab')).toBe('AB');
     expect(isValidCode('')).toBe(false);

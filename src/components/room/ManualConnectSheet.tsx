@@ -1,5 +1,5 @@
 /**
- * Manual connection sheet (DESIGN 9.9): the two steps of the link exchange, for either side.
+ * Manual connection sheet (DESIGN 9): the two steps of the link exchange, for either side.
  *
  * - Host, step 1: the offer link (QR, Copy, Share) to send. Step 2: a paste field for the link
  *   the opponent sends back (opening that link on this device works too: the new tab hands it to

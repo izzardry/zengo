@@ -1,12 +1,12 @@
 /**
- * A calm card over the board for room states that last (DESIGN 9.12, 9.5, 9.11):
+ * A calm card over the board for room states that last (DESIGN 9):
  *
  * - `This room is open in another tab` with `Use here` (take the room over from the other tab).
  * - Version mismatch with `Reload`.
  * - Rejoin declined.
  * - Waiting for the opponent to let this device in (after `joiningDelayMs`, so a first join that
  *   is welcomed at once does not flash it).
- * - `Waiting for opponent` while a device without a seat waits as anchor (DESIGN 9.5: an invite
+ * - `Waiting for opponent` while a device without a seat waits as anchor (DESIGN 9: an invite
  *   link opened while the other app is closed, or a lost device returning while the survivor is
  *   offline). Also after `joiningDelayMs`, so a quick claim-then-dial does not flash it.
  *

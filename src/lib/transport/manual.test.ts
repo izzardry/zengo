@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Message, TransportState } from '../chessTypes';
+import type { Message, TransportState } from '../types';
 import { parseUrl } from '../url';
 import {
   answerLink,

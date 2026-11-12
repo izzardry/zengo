@@ -8,7 +8,7 @@ import type { ShareNavigator } from '@/components/game/share';
 import { IDLE_ROOM_VIEW, useRoom, type ManualView, type UseRoomOptions } from '@/hooks/useRoom';
 import { dictionaries } from '@/lib/i18n';
 import type { RoomControllerOptions } from '@/lib/room';
-import type { RoomNotice, RoomNoticeKind } from '@/lib/chessTypes';
+import type { RoomNotice, RoomNoticeKind } from '@/lib/types';
 import { parseUrl, serializeUrl, urlQuery } from '@/lib/url';
 import {
   InviteSheet,
@@ -76,9 +76,13 @@ describe('room text helpers', () => {
     expect(EN[noticeKey({ kind: 'request-declined', request: 'takeback' })]).toBe('Takeback declined');
     expect(EN[noticeKey({ kind: 'restored-from-opponent' })]).toBe('Game restored from opponent’s copy');
     expect(EN[noticeKey({ kind: 'ice-failed' })]).toBe('Could not reach your opponent directly. Try another network.');
-    for (const k of ['takeback', 'draw', 'rematch', 'rejoin'] as const) expect(EN[requestKey(k)]).toBeTruthy();
+    for (const k of ['takeback', 'rematch', 'rejoin'] as const) expect(EN[requestKey(k)]).toBeTruthy();
     expect(EN[requestKey('rejoin')]).toBe('Opponent is rejoining from a new device');
-    for (const k of ['takeback', 'draw', 'rematch'] as const) expect(EN[pendingKey(k)]).toBeTruthy();
+    for (const k of ['takeback', 'rematch'] as const) expect(EN[pendingKey(k)]).toBeTruthy();
+    // There are no draws in Go (DESIGN 9.4): no draw strings in any language.
+    for (const lang of ['en', 'de', 'fr', 'es'] as const) {
+      expect(Object.keys(dictionaries[lang]).filter((k) => k.startsWith('room.') && /draw/.test(k))).toEqual([]);
+    }
     for (const i of ['invalid', 'wrong-kind', 'mismatch', 'used', 'other-room', 'webrtc', 'ice-failed'] as const) {
       for (const lang of ['en', 'de', 'fr', 'es'] as const) expect(dictionaries[lang][manualIssueKey(i)], `${lang} ${i}`).toBeTruthy();
     }
@@ -95,7 +99,7 @@ describe('room text helpers', () => {
     expect(shouldOfferInvite(fakeRoomState({ phase: 'read-only' }))).toBe(false);
   });
 
-  it('a device without a seat waiting as anchor shows `Waiting for opponent` (DESIGN 9.5)', () => {
+  it('a device without a seat waiting as anchor shows `Waiting for opponent` (DESIGN 9)', () => {
     expect(waitsAsAnchor(null)).toBe(false);
     expect(waitsAsAnchor(fakeRoomState({ seat: null }))).toBe(true);
     // A seated creator gets the invite sheet instead.
@@ -173,7 +177,7 @@ describe('InviteSheet', () => {
     const nav = fakeNav(true);
     renderRoom(<InviteSheet open onOpenChange={() => {}} code="K7QW2M" link="https://x.test/#/?s=K7QW2M&o=r" nav={nav} />);
     await userEvent.click(screen.getByRole('button', { name: 'Share' }));
-    expect(nav.shared).toEqual([{ title: 'Zigo', text: 'Join my chess game!', url: 'https://x.test/#/?s=K7QW2M&o=r' }]);
+    expect(nav.shared).toEqual([{ title: 'Zigo', text: 'Join my Go game!', url: 'https://x.test/#/?s=K7QW2M&o=r' }]);
   });
 
   it('offers Connect manually with the calm reason when the 10-second rule says so', async () => {
@@ -298,12 +302,12 @@ describe('ManualConnectSheet', () => {
 /* ---------------------------------------------------------------------------------------------- */
 
 describe('RequestToasts', () => {
-  it('shows an incoming draw offer with Decline and Accept, and answers it', async () => {
+  it('shows an incoming rematch request with Decline and Accept, and answers it', async () => {
     const onReply = vi.fn();
-    const { rerender } = renderRoom(<RequestToasts requests={{ incoming: 'draw' }} onReply={onReply} />);
-    const t = await screen.findByRole('alertdialog', { name: 'Your opponent offers a draw' });
+    const { rerender } = renderRoom(<RequestToasts requests={{ incoming: 'rematch' }} onReply={onReply} />);
+    const t = await screen.findByRole('alertdialog', { name: 'Your opponent wants a rematch' });
     await userEvent.click(within(t).getByRole('button', { name: 'Accept' }));
-    expect(onReply).toHaveBeenCalledWith('draw', true);
+    expect(onReply).toHaveBeenCalledWith('rematch', true);
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
 
     rerender(<RequestToasts requests={{}} onReply={onReply} />);
@@ -315,16 +319,16 @@ describe('RequestToasts', () => {
 
   it('a request that replaces another in one render shows and stays (sonner keeps a dismissed id marked)', async () => {
     const onReply = vi.fn();
-    const { rerender } = renderRoom(<RequestToasts requests={{ incoming: 'draw' }} onReply={onReply} />);
-    expect(await screen.findByRole('alertdialog', { name: 'Your opponent offers a draw' })).toBeInTheDocument();
-    // The draw offer lapses and a takeback request lands in the same render.
+    const { rerender } = renderRoom(<RequestToasts requests={{ incoming: 'rematch' }} onReply={onReply} />);
+    expect(await screen.findByRole('alertdialog', { name: 'Your opponent wants a rematch' })).toBeInTheDocument();
+    // The rematch request lapses and a takeback request lands in the same render.
     rerender(<RequestToasts requests={{ incoming: 'takeback' }} onReply={onReply} />);
     expect(await screen.findByRole('alertdialog', { name: 'Your opponent asks for a takeback' })).toBeInTheDocument();
     await act(async () => {
       await new Promise((r) => setTimeout(r, 600));
     });
     const t = screen.getByRole('alertdialog', { name: 'Your opponent asks for a takeback' });
-    expect(screen.queryByRole('alertdialog', { name: 'Your opponent offers a draw' })).toBeNull();
+    expect(screen.queryByRole('alertdialog', { name: 'Your opponent wants a rematch' })).toBeNull();
     await userEvent.click(within(t).getByRole('button', { name: 'Accept' }));
     expect(onReply).toHaveBeenCalledWith('takeback', true);
   });
@@ -349,19 +353,19 @@ describe('RequestToasts', () => {
   });
 
   it('withdraws the toast when the request lapses', async () => {
-    const { rerender } = renderRoom(<RequestToasts requests={{ incoming: 'rematch' }} onReply={() => {}} />);
-    expect(await screen.findByRole('alertdialog', { name: 'Your opponent wants a rematch' })).toBeInTheDocument();
+    const { rerender } = renderRoom(<RequestToasts requests={{ incoming: 'takeback' }} onReply={() => {}} />);
+    expect(await screen.findByRole('alertdialog', { name: 'Your opponent asks for a takeback' })).toBeInTheDocument();
     rerender(<RequestToasts requests={{}} onReply={() => {}} />);
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
   });
 
-  // DESIGN 9.7: the requester sees a pending state on the button (undo, flag, overlay Rematch).
-  // A toast here sat on the toolbar for as long as the request was open (Gate 3 finding), so this
-  // test, which asserted that toast, now asserts its absence.
+  // The requester sees a pending state on the button (undo, overlay Rematch). A toast here sat on
+  // the toolbar for as long as the request was open (an earlier gate finding), so this test asserts
+  // its absence.
   it('shows no toast for an own request: its button carries the pending state', async () => {
-    const { rerender } = renderRoom(<RequestToasts requests={{ outgoing: 'draw' }} onReply={() => {}} />);
+    const { rerender } = renderRoom(<RequestToasts requests={{ outgoing: 'rematch' }} onReply={() => {}} />);
     await act(async () => {});
-    expect(screen.queryByText('Draw offered')).toBeNull();
+    expect(screen.queryByText('Rematch requested')).toBeNull();
     expect(screen.queryByText('Waiting for your opponent')).toBeNull();
     rerender(<RequestToasts requests={{ outgoing: 'takeback' }} onReply={() => {}} />);
     await act(async () => {});
@@ -381,8 +385,8 @@ describe('RequestToasts', () => {
   });
 
   it('speaks Spanish with tú', async () => {
-    renderRoom(<RequestToasts requests={{ incoming: 'draw' }} onReply={() => {}} />, 'es');
-    const t = await screen.findByRole('alertdialog', { name: 'Tu rival ofrece tablas' });
+    renderRoom(<RequestToasts requests={{ incoming: 'rematch' }} onReply={() => {}} />, 'es');
+    const t = await screen.findByRole('alertdialog', { name: 'Tu rival quiere la revancha' });
     expect(within(t).getByRole('button', { name: 'Aceptar' })).toBeInTheDocument();
     expect(within(t).getByRole('button', { name: 'Rechazar' })).toBeInTheDocument();
   });

@@ -1,79 +1,95 @@
 /**
- * Room sync (DESIGN 9.3, 9.4, 9.5, 9.7, 9.8, 9.11, 12.1) — pure and framework-free.
+ * Room sync (DESIGN 9, 9.2, 9.3, 9.5, 12.1) — pure and framework-free.
  *
  * - Log hashing and the `head` summary message.
- * - `reconcile`: the five rules of DESIGN 9.4 as one function, used twice per connection:
- *   first with the other side's `head`, then with any `logs` it sends. Every adopted log is
- *   validated by replaying it from the start through `ZhessApi`.
- * - Live-play helpers on a `GameLog`: applying a received move, takeback, rematch.
- * - Room score across games (colors swap on rematch).
- * - Seat key: generation, nonces and the HMAC-SHA-256 proof through WebCrypto (DESIGN 9.3).
+ * - `reconcile`: the five reconcile rules plus the scoring rule of DESIGN 9.2, as one function used twice
+ *   per connection: first with the other side's `head`, then with any `logs` it sends. Every adopted
+ *   log is validated by replaying it from the start through `ZigoApi` (positional superko included).
+ * - Live-play helpers on a `GameLog`: applying a received ply (a point or `tt` for a pass),
+ *   takeback, rematch, and the scoring phase (mark, accept, resume, the scored end).
+ * - Room score across games (a win adds 2 half points ×2; Go has no draws).
+ * - Seat key: generation, nonces and the HMAC-SHA-256 proof through WebCrypto.
  * - Conversion between `GameLog` and the stored `SavedGame`.
  *
  * Time and randomness are injected (`rng`); nothing here reads the clock, storage or the network.
  */
 import type {
   Color,
-  GameEnd,
   Game,
   GameLog,
   HeadMsg,
   LogsMsg,
   MoveMsg,
   Ply,
+  Point,
   Result,
   Rng,
+  Rules,
   SavedGame,
+  Scoring,
   Seat,
+  Settings,
+  Size,
   Termination,
-  ZhessApi,
-} from './chessTypes';
-import { PROTOCOL_VERSION } from './chessTypes';
-import zhess, { parseTc } from './zhess';
+  ZigoApi,
+} from './types';
+import { PROTOCOL_VERSION } from './types';
+import zigo, { isPoint, isValidMoves, makeSettings, normalizeHandicap, parseTc, PASS, pointToIndex } from './zigo';
+import scoringApi from './scoring';
 
 /* ---------------------------------------------------------------------------------------------- */
 /* Small helpers                                                                                    */
 /* ---------------------------------------------------------------------------------------------- */
 
-const RESULTS: ReadonlySet<string> = new Set<Result>(['1-0', '0-1', '1/2-1/2']);
-const TERMINATIONS: ReadonlySet<string> = new Set<Termination>([
-  'mate',
-  'resign',
-  'time',
-  'stalemate',
-  'repetition',
-  'fifty',
-  'material',
-  'agreed',
-]);
-/** Endings `ZhessApi.play` detects by itself; a log may only claim them if the position says so. */
-const AUTO_ENDINGS: ReadonlySet<Termination> = new Set<Termination>([
-  'mate',
-  'stalemate',
-  'repetition',
-  'fifty',
-  'material',
-]);
-const UCI_RE = /^[a-h][1-8][a-h][1-8][qrbn]?$/;
+/** How a room game ended (`GameLog.end`). */
+export type LogEnd = NonNullable<GameLog['end']>;
+
+/** The game settings a log carries. */
+export type LogSettings = Pick<GameLog, 'size' | 'rules' | 'handicap'>;
+
+/** Settings of a room created without any (an invite link opened by two newcomers): 9×9, area, no handicap. */
+export const DEFAULT_LOG_SETTINGS: LogSettings = Object.freeze({ size: 9, rules: 'area', handicap: 0 });
+
+const TERMINATIONS: ReadonlySet<string> = new Set<Termination>(['score', 'resign', 'time']);
+const SIZES: ReadonlySet<unknown> = new Set<Size>([9, 13, 19]);
+const RULES: ReadonlySet<unknown> = new Set<Rules>(['area', 'territory']);
+
+const isCount = (x: unknown): x is number => typeof x === 'number' && Number.isInteger(x) && x >= 0;
 
 /** The other seat. */
 export function otherSeat(seat: Seat): Seat {
   return seat === 0 ? 1 : 0;
 }
 
+/** The other color. */
+export function otherColor(c: Color): Color {
+  return c === 'B' ? 'W' : 'B';
+}
+
 /** This seat's color in a game. */
-export function colorOf(log: Pick<GameLog, 'white'>, seat: Seat): Color {
-  return log.white === seat ? 'w' : 'b';
+export function colorOf(log: Pick<GameLog, 'black'>, seat: Seat): Color {
+  return log.black === seat ? 'B' : 'W';
 }
 
 /** The seat that plays `color` in a game. */
-export function seatOf(log: Pick<GameLog, 'white'>, color: Color): Seat {
-  return color === 'w' ? log.white : otherSeat(log.white);
+export function seatOf(log: Pick<GameLog, 'black'>, color: Color): Seat {
+  return color === 'B' ? log.black : otherSeat(log.black);
 }
 
-/** The color that made ply `i` (0-based). Room games always start from the standard position. */
-export function colorOfPly(i: number): Color {
-  return i % 2 === 0 ? 'w' : 'b';
+/** The color that makes the first ply: White with a handicap of 2 or more, else Black. */
+export function firstColor(log: Pick<GameLog, 'handicap'>): Color {
+  return log.handicap >= 2 ? 'W' : 'B';
+}
+
+/** The color that made ply `i` (0-based). Room games start from the empty board plus handicap. */
+export function colorOfPly(log: Pick<GameLog, 'handicap'>, i: number): Color {
+  const first = firstColor(log);
+  return i % 2 === 0 ? first : otherColor(first);
+}
+
+/** The rules-core settings of a log (default komi for its rules and handicap). */
+export function settingsOf(log: LogSettings): Settings {
+  return makeSettings(log.size, log.rules, log.handicap);
 }
 
 /** The current game: the log with the highest `n`, or undefined for an empty list. */
@@ -94,9 +110,25 @@ function samePly(a: Ply, b: Ply): boolean {
   return a.m === b.m && a.ms === b.ms;
 }
 
-function sameEnd(a: GameEnd | undefined, b: GameEnd | undefined): boolean {
+function sameResult(a: Result, b: Result): boolean {
+  return a.winner === b.winner && a.by === b.by && (a.margin ?? null) === (b.margin ?? null);
+}
+
+function sameEnd(a: LogEnd | undefined, b: LogEnd | undefined): boolean {
   if (!a || !b) return a === b;
-  return a.result === b.result && a.by === b.by;
+  return a.by === b.by && sameResult(a.result, b.result);
+}
+
+function sameScoring(a: Scoring | undefined, b: Scoring | undefined): boolean {
+  if (!a || !b) return a === b;
+  return (
+    a.round === b.round &&
+    a.rev === b.rev &&
+    a.accepted[0] === b.accepted[0] &&
+    a.accepted[1] === b.accepted[1] &&
+    a.dead.length === b.dead.length &&
+    a.dead.every((p, i) => p === b.dead[i])
+  );
 }
 
 /** Length of the common prefix of two ply lists (move and time must both match). */
@@ -105,6 +137,11 @@ export function commonPrefix(a: readonly Ply[], b: readonly Ply[]): number {
   let i = 0;
   while (i < n && samePly(a[i], b[i])) i++;
   return i;
+}
+
+/** A plain, mutable copy of a scoring state (dead sorted and de-duplicated). */
+function plainScoring(s: Scoring): Scoring {
+  return { round: s.round === 2 ? 2 : 1, rev: s.rev, dead: [...new Set(s.dead)].sort(), accepted: [s.accepted[0], s.accepted[1]] };
 }
 
 /* ---------------------------------------------------------------------------------------------- */
@@ -130,25 +167,38 @@ export function hashString(s: string): string {
 }
 
 /**
- * Hash of a game's identity and its first `len` plies (default: all): `n`, `epoch`, `white`, `tc`
- * and every ply's move and time. The end is not included, so the hash of a prefix can be compared
- * with the other side's `head`. 16 hex digits.
+ * Hash of a game's identity and its first `len` plies (default: all): `n`, `epoch`, `black`, `tc`,
+ * the settings (size, rules, handicap) and every ply's point and time. Neither the scoring state nor
+ * the end is included, so the hash of a prefix can be compared with the other side's `head`.
+ * 16 hex digits.
  */
 export function pliesHash(log: GameLog, len: number = log.plies.length): string {
   const k = Math.max(0, Math.min(log.plies.length, Math.floor(len)));
-  let s = `${log.n}|${log.epoch}|${log.white}|${log.tc ?? '-'}|`;
+  let s = `${log.n}|${log.epoch}|${log.black}|${log.tc ?? '-'}|${log.size}|${log.rules}|${log.handicap}|`;
   for (let i = 0; i < k; i++) s += `${log.plies[i].m},${log.plies[i].ms};`;
   return hashString(s);
 }
 
+/** `B+score9`, `W+resign`: the end as it appears in a `head.hash`. */
+function endTag(end: LogEnd): string {
+  return `${end.result.winner}+${end.by}${end.result.margin ?? ''}`;
+}
+
+/** The scoring state as it appears in a `head.hash`: round, rev, acceptances and a hash of the dead set. */
+function scoringTag(s: Scoring): string {
+  return `s${s.round}r${s.rev}a${s.accepted[0]}-${s.accepted[1]}d${hashString(s.dead.join(''))}`;
+}
+
 /**
- * The `head.hash` of a log: `pliesHash`, followed by `.result.by` when the game is over, e.g.
- * `3f2a…9c` or `3f2a…9c.1-0.resign`. Two logs have the same hash exactly when they agree on
- * `n`, `epoch`, `white`, `tc`, every ply and the end.
+ * The `head.hash` of a log: `pliesHash`, followed by `.<scoring>` while (or after) scoring and by
+ * `.<end>` when the game is over, e.g. `3f2a…9c`, `3f2a…9c.s1r2a2-0d…` or `3f2a…9c.W+resign`. Two logs
+ * have the same hash exactly when they agree on the identity, every ply, the scoring state and the end.
  */
 export function hashLog(log: GameLog): string {
-  const h = pliesHash(log);
-  return log.end ? `${h}.${log.end.result}.${log.end.by}` : h;
+  let h = pliesHash(log);
+  if (log.scoring) h += `.${scoringTag(log.scoring)}`;
+  if (log.end) h += `.${endTag(log.end)}`;
+  return h;
 }
 
 /** The plies part of a `head.hash` (everything before the first `.`). */
@@ -158,10 +208,9 @@ export function headPliesHash(hash: string): string {
 }
 
 /**
- * The `head` reconcile summary of this device's current game (DESIGN 9.4, 9.11). `log` is the
- * current game, or undefined when this device has no game in the room yet (then `n` is 0).
- * `turnMs` is the time this device has already used on its own running turn (DESIGN 9.8); pass it
- * only when it is this device's turn.
+ * The `head` reconcile summary of this device's current game. `log` is the current game, or
+ * undefined when this device has no game in the room yet (then `n` is 0). `turnMs` is the time this
+ * device has already used on its own running turn; pass it only when it is this device's turn.
  */
 export function makeHead(log: GameLog | undefined, turnMs?: number): HeadMsg {
   const head: HeadMsg = log
@@ -183,82 +232,149 @@ export function makeLogs(games: readonly GameLog[]): LogsMsg {
 export type ValidLog = { ok: true; log: GameLog; game: Game };
 export type InvalidLog = { ok: false; error: string };
 
+/** The scored result of a game in scoring with its marked dead stones (DESIGN 8.1: a pure function). */
+export function scoredResult(g: Game, dead: readonly Point[]): Result {
+  return scoringApi.result(g, scoringApi.score(g, dead));
+}
+
+function readResult(raw: unknown): Result | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const r = raw as Record<string, unknown>;
+  if (r.winner !== 'B' && r.winner !== 'W') return null;
+  if (typeof r.by !== 'string' || !TERMINATIONS.has(r.by)) return null;
+  const by = r.by as Termination;
+  if (by === 'score') {
+    if (!isCount(r.margin)) return null;
+    return { winner: r.winner, by, margin: r.margin };
+  }
+  if (r.margin !== undefined && r.margin !== null) return null;
+  return { winner: r.winner, by };
+}
+
+function readScoring(raw: unknown, size: number): Scoring | string {
+  if (typeof raw !== 'object' || raw === null) return 'bad scoring';
+  const s = raw as Record<string, unknown>;
+  if (s.round !== 1 && s.round !== 2) return 'bad scoring round';
+  if (!isCount(s.rev)) return 'bad scoring rev';
+  if (!Array.isArray(s.dead) || !s.dead.every((p) => isPoint(p, size))) return 'bad dead stones';
+  const acc = s.accepted;
+  if (!Array.isArray(acc) || acc.length !== 2 || !acc.every((a) => isCount(a) && a <= (s.rev as number))) return 'bad acceptances';
+  return { round: s.round, rev: s.rev, dead: [...new Set(s.dead as string[])].sort(), accepted: [acc[0] as number, acc[1] as number] };
+}
+
 /**
- * Checks a log received from the other device (any JSON) and replays it from the standard start
- * through `api` (DESIGN 9.4 rule 3: an illegal ply aborts the sync).
+ * Checks a log received from the other device (any JSON) and replays it from the start through
+ * `api` (an illegal ply, positional superko included, aborts the sync).
  *
  * Rejects: wrong shapes, `n < 1`, a negative epoch, an unknown seat, an unreadable time control,
- * an illegal ply or a ply after the game ended, an automatic ending the position does not show
- * (or that differs from the one it shows), `agreed` that is not a draw, `resign` that is a draw.
+ * a size other than 9/13/19, unknown rules, a handicap Zigo does not offer on that size, a point off
+ * the board, an illegal ply, a scoring state without two consecutive passes at the end (or with dead
+ * points that are not stones), an end whose `by` differs from its result's, and a scored end whose
+ * result is not the count of the marked dead stones.
  *
- * The returned log is a fresh, normalized copy: plies in canonical UCI with whole, non-negative
- * ms (as `api.play` stores them) and the automatic ending filled in if the sender left it out.
- * `game` is the replayed game with its end applied.
+ * A ply that follows a double pass resumes scoring first (as `ZigoApi.replay`). A log that ends in a
+ * double pass without `scoring` was resumed; with `scoring` it is in (or was ended in) scoring.
+ *
+ * The returned log is a fresh, normalized copy: whole, non-negative ms (as `api.play` stores them),
+ * the scoring round derived from the plies and the dead set sorted. `game` is the replayed game with
+ * its scoring state and end applied.
  */
-export function validateLog(raw: unknown, api: ZhessApi = zhess): ValidLog | InvalidLog {
+export function validateLog(raw: unknown, api: ZigoApi = zigo): ValidLog | InvalidLog {
   const bad = (error: string): InvalidLog => ({ ok: false, error });
   if (typeof raw !== 'object' || raw === null) return bad('not an object');
   const r = raw as Record<string, unknown>;
-  const { n, epoch, white, tc, plies, end } = r;
+  const { n, epoch, black, tc, plies, end, size, rules, handicap, scoring } = r;
   if (typeof n !== 'number' || !Number.isInteger(n) || n < 1) return bad('bad n');
-  if (typeof epoch !== 'number' || !Number.isInteger(epoch) || epoch < 0) return bad('bad epoch');
-  if (white !== 0 && white !== 1) return bad('bad white');
+  if (!isCount(epoch)) return bad('bad epoch');
+  if (black !== 0 && black !== 1) return bad('bad black');
   if (tc !== null && (typeof tc !== 'string' || parseTc(tc) === null)) return bad('bad tc');
+  if (!SIZES.has(size)) return bad('bad size');
+  if (!RULES.has(rules)) return bad('bad rules');
+  const sz = size as Size;
+  if (!isCount(handicap) || normalizeHandicap(sz, handicap) !== handicap) return bad('bad handicap');
   if (!Array.isArray(plies)) return bad('bad plies');
-  let ending: GameEnd | undefined;
+  let ending: LogEnd | undefined;
   if (end !== undefined && end !== null) {
     if (typeof end !== 'object') return bad('bad end');
     const e = end as Record<string, unknown>;
-    if (typeof e.result !== 'string' || !RESULTS.has(e.result)) return bad('bad result');
-    if (typeof e.by !== 'string' || !TERMINATIONS.has(e.by)) return bad('bad termination');
-    ending = { result: e.result as Result, by: e.by as Termination };
-    if (ending.by === 'agreed' && ending.result !== '1/2-1/2') return bad('agreed draw with a winner');
-    if (ending.by === 'resign' && ending.result === '1/2-1/2') return bad('resignation without a winner');
+    const result = readResult(e.result);
+    if (!result) return bad('bad result');
+    if (e.by !== result.by) return bad('bad termination');
+    ending = { result, by: result.by };
+  }
+  let marks: Scoring | undefined;
+  if (scoring !== undefined && scoring !== null) {
+    const s = readScoring(scoring, sz);
+    if (typeof s === 'string') return bad(s);
+    marks = s;
   }
 
-  let g = api.newGame();
+  const settings = makeSettings(sz, rules as Rules, handicap);
+  let g = api.newGame(settings);
   for (let i = 0; i < plies.length; i++) {
     const p = plies[i] as unknown;
     if (typeof p !== 'object' || p === null) return bad(`bad ply ${i}`);
     const { m, ms } = p as Record<string, unknown>;
-    if (typeof m !== 'string' || !UCI_RE.test(m)) return bad(`bad move at ply ${i}`);
+    if (typeof m !== 'string' || (m !== PASS && !isPoint(m, sz))) return bad(`bad move at ply ${i}`);
     if (typeof ms !== 'number' || !Number.isFinite(ms) || ms < 0) return bad(`bad time at ply ${i}`);
     try {
+      if (g.scoring) g = api.resume(g);
       g = api.play(g, m, ms);
     } catch {
       return bad(`illegal ply ${i}: ${m}`);
     }
   }
 
-  if (g.end) {
-    // The position itself ended the game: a log may leave the end out, but not contradict it.
-    if (ending && !sameEnd(ending, g.end)) return bad('end contradicts the position');
-    ending = g.end;
-  } else if (ending) {
-    if (AUTO_ENDINGS.has(ending.by)) return bad('automatic end not shown by the position');
-    g = api.end(g, ending.result, ending.by);
+  if (g.scoring) {
+    if (marks) {
+      for (const p of marks.dead) if (g.board[pointToIndex(p, sz)] === 0) return bad('dead point is not a stone');
+      g = api.setScoring(g, { ...marks, round: g.scoring.round });
+    } else {
+      g = api.resume(g);
+    }
+  } else if (marks) {
+    return bad('scoring without two passes');
+  }
+
+  if (ending) {
+    if (ending.by === 'score') {
+      if (!g.scoring) return bad('scored end without scoring');
+      if (!sameResult(ending.result, scoredResult(g, g.scoring.dead))) return bad('score does not match the marking');
+    }
+    g = api.end(g, ending.result);
   }
 
   const log: GameLog = {
     n,
     epoch,
-    white,
-    tc: (tc as string | null) ?? null,
     plies: g.plies.map((p) => ({ m: p.m, ms: p.ms })),
+    black,
+    tc: (tc as string | null) ?? null,
+    size: sz,
+    rules: rules as Rules,
+    handicap,
   };
-  if (ending) log.end = { result: ending.result, by: ending.by };
+  if (g.scoring) log.scoring = plainScoring(g.scoring);
+  if (ending) log.end = { result: { ...ending.result }, by: ending.by };
   return { ok: true, log, game: g };
 }
 
-/** The game of a log (replayed, end applied). Throws on an invalid log. */
-export function logToGame(log: GameLog, api: ZhessApi = zhess): Game {
+/** The game of a log (replayed, scoring and end applied). Throws on an invalid log. */
+export function logToGame(log: GameLog, api: ZigoApi = zigo): Game {
   const v = validateLog(log, api);
   if (!v.ok) throw new Error(`Invalid game log: ${v.error}`);
   return v.game;
 }
 
+/** The game of a trusted log (this device's own), without the end: replay plus the scoring state. */
+function playable(log: GameLog, api: ZigoApi): Game {
+  let g = api.replay(settingsOf(log), log.plies);
+  if (g.scoring) g = log.scoring ? api.setScoring(g, { ...log.scoring, round: g.scoring.round }) : api.resume(g);
+  return g;
+}
+
 /* ---------------------------------------------------------------------------------------------- */
-/* Comparing two copies of one game (DESIGN 9.4 rules 2–5)                                          */
+/* Comparing two copies of one game (rules 2–6)                                                     */
 /* ---------------------------------------------------------------------------------------------- */
 
 /** Which copy of a game wins, and whether they were a true fork (rule 4). */
@@ -266,34 +382,76 @@ export interface Comparison {
   winner: 'local' | 'remote' | 'same';
   /** Rule 4 decided it: seat 0's copy won over a contradicting one. */
   fork: boolean;
-  /** The rule that decided (2 epoch, 3 prefix, 4 fork, 5 finished), or 0 when the copies are identical. */
-  rule: 0 | 2 | 3 | 4 | 5;
+  /**
+   * The rule that decided (2 epoch, 3 prefix, 4 fork, 5 finished, 6 scoring), or 0 when the copies
+   * are identical.
+   */
+  rule: 0 | 2 | 3 | 4 | 5 | 6;
 }
 
 /**
- * Compares two copies of the same game `n` (rules 2–5). Antisymmetric: the other device, comparing
- * the same two copies from its side with its own seat, reaches the mirrored verdict.
+ * Orders two scoring states of the same plies (rule 6, DESIGN 9.2): 1 when `a` wins, -1 when `b`
+ * wins, 0 when they are equal, null when they contradict each other (a fork: seat 0's copy wins).
+ *
+ * - A resumed copy (no scoring after the double pass) wins over a copy still scoring: a resume is
+ *   the only way out of scoring, so it came later.
+ * - The higher `rev` wins.
+ * - Equal `rev` with a different dead set contradicts (DESIGN 9.2: seat 0's copy wins).
+ * - Equal marks: the copy whose acceptances include the other's wins (an `accept` that was lost on
+ *   the way); acceptances that each lack the other's contradict.
+ */
+export function compareScoring(a: Scoring | undefined, b: Scoring | undefined): 1 | -1 | 0 | null {
+  if (!a && !b) return 0;
+  if (!a) return 1;
+  if (!b) return -1;
+  if (a.rev !== b.rev) return a.rev > b.rev ? 1 : -1;
+  if (a.dead.length !== b.dead.length || a.dead.some((p, i) => p !== b.dead[i])) return null;
+  const aHas = a.accepted[0] >= b.accepted[0] && a.accepted[1] >= b.accepted[1];
+  const bHas = b.accepted[0] >= a.accepted[0] && b.accepted[1] >= a.accepted[1];
+  if (aHas && bHas) return 0;
+  if (aHas) return 1;
+  if (bHas) return -1;
+  return null;
+}
+
+/**
+ * Compares two copies of the same game `n`. Antisymmetric: the other device, comparing the same two
+ * copies from its side with its own seat, reaches the mirrored verdict.
  *
  * 2. The higher epoch wins.
  * 3. If one ply list is a prefix of the other, the longer wins.
  * 4. Equal length with different content, or any other contradiction: seat 0's copy wins.
  * 5. Of two identical ply lists, the finished copy wins.
+ * 6. Of two identical ply lists with the same end, the scoring state decides (`compareScoring`).
  *
- * Where the design is silent: a finished copy also beats a longer unfinished copy that continues it
- * (no ply can follow the end of a game; this is an offline resignation crossing an offline move),
- * and two finished copies of different length or with different ends are a fork (rule 4).
+ * Where the design is silent (as in the original room design): a finished copy also beats a longer unfinished copy that
+ * continues it (an offline resignation crossing an offline move), and two finished copies of
+ * different length or with different ends are a fork (rule 4).
  */
 export function compareLogs(local: GameLog, remote: GameLog, localSeat: Seat): Comparison {
   const fork = (): Comparison => ({ winner: localSeat === 0 ? 'local' : 'remote', fork: true, rule: 4 });
   if (local.epoch !== remote.epoch) {
     return { winner: local.epoch > remote.epoch ? 'local' : 'remote', fork: false, rule: 2 };
   }
-  if (local.white !== remote.white || local.tc !== remote.tc) return fork();
+  if (
+    local.black !== remote.black ||
+    local.tc !== remote.tc ||
+    local.size !== remote.size ||
+    local.rules !== remote.rules ||
+    local.handicap !== remote.handicap
+  ) {
+    return fork();
+  }
   const lp = local.plies;
   const rp = remote.plies;
   const p = commonPrefix(lp, rp);
   if (p === lp.length && p === rp.length) {
-    if (sameEnd(local.end, remote.end)) return { winner: 'same', fork: false, rule: 0 };
+    if (sameEnd(local.end, remote.end)) {
+      if (sameScoring(local.scoring, remote.scoring)) return { winner: 'same', fork: false, rule: 0 };
+      const s = compareScoring(local.scoring, remote.scoring);
+      if (s === null || s === 0) return fork();
+      return { winner: s > 0 ? 'local' : 'remote', fork: false, rule: 6 };
+    }
     if (local.end && remote.end) return fork();
     return { winner: local.end ? 'local' : 'remote', fork: false, rule: 5 };
   }
@@ -309,7 +467,7 @@ export function compareLogs(local: GameLog, remote: GameLog, localSeat: Seat): C
 }
 
 /* ---------------------------------------------------------------------------------------------- */
-/* Reconcile (DESIGN 9.4 rules 1–5, 9.5)                                                            */
+/* Reconcile                                                                                        */
 /* ---------------------------------------------------------------------------------------------- */
 
 /**
@@ -319,8 +477,9 @@ export function compareLogs(local: GameLog, remote: GameLog, localSeat: Seat): C
  * - `ahead`: this device's copy wins; `send` holds the logs to send.
  * - `behind`: the other copy wins. After a `head`: wait for its `logs` (seat 1 may still have
  *   `send` set, see below). After `logs`: store `adopt`.
- * - `fork`: after a `head` only. The copies contradict each other (rule 4); both devices send their
- *   logs (`send`) and the `logs` step settles it.
+ * - `fork`: after a `head` only. The copies differ in a way the head cannot settle (a contradiction,
+ *   or the same plies with another scoring state); both devices send their logs (`send`) and the
+ *   `logs` step settles it.
  *
  * Whatever the status, send `send` when it is set. A fork is reported (`forked`) only by the
  * `logs` step, exactly once per device: seat 1 when it adopts seat 0's copy, seat 0 when it receives
@@ -348,15 +507,15 @@ export interface SyncResult {
   /** Why validation failed (`invalid` only). */
   error?: string;
   /** The rule that decided the current game (see `Comparison.rule`; 1 = game number). */
-  rule?: 0 | 1 | 2 | 3 | 4 | 5;
+  rule?: 0 | 1 | 2 | 3 | 4 | 5 | 6;
 }
 
 /** The other side's message: its `head`, its `logs` message, or the games of a `logs` / `grant`. */
 export type RemoteSync = HeadMsg | LogsMsg | readonly GameLog[];
 
 /**
- * The one reconcile function (DESIGN 9.4). Call it with every `head` and every `logs` the other
- * device sends, passing all logs of the room this device holds (any order) and its seat.
+ * The one reconcile function. Call it with every `head` and every `logs` the other device sends,
+ * passing all logs of the room this device holds (any order) and its seat.
  *
  * Protocol around it: on connect (after the challenge) both devices send `makeHead(current)`.
  * On a `head`, call `reconcile`; if it returns `send`, send `makeLogs(send)`. On `logs`, call it
@@ -367,7 +526,7 @@ export type RemoteSync = HeadMsg | LogsMsg | readonly GameLog[];
  * own current number on (its unfinished game, the finished games it missed, the current one).
  * Older games are not compared after a `head`, only when they arrive in `logs`.
  */
-export function reconcile(local: readonly GameLog[], remote: RemoteSync, localSeat: Seat, api: ZhessApi = zhess): SyncResult {
+export function reconcile(local: readonly GameLog[], remote: RemoteSync, localSeat: Seat, api: ZigoApi = zigo): SyncResult {
   if (isHead(remote)) return reconcileHead(local, remote, localSeat);
   const games = Array.isArray(remote) ? (remote as readonly GameLog[]) : (remote as LogsMsg).games;
   return reconcileLogs(local, games, localSeat, api);
@@ -381,8 +540,6 @@ function isHead(r: RemoteSync): r is HeadMsg {
 function gamesFrom(local: readonly GameLog[], from: number): GameLog[] {
   return sortLogs(local).filter((l) => l.n >= from);
 }
-
-const isCount = (x: unknown): x is number => typeof x === 'number' && Number.isInteger(x) && x >= 0;
 
 function reconcileHead(local: readonly GameLog[], head: HeadMsg, localSeat: Seat): SyncResult {
   if (!isCount(head.n) || !isCount(head.epoch) || !isCount(head.len) || typeof head.hash !== 'string' || typeof head.ended !== 'boolean') {
@@ -408,7 +565,8 @@ function reconcileHead(local: readonly GameLog[], head: HeadMsg, localSeat: Seat
   if (head.len === len) {
     if (head.hash === hashLog(cur)) return { status: 'in-sync', forked: false, rule: 0 };
     if (remotePlies !== pliesHash(cur)) return fork();
-    // Same plies, different end state (rule 5) or two different ends (rule 4).
+    // Same plies, different end state (rule 5), two different ends (rule 4), or another scoring
+    // state (rule 6, settled by the `logs` step: both send).
     if (cur.end && !head.ended) return ahead(5, [cur]);
     if (!cur.end && head.ended) return behind(5);
     return fork();
@@ -429,7 +587,7 @@ function reconcileHead(local: readonly GameLog[], head: HeadMsg, localSeat: Seat
   return behind(3);
 }
 
-function reconcileLogs(local: readonly GameLog[], remoteRaw: readonly GameLog[], localSeat: Seat, api: ZhessApi): SyncResult {
+function reconcileLogs(local: readonly GameLog[], remoteRaw: readonly GameLog[], localSeat: Seat, api: ZigoApi): SyncResult {
   if (!Array.isArray(remoteRaw)) return { status: 'invalid', forked: false, error: 'logs is not a list' };
   const remote: GameLog[] = [];
   for (const raw of remoteRaw) {
@@ -494,27 +652,27 @@ export function mergeLogs(local: readonly GameLog[], adopt: readonly GameLog[]):
 }
 
 /* ---------------------------------------------------------------------------------------------- */
-/* Live play on a log (DESIGN 9.4, 9.7)                                                             */
+/* Live play on a log                                                                               */
 /* ---------------------------------------------------------------------------------------------- */
 
 /** A fresh game: game 1 of a room, or a rematch. */
-export function newLog(n: number, white: Seat, tc: string | null): GameLog {
-  return { n, epoch: 0, plies: [], white, tc };
+export function newLog(n: number, black: Seat, tc: string | null, settings: LogSettings = DEFAULT_LOG_SETTINGS): GameLog {
+  const size = settings.size;
+  return { n, epoch: 0, plies: [], black, tc, size, rules: settings.rules, handicap: normalizeHandicap(size, settings.handicap) };
 }
 
-/** The rematch of a game: `n + 1`, colors swapped, same time control (DESIGN 9.7). */
+/**
+ * The rematch of a game (DESIGN 9.4): `n + 1` with the same size, rules, handicap and time control.
+ * Colors swap, except in a handicap game, where the player who took Black keeps it.
+ */
 export function rematchLog(prev: GameLog): GameLog {
-  return newLog(prev.n + 1, otherSeat(prev.white), prev.tc);
+  const black = prev.handicap >= 2 ? prev.black : otherSeat(prev.black);
+  return newLog(prev.n + 1, black, prev.tc, prev);
 }
 
-/** Seat that plays white in game `n` when seat `firstWhite` had white in game 1 (colors alternate). */
-export function whiteOfGame(n: number, firstWhite: Seat): Seat {
-  return n % 2 === 1 ? firstWhite : otherSeat(firstWhite);
-}
-
-/** The color to move in a log (standard start, so white on even ply counts). */
-export function turnOf(log: GameLog): Color {
-  return colorOfPly(log.plies.length);
+/** The color to move in a log (Black first, White first with a handicap). */
+export function turnOf(log: Pick<GameLog, 'handicap' | 'plies'>): Color {
+  return colorOfPly(log, log.plies.length);
 }
 
 /** The seat to move in a log. */
@@ -522,20 +680,31 @@ export function seatToMove(log: GameLog): Seat {
   return seatOf(log, turnOf(log));
 }
 
-/** A new log with one ply played by `api` (canonical UCI, ending detected). Throws on an illegal move. */
-export function appendPly(log: GameLog, m: string, ms: number, api: ZhessApi = zhess): GameLog {
+/** True for a well-formed ply point on a board of `size`: two letters on the board, or `tt`. */
+export function isPly(m: unknown, size: number): m is Point {
+  return typeof m === 'string' && (m === PASS || isPoint(m, size));
+}
+
+/**
+ * A new log with one ply played by `api` (a point, or `tt` to pass). The second consecutive pass
+ * enters scoring (`scoring` round 1, or 2 after a resume, rev 0). Throws on an illegal ply, while
+ * scoring (resume first) and after the end.
+ */
+export function appendPly(log: GameLog, m: Point, ms: number, api: ZigoApi = zigo): GameLog {
   if (log.end) throw new Error('Game is over');
-  const g = api.play(api.replay(log.plies), m, ms);
+  if (!isPly(m, log.size)) throw new Error(`Bad ply ${String(m)}`);
+  const g = api.play(playable(log, api), m, ms);
   const out: GameLog = { ...log, plies: g.plies.map((p) => ({ m: p.m, ms: p.ms })) };
   delete out.end;
-  if (g.end) out.end = { ...g.end };
+  delete out.scoring;
+  if (g.scoring) out.scoring = plainScoring(g.scoring);
   return out;
 }
 
-/** A new log with the game ended (resign, flag, agreed draw). A finished log is returned unchanged. */
-export function endLog(log: GameLog, end: GameEnd): GameLog {
+/** A new log with the game ended (resign, time, score). A finished log is returned unchanged. */
+export function endLog(log: GameLog, end: LogEnd): GameLog {
   if (log.end) return log;
-  return { ...log, end: { result: end.result, by: end.by } };
+  return { ...log, end: { result: { ...end.result }, by: end.by } };
 }
 
 /**
@@ -545,7 +714,8 @@ export function endLog(log: GameLog, end: GameEnd): GameLog {
  * - `stale`: another game or an older epoch; ignore it.
  * - `gap`: the move skips plies or the other copy is ahead in some other way; ask for a reconcile
  *   (send `head`).
- * - `conflict`: a different ply at that index, a ply after the end, or an illegal move; reconcile.
+ * - `conflict`: a different ply at that index, a ply after the end or during scoring, or an
+ *   illegal move; reconcile.
  */
 export type MoveOutcome =
   | { kind: 'applied'; log: GameLog }
@@ -554,65 +724,123 @@ export type MoveOutcome =
   | { kind: 'gap' }
   | { kind: 'conflict'; error: string };
 
-/** Applies a live `move` message (DESIGN 9.4: `{n, epoch, i, m, ms}`) to the local copy of the game. */
-export function applyMoveMsg(log: GameLog, msg: Pick<MoveMsg, 'n' | 'epoch' | 'i' | 'm' | 'ms'>, api: ZhessApi = zhess): MoveOutcome {
+/** Applies a live `move` message (`{n, epoch, i, m, ms}`) to the local copy of the game. */
+export function applyMoveMsg(log: GameLog, msg: Pick<MoveMsg, 'n' | 'epoch' | 'i' | 'm' | 'ms'>, api: ZigoApi = zigo): MoveOutcome {
   if (msg.n < log.n || (msg.n === log.n && msg.epoch < log.epoch)) return { kind: 'stale' };
   if (msg.n > log.n || msg.epoch > log.epoch) return { kind: 'gap' };
   if (!Number.isInteger(msg.i) || msg.i < 0) return { kind: 'conflict', error: 'bad index' };
   if (msg.i < log.plies.length) {
     const have = log.plies[msg.i];
     if (have.m === msg.m && have.ms === Math.max(0, Math.round(msg.ms))) return { kind: 'duplicate' };
-    // A resend in non-canonical form (e.g. a queen promotion without its letter) still matches.
-    try {
-      const g = api.play(api.replay(log.plies.slice(0, msg.i)), msg.m, msg.ms);
-      if (samePly(g.plies[msg.i], have)) return { kind: 'duplicate' };
-    } catch {
-      /* fall through */
-    }
     return { kind: 'conflict', error: `different ply at ${msg.i}` };
   }
   if (msg.i > log.plies.length) return { kind: 'gap' };
   if (log.end) return { kind: 'conflict', error: 'game is over' };
-  if (typeof msg.m !== 'string' || !UCI_RE.test(msg.m)) return { kind: 'conflict', error: 'bad move' };
+  if (!isPly(msg.m, log.size)) return { kind: 'conflict', error: 'bad move' };
   if (typeof msg.ms !== 'number' || !Number.isFinite(msg.ms) || msg.ms < 0) return { kind: 'conflict', error: 'bad time' };
   try {
     return { kind: 'applied', log: appendPly(log, msg.m, msg.ms, api) };
   } catch {
-    return { kind: 'conflict', error: `illegal move ${msg.m}` };
+    return { kind: 'conflict', error: log.scoring ? 'game is in scoring' : `illegal move ${msg.m}` };
   }
 }
 
 /**
- * The takeback of DESIGN 9.7: the log cut back to before `requester`'s last move, `epoch + 1`.
- * Null when that seat has not moved yet or the game is over.
+ * The takeback (DESIGN 9.4): the log cut back to before `requester`'s last ply, `epoch + 1`.
+ * During scoring it cuts the second pass (or more), which ends scoring. Null when that seat has not
+ * played yet or the game is over.
  */
 export function takebackLog(log: GameLog, requester: Seat): GameLog | null {
   if (log.end) return null;
   const color = colorOf(log, requester);
   for (let i = log.plies.length - 1; i >= 0; i--) {
-    if (colorOfPly(i) === color) {
-      return { n: log.n, epoch: log.epoch + 1, white: log.white, tc: log.tc, plies: log.plies.slice(0, i) };
+    if (colorOfPly(log, i) === color) {
+      return { ...newLog(log.n, log.black, log.tc, log), epoch: log.epoch + 1, plies: log.plies.slice(0, i) };
     }
   }
   return null;
 }
 
 /* ---------------------------------------------------------------------------------------------- */
-/* Score (DESIGN 9.3, 9.7)                                                                          */
+/* Scoring on a log (DESIGN 9.5)                                                                    */
 /* ---------------------------------------------------------------------------------------------- */
 
-/** Points a finished game adds per seat, in half points ×2: a win 2, a draw 1 each, a loss 0. */
-export function gamePoints(log: Pick<GameLog, 'white' | 'end'>): [number, number] {
+/** The log is in scoring and not over: marks, acceptances and a resume are possible. */
+export function isScoring(log: GameLog | undefined): log is GameLog & { scoring: Scoring } {
+  return !!log && !!log.scoring && !log.end;
+}
+
+/**
+ * A new log with the marking replaced (a proposal or a toggle): `rev` (default `rev + 1`) and the
+ * dead set (whole groups are the caller's business; only stones are kept), both acceptances
+ * cleared. Null when the log is not in scoring or `rev` is not higher than the current one.
+ */
+export function markLog(log: GameLog, dead: readonly Point[], rev?: number, api: ZigoApi = zigo): GameLog | null {
+  if (!isScoring(log)) return null;
+  const next = rev ?? log.scoring.rev + 1;
+  if (!isCount(next) || next <= log.scoring.rev) return null;
+  const g = playable(log, api);
+  const stones = [...new Set(dead)].filter((p) => isPoint(p, log.size) && g.board[pointToIndex(p, log.size)] !== 0).sort();
+  return { ...log, scoring: { round: log.scoring.round, rev: next, dead: stones, accepted: [0, 0] } };
+}
+
+/** A new log with `seat`'s acceptance of the current marking. Null when not scoring. */
+export function acceptLog(log: GameLog, seat: Seat): GameLog | null {
+  if (!isScoring(log)) return null;
+  const accepted: [number, number] = [log.scoring.accepted[0], log.scoring.accepted[1]];
+  accepted[seat] = log.scoring.rev;
+  return { ...log, scoring: { ...log.scoring, dead: [...log.scoring.dead], accepted } };
+}
+
+/** Both seats accepted the current marking (a marking with `rev` ≥ 1: rev 0 is "nothing proposed yet"). */
+export function bothAccepted(log: GameLog): boolean {
+  const s = log.scoring;
+  return !!s && s.rev >= 1 && s.accepted[0] === s.rev && s.accepted[1] === s.rev;
+}
+
+/** A new log that left scoring: play continues with the player to move. Null when not scoring. */
+export function resumeLog(log: GameLog): GameLog | null {
+  if (!isScoring(log)) return null;
+  const out: GameLog = { ...log };
+  delete out.scoring;
+  return out;
+}
+
+/** The scored end of a log in scoring, counted from its marking. Null when not scoring. */
+export function scoreEnd(log: GameLog, api: ZigoApi = zigo): LogEnd | null {
+  if (!isScoring(log)) return null;
+  const result = scoredResult(playable(log, api), log.scoring.dead);
+  return { result, by: 'score' };
+}
+
+/**
+ * The round-2 end (DESIGN 9.5): scored at once from `dead` (seat 0's proposal; all alive without an
+ * engine). The marking is stored as rev 1, accepted by both, so both devices hold the same log.
+ * Null when the log is not in round-2 scoring.
+ */
+export function roundTwoEnd(log: GameLog, dead: readonly Point[], api: ZigoApi = zigo): GameLog | null {
+  if (!isScoring(log) || log.scoring.round !== 2) return null;
+  const marked = markLog(log, dead, Math.max(1, log.scoring.rev + 1), api);
+  if (!marked) return null;
+  const done: GameLog = { ...marked, scoring: { ...(marked.scoring as Scoring), accepted: [marked.scoring!.rev, marked.scoring!.rev] } };
+  const end = scoreEnd(done, api);
+  return end ? endLog(done, end) : null;
+}
+
+/* ---------------------------------------------------------------------------------------------- */
+/* Score                                                                                            */
+/* ---------------------------------------------------------------------------------------------- */
+
+/** Points a finished game adds per seat, in half points ×2: a win 2, a loss 0 (no draws in Go). */
+export function gamePoints(log: Pick<GameLog, 'black' | 'end'>): [number, number] {
   const out: [number, number] = [0, 0];
   if (!log.end) return out;
-  if (log.end.result === '1/2-1/2') return [1, 1];
-  const winner = seatOf(log, log.end.result === '1-0' ? 'w' : 'b');
-  out[winner] = 2;
+  out[seatOf(log, log.end.result.winner)] = 2;
   return out;
 }
 
 /** Room score per seat (half points ×2) over the given games; unfinished games count nothing. */
-export function roomScore(logs: readonly Pick<GameLog, 'white' | 'end'>[]): [number, number] {
+export function roomScore(logs: readonly Pick<GameLog, 'black' | 'end'>[]): [number, number] {
   const s: [number, number] = [0, 0];
   for (const l of logs) {
     const p = gamePoints(l);
@@ -628,7 +856,7 @@ export function scoreView(score: readonly [number, number], seat: Seat): [number
 }
 
 /* ---------------------------------------------------------------------------------------------- */
-/* base64url and the seat key (DESIGN 9.3)                                                          */
+/* base64url and the seat key                                                                       */
 /* ---------------------------------------------------------------------------------------------- */
 
 const B64URL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
@@ -717,7 +945,7 @@ export function isValidKey(key: unknown): key is string {
 
 /**
  * The bytes a proof signs: the challenge nonce, the room code (UTF-8), and the prover's seat.
- * The seat is an addition to DESIGN 9.3's `HMAC(key, nonce)`: without it a device without the key
+ * The seat is an addition to `HMAC(key, nonce)` (an addition to the design): without it a device without the key
  * could echo a device's own nonce back and replay that device's proof to it.
  */
 export function proofMessage(nonce: string, code: string, proverSeat: Seat): Uint8Array<ArrayBuffer> {
@@ -785,13 +1013,16 @@ export function roomGameId(code: string, n: number): string {
 export function logToSaved(
   log: GameLog,
   opts: { code: string; seat: Seat; now: number; prev?: SavedGame; lastPlayedAt?: number },
-  api: ZhessApi = zhess,
+  api: ZigoApi = zigo,
 ): SavedGame {
   const s: SavedGame = {
     id: roomGameId(opts.code, log.n),
     code: opts.code,
     mode: 'room',
     color: colorOf(log, opts.seat),
+    size: log.size,
+    rules: log.rules,
+    handicap: log.handicap,
     tc: log.tc,
     moves: api.encodeMoves(log.plies),
     ms: log.plies.map((p) => p.ms),
@@ -800,10 +1031,8 @@ export function logToSaved(
     createdAt: opts.prev?.createdAt ?? opts.now,
     lastPlayedAt: opts.lastPlayedAt ?? opts.now,
   };
-  if (log.end) {
-    s.result = log.end.result;
-    s.by = log.end.by;
-  }
+  if (log.scoring) s.scoring = plainScoring(log.scoring);
+  if (log.end) s.result = { ...log.end.result };
   return s;
 }
 
@@ -811,22 +1040,22 @@ export function logToSaved(
  * The `GameLog` of a stored room game, for this device's `seat`. Null when the record is not a room
  * game or does not replay.
  */
-export function savedToLog(saved: SavedGame, seat: Seat, api: ZhessApi = zhess): GameLog | null {
+export function savedToLog(saved: SavedGame, seat: Seat, api: ZigoApi = zigo): GameLog | null {
   if (saved.mode !== 'room' || !saved.room) return null;
-  let g: Game;
-  try {
-    const end = saved.result && saved.by ? { result: saved.result, by: saved.by } : undefined;
-    g = api.fromRecord(saved.moves, saved.ms, end);
-  } catch {
-    return null;
-  }
-  const log: GameLog = {
+  if (typeof saved.moves !== 'string' || !isValidMoves(saved.moves)) return null;
+  const points = api.decodeMoves(saved.moves);
+  const raw: Record<string, unknown> = {
     n: saved.room.n,
     epoch: saved.room.epoch,
-    plies: g.plies.map((p) => ({ m: p.m, ms: p.ms })),
-    white: saved.color === 'w' ? seat : otherSeat(seat),
-    tc: saved.tc,
+    plies: points.map((m, i) => ({ m, ms: Number.isFinite(saved.ms?.[i]) ? saved.ms[i] : 0 })),
+    black: saved.color === 'B' ? seat : otherSeat(seat),
+    tc: saved.tc ?? null,
+    size: saved.size,
+    rules: saved.rules,
+    handicap: saved.handicap,
   };
-  if (g.end) log.end = { result: g.end.result, by: g.end.by };
-  return log;
+  if (saved.scoring) raw.scoring = saved.scoring;
+  if (saved.result) raw.end = { result: saved.result, by: saved.result.by };
+  const v = validateLog(raw, api);
+  return v.ok ? v.log : null;
 }

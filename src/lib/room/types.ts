@@ -5,30 +5,43 @@
  */
 import type {
   ColorChoice,
+  Game,
   GameLog,
   Now,
+  Point,
   RequestKind,
   RoomController,
   RoomNotice,
   RoomSnapshot,
   Rng,
+  Rules,
+  Size,
   Store,
   TcString,
   Transport,
   TransportFactory,
-  ZhessApi,
-} from '../chessTypes';
+  ZigoApi,
+} from '../types';
 import type { Timers, TransportFailureKind } from '../transport/common';
 
-/** Settings a device uses when it creates the room (DESIGN 4.1: clock and color of the start screen). */
+/**
+ * Settings a device uses when it creates the room (DESIGN 4.1, 9.1: clock, color, size, rules and
+ * handicap of the start screen). They travel to the joiner in `welcome` and stay for every rematch.
+ */
 export interface RoomCreateSettings {
-  /** Time control of game 1, e.g. `5+0`, or null for no clock. */
+  /** Time control of game 1, e.g. `5+7` or `20m5x30`, or null for no clock. */
   readonly tc: TcString | null;
   /** The creator's color in game 1. `random` is resolved with the injected `rng`. */
   readonly color: ColorChoice;
+  /** Board size. Default 9. */
+  readonly size?: Size;
+  /** Rule set. Default `area`. */
+  readonly rules?: Rules;
+  /** Handicap stones (0 or 2–9, normalized for the size). Default 0. */
+  readonly handicap?: number;
 }
 
-/** Time already spent on this device's own running turn, e.g. restored after a reload (DESIGN 9.8). */
+/** Time already spent on this device's own running turn, e.g. restored after a reload (DESIGN 9.7). */
 export interface InitialTurn {
   readonly n: number;
   readonly epoch: number;
@@ -46,10 +59,16 @@ export interface RoomControllerOptions {
   readonly transport?: Transport | null;
   /** Creates the transport for `code` (PeerJS in the app, the memory network in tests). */
   readonly factory?: TransportFactory | null;
-  /** Rules API. Default: the `zhess` singleton. */
-  readonly zhess?: ZhessApi;
+  /** Rules API. Default: the `zigo` singleton. */
+  readonly zigo?: ZigoApi;
   /**
-   * Monotonic clock for the running turn (DESIGN 9.8). Default `performance.now()`. Pass the same
+   * The scoring proposal of this device's engine (DESIGN 9.5): dead stones for a game that just
+   * entered scoring, or null when there is no engine. Only seat 0 proposes. Default: none (every
+   * stone alive). Milestone 3 wires the engine in here.
+   */
+  readonly propose?: ((game: Game) => readonly Point[] | null) | null;
+  /**
+   * Monotonic clock for the running turn (DESIGN 9.7). Default `performance.now()`. Pass the same
    * function to `useClock({ now, external: snapshot.clock })`.
    */
   readonly now?: Now;
@@ -66,11 +85,11 @@ export interface RoomControllerOptions {
    * where the anchor creates with these settings or the defaults (no clock, random color).
    */
   readonly create?: RoomCreateSettings | null;
-  /** The room is open in another tab (DESIGN 9.12): load it, never connect, lock the board. */
+  /** The room is open in another tab (DESIGN 9): load it, never connect, lock the board. */
   readonly readOnly?: boolean;
   /** Time already spent on this device's running turn, applied when the position matches. */
   readonly initialTurn?: InitialTurn | null;
-  /** Ping interval (DESIGN 9.11). Default 5000 ms. */
+  /** Ping interval (DESIGN 9). Default 5000 ms. */
   readonly pingMs?: number;
   /** Missed ping intervals that mark the peer disconnected. Default 3. */
   readonly missLimit?: number;
@@ -120,8 +139,14 @@ export interface RoomState extends RoomSnapshot {
   readonly logs: readonly GameLog[];
   /** This device's seat is to move in the current, unfinished game. */
   readonly myTurn: boolean;
-  /** `move()` would be accepted now (seated, my turn, not locked, not over). */
+  /** `move()` and `pass()` would be accepted now (seated, my turn, not locked, not over, not scoring). */
   readonly canMove: boolean;
+  /** `mark()` would be accepted now: the game is in scoring and this device is seated (also offline). */
+  readonly canMark: boolean;
+  /** `accept()` would be accepted now: scoring with a proposal (rev ≥ 1) this seat has not accepted, live. */
+  readonly canAccept: boolean;
+  /** `resume()` would be accepted now: scoring, live. */
+  readonly canResume: boolean;
   /** Which requests `ask()` would send now. */
   readonly canAsk: Readonly<Record<RequestKind, boolean>>;
   /** Transport failure including `peer-gone` (a lost channel), which `failure` leaves out. */
@@ -136,8 +161,16 @@ export interface RoomControllerApi extends RoomController {
   subscribe(cb: (s: RoomState) => void): () => void;
   /** Called once per notice, in order (a snapshot subscriber may see only the latest). */
   onNotice(cb: (n: RoomNotice) => void): () => void;
-  /** Plays this device's move; `ms` defaults to `elapsed()`. False if not allowed or illegal. */
-  move(uci: string, ms?: number): boolean;
+  /** Plays this device's stone (two SGF letters; `tt` passes); `ms` defaults to `elapsed()`. False if not allowed or illegal. */
+  move(point: Point, ms?: number): boolean;
+  /** Passes (DESIGN 6.2); the second consecutive pass enters scoring. False if not allowed. */
+  pass(ms?: number): boolean;
+  /** Sends a scoring proposal or toggle: the full dead set (DESIGN 9.5). Clears both acceptances. */
+  mark(dead: readonly Point[]): boolean;
+  /** Accepts the current marking; the game ends when both seats accepted the same rev. */
+  accept(): boolean;
+  /** Leaves scoring; play continues with the player to move. */
+  resume(): boolean;
   ask(kind: RequestKind): boolean;
   reply(kind: RequestKind | 'rejoin', ok: boolean): boolean;
   resign(): boolean;

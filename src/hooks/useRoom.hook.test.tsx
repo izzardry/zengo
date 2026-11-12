@@ -3,7 +3,7 @@ import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { createFakeController, type FakeController } from '@/components/room/testUtils';
 import type { RoomControllerOptions } from '@/lib/room';
-import type { RoomNotice } from '@/lib/chessTypes';
+import type { RoomNotice } from '@/lib/types';
 import { IDLE_ROOM_VIEW, useRoom, type ManualApi, type UseRoomOptions } from './useRoom';
 
 function setup(extra: Partial<UseRoomOptions> = {}) {
@@ -47,10 +47,18 @@ describe('useRoom', () => {
     const { made, opts } = setup();
     const { result } = renderHook(() => useRoom('K7QW2M', opts));
     const c = made[0];
-    expect(result.current.move('e2e4', 12)).toBe(true);
-    expect(c.move).toHaveBeenCalledWith('e2e4', 12);
-    result.current.ask('draw');
-    expect(c.ask).toHaveBeenCalledWith('draw');
+    expect(result.current.move('dd', 12)).toBe(true);
+    expect(c.move).toHaveBeenCalledWith('dd', 12);
+    expect(result.current.pass(7)).toBe(true);
+    expect(c.pass).toHaveBeenCalledWith(7);
+    expect(result.current.mark(['dd'])).toBe(true);
+    expect(c.mark).toHaveBeenCalledWith(['dd']);
+    expect(result.current.accept()).toBe(true);
+    expect(c.accept).toHaveBeenCalled();
+    expect(result.current.resume()).toBe(true);
+    expect(c.resume).toHaveBeenCalled();
+    result.current.ask('takeback');
+    expect(c.ask).toHaveBeenCalledWith('takeback');
     result.current.reply('rejoin', false);
     expect(c.reply).toHaveBeenCalledWith('rejoin', false);
     result.current.resign();
@@ -87,7 +95,8 @@ describe('useRoom', () => {
     rerender({ code: 'ABC123', enabled: false });
     expect(made[1].leave).toHaveBeenCalled();
     expect(result.current).toMatchObject({ ...IDLE_ROOM_VIEW, controller: null });
-    expect(result.current.move('e2e4')).toBe(false);
+    expect(result.current.move('dd')).toBe(false);
+    expect(result.current.pass()).toBe(false);
 
     rerender({ code: 'not a code!', enabled: true });
     expect(made).toHaveLength(2);
@@ -103,9 +112,9 @@ describe('useRoom', () => {
   });
 
   it('passes create to the owner controller only', () => {
-    const { made, opts } = setup({ create: { tc: '5+0', color: 'b' } });
+    const { made, opts } = setup({ create: { tc: '5+0', color: 'W', size: 13, rules: 'territory', handicap: 2 } });
     renderHook(() => useRoom('K7QW2M', opts));
-    expect(made[0].opts.create).toEqual({ tc: '5+0', color: 'b' });
+    expect(made[0].opts.create).toEqual({ tc: '5+0', color: 'W', size: 13, rules: 'territory', handicap: 2 });
   });
 
   it('follows x and y from the address bar and reports when they were used', async () => {

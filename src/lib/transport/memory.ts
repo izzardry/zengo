@@ -18,7 +18,7 @@
  * `setTimeout`, so `vi.useFakeTimers()` controls them) after `delayMs` (default 0), or only on
  * `flush()` when `manual: true`. State changes from the controls are synchronous.
  */
-import type { Message, Rng, TransportState } from '../chessTypes';
+import type { Message, Rng, TransportState } from '../types';
 import { defaultTimers, TransportCore, type RoomTransport, type Timers, type TransportFailureKind, type TransportRole } from './common';
 
 /** Which messages to drop: never/always, a probability (uses `rng`), or a predicate. */

@@ -5,15 +5,15 @@
 import type { ManualCause, ManualIssue } from '@/hooks/useRoom';
 import type { TranslationKey } from '@/lib/i18n';
 import type { RoomState } from '@/lib/room';
-import type { Presence, RequestKind, RoomNotice } from '@/lib/chessTypes';
+import type { Presence, RequestKind, RoomNotice } from '@/lib/types';
 import type { UrlParams } from '@/lib/url';
 
-/** Label of the presence dot (DESIGN 9.10). */
+/** Label of the presence dot (DESIGN 9). */
 export function presenceKey(p: Presence): TranslationKey {
   return `room.presence.${p}` as const;
 }
 
-/** Text of an incoming request toast (DESIGN 9.5, 9.7). */
+/** Text of an incoming request toast (DESIGN 9). */
 export function requestKey(kind: RequestKind | 'rejoin'): TranslationKey {
   return `room.request.${kind}` as const;
 }
@@ -42,7 +42,7 @@ export function manualCauseKey(cause: ManualCause): TranslationKey | null {
   }
 }
 
-/** Toast text of a room notice (DESIGN 9.5, 9.7, 9.10, 9.11). */
+/** Toast text of a room notice (DESIGN 9). */
 export function noticeKey(n: Pick<RoomNotice, 'kind' | 'request'>): TranslationKey {
   switch (n.kind) {
     case 'opponent-joined':
@@ -64,7 +64,7 @@ export function noticeKey(n: Pick<RoomNotice, 'kind' | 'request'>): TranslationK
     case 'challenge-failed':
       return 'room.notice.challengeFailed';
     case 'request-declined':
-      return `room.notice.declined.${n.request ?? 'draw'}` as const;
+      return `room.notice.declined.${n.request ?? 'takeback'}` as const;
     case 'ice-failed':
     default:
       return 'room.notice.iceFailed';
@@ -73,14 +73,14 @@ export function noticeKey(n: Pick<RoomNotice, 'kind' | 'request'>): TranslationK
 
 /**
  * The creator's room is open and nobody has joined yet: the invite sheet opens by itself
- * (DESIGN 9.2: the anchor "waits for a connection and shows the invite sheet").
+ * (DESIGN 9: the anchor "waits for a connection and shows the invite sheet").
  */
 export function shouldOfferInvite(state: Pick<RoomState, 'seat' | 'lastSeenAt' | 'live' | 'phase'> | null): boolean {
   return !!state && state.seat === 0 && state.lastSeenAt === 0 && !state.live && state.phase !== 'read-only' && state.phase !== 'closed';
 }
 
 /**
- * This device holds no seat yet and waits as anchor for the opponent (DESIGN 9.5, last row: "The
+ * This device holds no seat yet and waits as anchor for the opponent (DESIGN 9, last row: "The
  * returning device waits as anchor with `Waiting for opponent`"). Covers an invite link opened while
  * the creator's app is closed and a lost device returning while the survivor is offline. A seated
  * creator waiting for a joiner gets the invite sheet instead (`shouldOfferInvite`).

@@ -1,7 +1,7 @@
 /**
- * Invite sheet (DESIGN 9.2, 9.10, 13.2): the room code, the invite link `?s=<CODE>&o=r` (never
+ * Invite sheet (DESIGN 9): the room code, the invite link `?s=<CODE>&o=r` (never
  * moves, never the key) with its QR code, Copy and native Share, the opponent's presence, and the
- * `Connect manually` ghost button when the 10-second rule offers it (DESIGN 9.9).
+ * `Connect manually` ghost button when the 10-second rule offers it (DESIGN 9).
  */
 import { UserPlus } from 'lucide-react';
 import type { ShareNavigator } from '@/components/game/share';

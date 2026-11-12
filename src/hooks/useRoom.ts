@@ -4,25 +4,25 @@
  *
  * The work is done by `createRoomSession`, which has no React in it and is tested on its own:
  *
- * - **Tab guard (DESIGN 9.12).** The room is guarded by the Web Lock `zigo:room:<CODE>`. The tab
+ * - **Tab guard (DESIGN 9).** The room is guarded by the Web Lock `zigo:room:<CODE>`. The tab
  *   that holds it owns the room: it runs the controller and connects. A second tab gets a read-only
  *   controller (`tab: 'other'`, board locked with reason `other-tab`), follows the other tab's
  *   writes through `storage` events, takes over by itself when the owner closes, and can take over
  *   at once with `takeOver()` (the lock is stolen; the old owner turns read-only). Without
  *   `navigator.locks` (old browsers, insecure origins) every tab owns the room.
  * - **Transports.** The broker (`createPeerJsFactory`, when `flags.peerjsBroker`) is started by the
- *   session and attached to the controller. The manual fallback (DESIGN 9.9, when
+ *   session and attached to the controller. The manual fallback (DESIGN 9, when
  *   `flags.manualSignalling`) runs beside it: `openManual()` makes this device the manual host;
  *   an `x` link (`offer`) makes it the guest; a `y` link (`answer`) opened in a new tab is handed to
  *   the waiting tab over `BroadcastChannel` (that tab stays passive, `tab: 'handover'`). A manual
  *   channel replaces the broker once it opens; when it is lost the broker is tried again, and the
  *   10-second rule offers the manual exchange again if that fails too.
- * - **10-second rule (DESIGN 9.9).** `manualCause` says when to show `Connect manually`: at once
+ * - **10-second rule (DESIGN 9).** `manualCause` says when to show `Connect manually`: at once
  *   when the broker is unreachable or switched off, or when ICE failed; after `fallbackMs` (10 s) of
  *   failing signalling otherwise. A device waiting peacefully as the anchor is not failing.
  * - **Persistence.** The controller saves the room and every game through the `Store` (3C). This
  *   session adds the running turn's time: it is banked in `localStorage` on `pagehide`, on a
- *   hidden tab and on dispose, and handed back to the controller as `initialTurn` (DESIGN 9.8).
+ *   hidden tab and on dispose, and handed back to the controller as `initialTurn` (DESIGN 9.7).
  *   `localStorage`, not `sessionStorage`: closing the app (a phone's normal way to leave) must not
  *   lose it, or the reconnect would report a turn time of 0.
  * - **Snapshot.** `subscribe` / `view` follow the `useSyncExternalStore` contract: the view object
@@ -50,14 +50,14 @@ import {
   type RoomTransport,
   type Timers,
 } from '@/lib/transport';
-import type { Now, RequestKind, RoomNotice, Rng, Store, Transport, TransportFactory, TransportState } from '@/lib/chessTypes';
+import type { Now, Point, RequestKind, RoomNotice, Rng, Store, Transport, TransportFactory, TransportState } from '@/lib/types';
 
 /* ---------------------------------------------------------------------------------------------- */
 /* Public types                                                                                     */
 /* ---------------------------------------------------------------------------------------------- */
 
 /**
- * Who runs the room in this tab (DESIGN 9.12).
+ * Who runs the room in this tab (DESIGN 9).
  * - `pending`: asking for the Web Lock (a moment); the controller is read-only meanwhile.
  * - `owner`: this tab runs the room (also when Web Locks are missing).
  * - `other`: another tab of this device runs it; read-only here, `takeOver()` moves it here.
@@ -78,7 +78,7 @@ export interface LockManagerLike {
 export type ManualIssue = ManualErrorReason | 'ice-failed';
 
 /**
- * Steps of the manual exchange (DESIGN 9.9) as this device sees them.
+ * Steps of the manual exchange (DESIGN 9) as this device sees them.
  * - `idle`: nothing running.
  * - `preparing`: gathering ICE for the offer (host) or the answer (guest).
  * - `offer`: host, steps 1 and 2: `link` is the offer link to send; paste the answer below it.
@@ -105,7 +105,7 @@ export interface ManualView {
 }
 
 /**
- * Why `Connect manually` is offered (DESIGN 9.9, 9.10):
+ * Why `Connect manually` is offered (DESIGN 9):
  * `no-broker` (broker switched off), `broker-unreachable`, `ice-failed`, or `timeout` (signalling
  * failing for 10 s).
  */
@@ -213,7 +213,7 @@ export interface RoomSession {
 /* Helpers                                                                                          */
 /* ---------------------------------------------------------------------------------------------- */
 
-/** Web Lock name of a room (DESIGN 9.12). */
+/** Web Lock name of a room (DESIGN 9). */
 export function roomLockName(code: string): string {
   return `zigo:room:${code}`;
 }
@@ -460,7 +460,7 @@ class Session implements RoomSession {
     });
 
     if (opts.answer) {
-      // A tab opened from an answer link only passes it on (DESIGN 9.9 step 3).
+      // A tab opened from an answer link only passes it on (DESIGN 9, manual connection, step 3).
       this.tab = 'handover';
       this.useController(true);
       this.handOver(opts.answer);
@@ -818,7 +818,7 @@ class Session implements RoomSession {
   }
 
   /* ============================================================================================ */
-  /* Manual exchange (DESIGN 9.9)                                                                  */
+  /* Manual exchange (DESIGN 9)                                                                  */
   /* ============================================================================================ */
 
   private setManual(m: ManualView, emit = true): void {
@@ -929,7 +929,7 @@ class Session implements RoomSession {
     const onState = (s: TransportState) => {
       if (this.disposed) return;
       if (this.manualT === t) {
-        // The manual channel in use is gone: back to the broker (DESIGN 9.9).
+        // The manual channel in use is gone: back to the broker (DESIGN 9).
         if (s === 'closed' || s === 'failed') this.manualLost(t);
         return;
       }
@@ -1092,8 +1092,16 @@ export interface UseRoomOptions extends Omit<RoomSessionOptions, 'code'> {
 export interface RoomHandle extends RoomView {
   /** The current controller (read-only while `tab` is not `owner`), or null. */
   readonly controller: RoomControllerApi | null;
-  /** Plays this device's move (`ms` defaults to the controller's running turn). */
-  move(uci: string, ms?: number): boolean;
+  /** Plays this device's stone, two SGF letters (`ms` defaults to the controller's running turn). */
+  move(point: Point, ms?: number): boolean;
+  /** Passes (`tt`); the second consecutive pass enters scoring. */
+  pass(ms?: number): boolean;
+  /** Scoring: sends the full dead set (a proposal or a toggle). */
+  mark(dead: readonly Point[]): boolean;
+  /** Scoring: accepts the current marking. */
+  accept(): boolean;
+  /** Scoring: leaves it and plays on. */
+  resume(): boolean;
   ask(kind: RequestKind): boolean;
   reply(kind: RequestKind | 'rejoin', ok: boolean): boolean;
   resign(): boolean;
@@ -1152,7 +1160,11 @@ export function useRoom(code: string | null, opts: UseRoomOptions = {}): RoomHan
   const actions = useMemo<Omit<RoomHandle, keyof RoomView | 'controller'>>(() => {
     const c = () => session?.controller ?? null;
     return {
-      move: (uci, ms) => c()?.move(uci, ms) ?? false,
+      move: (point, ms) => c()?.move(point, ms) ?? false,
+      pass: (ms) => c()?.pass(ms) ?? false,
+      mark: (dead) => c()?.mark(dead) ?? false,
+      accept: () => c()?.accept() ?? false,
+      resume: () => c()?.resume() ?? false,
       ask: (kind) => c()?.ask(kind) ?? false,
       reply: (kind, ok) => c()?.reply(kind, ok) ?? false,
       resign: () => c()?.resign() ?? false,

@@ -1,52 +1,59 @@
 /**
- * Room controller tests (DESIGN 9, 15.4; PLAN 7). Two (or more) controllers over 3B's memory
- * transport, on fake time and seeded randomness. Scenarios: join, lock, challenge failure, rejoin
- * grant and deny, offline move delivery, takeback, draw, rematch, clock pause, version mismatch,
- * plus drop and resend, disconnect mid-request, both reconnect, stale epoch, fork resolution, flag
- * claim timing, rematch colors and score, liveness, persistence and code collisions.
+ * Room controller tests (DESIGN 9, 15.4; PLAN 7). Two (or more) controllers over the memory
+ * transport, on fake time and seeded randomness, playing Go on 9×9 unless said otherwise.
+ * Scenarios: join with the creator's settings, lock, challenge failure, rejoin grant and deny,
+ * offline stones and passes, takeback (also during scoring), rematch (colors and the handicap rule),
+ * clock pause, version mismatch, drop and resend, disconnect mid-request, both reconnect, stale
+ * epoch, fork resolution, flag claim timing, score, liveness, persistence, code collisions, and the
+ * scoring round (seat 0's proposal, toggles clearing acceptances, accept, resume, round 2).
  */
 import { describe, expect, it } from 'vitest';
-import type { GameLog, Message, Room, SavedGame, Seat } from './chessTypes';
+import type { GameLog, Message, Point, Room, SavedGame, Seat } from './types';
 import { createStore, memoryStorage } from './storage';
-import { appendPly, endLog, generateKey, hashLog, logToSaved, makeHead, newLog, proveSeat, roomGameId, roomScore, scoreView } from './sync';
-import zhess from './zhess';
-import { createRoomController, ROOM_DEFAULTS } from './room';
-import { provisionalWins } from './room/controller';
+import { appendPly, endLog, generateKey, hashLog, logToSaved, makeHead, newLog, proveSeat, resumeLog, roomGameId, roomScore, scoreView, type LogEnd, type LogSettings } from './sync';
+import zigo, { makeSettings } from './zigo';
+import scoringApi from './scoring';
+import { createRoomController, ROOM_DEFAULTS, type RoomCreateSettings } from './room';
+import { provisionalWins, timeLeft } from './room/controller';
 import { createHarness, fakePair, scriptPeer, seeded, WALL0, type Device, type Harness } from './room/testkit';
 
 const CODE = 'K7QW2M';
+
+const B_RESIGNS: LogEnd = { result: { winner: 'W', by: 'resign' }, by: 'resign' };
+const W_RESIGNS: LogEnd = { result: { winner: 'B', by: 'resign' }, by: 'resign' };
+const W_ON_TIME: LogEnd = { result: { winner: 'B', by: 'time' }, by: 'time' };
 
 /* ---------------------------------------------------------------------------------------------- */
 /* Helpers                                                                                          */
 /* ---------------------------------------------------------------------------------------------- */
 
-async function joined(create: { tc: string | null; color: 'w' | 'b' | 'random' } = { tc: null, color: 'w' }, memory = {}) {
+async function joined(create: RoomCreateSettings = { tc: null, color: 'B' }, memory = {}, opts: { propose?: (g: import('./types').Game) => Point[] | null } = {}) {
   const h = createHarness({ code: CODE, memory });
-  const A = h.device('A', { create });
+  const A = h.device('A', { create, ...opts });
   await h.settle();
   const B = h.device('B');
   await h.settle();
   return { h, A, B };
 }
 
-/** Plays `ucis` in order, each by whichever device is to move. */
-async function play(h: Harness, devs: Device[], ucis: string[], ms = 1000): Promise<void> {
-  for (const u of ucis) {
+/** Plays `points` in order (`tt` passes), each by whichever device is to move. */
+async function play(h: Harness, devs: Device[], points: string[], ms = 1000): Promise<void> {
+  for (const p of points) {
     const d = devs.find((x) => x.ctrl.snapshot.myTurn);
-    if (!d) throw new Error(`nobody to move for ${u}`);
-    expect(d.ctrl.move(u, ms), `${d.name} plays ${u}`).toBe(true);
+    if (!d) throw new Error(`nobody to move for ${p}`);
+    expect(d.ctrl.move(p, ms), `${d.name} plays ${p}`).toBe(true);
     await h.settle();
   }
 }
 
 const room = (d: Device): Room | undefined => d.store.rooms().find((r) => r.code === CODE);
 const saved = (d: Device): SavedGame[] => d.store.games().filter((g) => g.code === CODE);
-const ucis = (d: Device): string[] => d.ctrl.snapshot.game.plies.map((p) => p.m);
+const plies = (d: Device): string[] => d.ctrl.snapshot.game.plies.map((p) => p.m);
 const strip = (logs: readonly GameLog[]) => logs.map((l) => hashLog(l));
 
-function buildLog(n: number, white: Seat, tc: string | null, moves: string[], ms = 1000): GameLog {
-  let l = newLog(n, white, tc);
-  for (const m of moves) l = appendPly(l, m, ms);
+function buildLog(n: number, black: Seat, tc: string | null, moves: string[], ms = 1000, settings?: LogSettings): GameLog {
+  let l = newLog(n, black, tc, settings);
+  for (const m of moves) l = appendPly(l.scoring ? (resumeLog(l) as GameLog) : l, m, ms); // a ply after scoring resumes it
   return l;
 }
 
@@ -68,39 +75,63 @@ function linkLog(h: Harness): string[] {
 /* ---------------------------------------------------------------------------------------------- */
 
 describe('join and lock', () => {
-  it('the creator waits with an open room; the joiner gets seat 1, the key, the time control and its color', async () => {
+  it('the creator waits with an open room; the joiner gets seat 1, the key, the settings and its color', async () => {
     const h = createHarness({ code: CODE });
-    const A = h.device('A', { create: { tc: '5+0', color: 'b' } });
+    const A = h.device('A', { create: { tc: '5+0', color: 'W' } });
     await h.settle();
     const s0 = A.ctrl.snapshot;
-    expect(s0).toMatchObject({ code: CODE, presence: 'waiting', role: 'anchor', lock: 'open', seat: 0, n: 1, epoch: 0, color: 'b', live: false, phase: 'connecting' });
-    expect(s0.tc).toEqual({ baseMs: 300_000, incMs: 0 });
+    expect(s0).toMatchObject({ code: CODE, presence: 'waiting', role: 'anchor', lock: 'open', seat: 0, n: 1, epoch: 0, color: 'W', live: false, phase: 'connecting' });
+    expect(s0.tc).toEqual({ kind: 'fischer', baseMs: 300_000, incMs: 0 });
+    expect(s0.game.settings).toMatchObject({ size: 9, rules: 'area', handicap: 0 });
     expect(s0.locked).toBe('disconnected'); // timed: nobody to play yet
     expect(s0.clock).toEqual({ paused: true, turnStart: null, turnUsed: 0 });
     // The open room is stored at once and shows in history.
     expect(room(A)).toMatchObject({ seat: 0, lastSeenAt: 0, score: [0, 0], games: [`${CODE}.1`] });
-    expect(saved(A)).toEqual([expect.objectContaining({ id: `${CODE}.1`, mode: 'room', color: 'b', tc: '5+0', moves: '', room: { n: 1, epoch: 0 } })]);
+    expect(saved(A)).toEqual([
+      expect.objectContaining({ id: `${CODE}.1`, mode: 'room', color: 'W', size: 9, rules: 'area', handicap: 0, tc: '5+0', moves: '', room: { n: 1, epoch: 0 } }),
+    ]);
 
     const B = h.device('B');
     await h.settle();
     expect(linkLog(h)).toEqual(['A:hello', '#2:hello', '#2:join', 'A:welcome', 'A:head', '#2:head']);
     const welcome = h.sent().find((e) => e.msg.t === 'welcome')?.msg;
-    expect(welcome).toMatchObject({ t: 'welcome', v: 1, seat: 1, tc: '5+0', color: 'w', key: room(A)?.key });
+    expect(welcome).toEqual({ t: 'welcome', v: 1, seat: 1, tc: '5+0', color: 'B', size: 9, rules: 'area', handicap: 0, key: room(A)?.key });
 
-    expect(A.ctrl.snapshot).toMatchObject({ presence: 'connected', lock: 'locked', live: true, phase: 'live', seat: 0, color: 'b', locked: null });
-    expect(B.ctrl.snapshot).toMatchObject({ presence: 'connected', lock: 'locked', live: true, phase: 'live', seat: 1, color: 'w', n: 1, locked: null, role: 'dialer' });
-    expect(B.ctrl.snapshot.tc).toEqual({ baseMs: 300_000, incMs: 0 });
+    expect(A.ctrl.snapshot).toMatchObject({ presence: 'connected', lock: 'locked', live: true, phase: 'live', seat: 0, color: 'W', locked: null });
+    expect(B.ctrl.snapshot).toMatchObject({ presence: 'connected', lock: 'locked', live: true, phase: 'live', seat: 1, color: 'B', n: 1, locked: null, role: 'dialer' });
+    expect(B.ctrl.snapshot.tc).toEqual({ kind: 'fischer', baseMs: 300_000, incMs: 0 });
     expect(A.kinds()).toEqual(['opponent-joined']);
     expect(B.kinds()).toEqual(['opponent-connected']);
     expect(room(B)?.key).toBe(room(A)?.key);
     expect(room(B)).toMatchObject({ seat: 1, games: [`${CODE}.1`] });
     expect(room(A)?.lastSeenAt).toBeGreaterThan(0);
-    expect(saved(B)).toEqual([expect.objectContaining({ id: `${CODE}.1`, mode: 'room', color: 'w', tc: '5+0' })]);
-    // Clocks run once live; white (B) is to move.
+    expect(saved(B)).toEqual([expect.objectContaining({ id: `${CODE}.1`, mode: 'room', color: 'B', tc: '5+0' })]);
+    // Clocks run once live; Black (B) is to move.
     expect(B.ctrl.snapshot.myTurn).toBe(true);
     expect(B.ctrl.snapshot.canMove).toBe(true);
     expect(A.ctrl.snapshot.canMove).toBe(false);
     expect(B.ctrl.snapshot.clock).toEqual({ paused: false, turnStart: h.time.t, turnUsed: 0 });
+  });
+
+  it("the creator's size, rules and handicap reach the joiner; with a handicap White moves first", async () => {
+    const { h, A, B } = await joined({ tc: '20m5x30', color: 'B', size: 13, rules: 'territory', handicap: 3 });
+    const welcome = h.sent().find((e) => e.msg.t === 'welcome')?.msg;
+    expect(welcome).toMatchObject({ t: 'welcome', seat: 1, color: 'W', size: 13, rules: 'territory', handicap: 3, tc: '20m5x30' });
+    for (const d of [A, B]) {
+      expect(d.ctrl.snapshot.game.settings).toEqual(makeSettings(13, 'territory', 3));
+      expect(d.ctrl.snapshot.tc).toEqual({ kind: 'byoyomi', baseMs: 1_200_000, periods: 5, periodMs: 30_000 });
+      expect(d.ctrl.snapshot.game.board.filter((v) => v === 1)).toHaveLength(3); // the handicap stones
+    }
+    expect(B.ctrl.snapshot.myTurn).toBe(true); // White (the joiner) moves first
+    await play(h, [A, B], ['kk', 'cc']);
+    expect(plies(A)).toEqual(['kk', 'cc']);
+    expect(saved(B)[0]).toMatchObject({ size: 13, rules: 'territory', handicap: 3, color: 'W' });
+  });
+
+  it('an out-of-range creator handicap is normalized for the size', async () => {
+    const { A, B } = await joined({ tc: null, color: 'B', size: 9, handicap: 9 });
+    expect(A.ctrl.snapshot.game.settings.handicap).toBe(5);
+    expect(B.ctrl.snapshot.game.settings.handicap).toBe(5);
   });
 
   it('a random creator color comes from the injected rng and both devices agree', async () => {
@@ -133,7 +164,7 @@ describe('join and lock', () => {
 
   it('challenge failure: a device with another key learns nothing and the anchor retries later', async () => {
     const { h, A, B } = await joined();
-    await play(h, [A, B], ['e2e4', 'e7e5']);
+    await play(h, [A, B], ['cc', 'gg']);
     B.ctrl.leave();
     await h.settle();
     // A stranger who registered the room with its own key.
@@ -156,47 +187,49 @@ describe('join and lock', () => {
     await h.settle();
     expect(A.ctrl.snapshot.live).toBe(true);
     expect(B2.ctrl.snapshot.live).toBe(true);
-    expect(ucis(B2)).toEqual(['e2e4', 'e7e5']);
+    expect(plies(B2)).toEqual(['cc', 'gg']);
     expect(A.kinds().at(-1)).toBe('reconnected');
   });
 
   it('both devices created a room under the same code: the dialer gives up its provisional room and joins', async () => {
     const h = createHarness({ code: CODE });
-    const A = h.device('A', { create: { tc: '3+2', color: 'w' } });
-    const B = h.device('B', { create: { tc: null, color: 'w' } });
+    const A = h.device('A', { create: { tc: '3+2', color: 'B', size: 13 } });
+    const B = h.device('B', { create: { tc: null, color: 'B', size: 19 } });
     await h.settle();
-    expect(A.ctrl.snapshot).toMatchObject({ live: true, seat: 0, color: 'w', lock: 'locked' });
-    expect(B.ctrl.snapshot).toMatchObject({ live: true, seat: 1, color: 'b', lock: 'locked' });
-    expect(B.ctrl.snapshot.tc).toEqual({ baseMs: 180_000, incMs: 2000 });
+    expect(A.ctrl.snapshot).toMatchObject({ live: true, seat: 0, color: 'B', lock: 'locked' });
+    expect(B.ctrl.snapshot).toMatchObject({ live: true, seat: 1, color: 'W', lock: 'locked' });
+    expect(B.ctrl.snapshot.tc).toEqual({ kind: 'fischer', baseMs: 180_000, incMs: 2000 });
+    expect(B.ctrl.snapshot.game.settings.size).toBe(13);
     expect(room(B)?.key).toBe(room(A)?.key);
-    expect(saved(B)).toEqual([expect.objectContaining({ id: `${CODE}.1`, color: 'b', tc: '3+2' })]);
+    expect(saved(B)).toEqual([expect.objectContaining({ id: `${CODE}.1`, color: 'W', tc: '3+2', size: 13 })]);
   });
 
   it('the joiner typed the code while the creator was away: the creator keeps seat 0, its settings and its offline move', async () => {
     const h = createHarness({ code: CODE });
-    // The creator starts an untimed room as white, moves while waiting, and closes the app.
-    const A = h.device('A', { create: { tc: null, color: 'w' } });
+    // The creator starts an untimed room as Black, moves while waiting, and closes the app.
+    const A = h.device('A', { create: { tc: null, color: 'B' } });
     await h.settle();
-    expect(A.ctrl.move('e2e4')).toBe(true);
+    expect(A.ctrl.move('cc')).toBe(true);
     await h.settle();
     A.ctrl.leave();
     await h.advance(60_000);
     // The friend types the code with Room selected (their own settings) and is online first:
     // their device holds the anchor id with a provisional room of its own.
-    const B = h.device('B', { create: { tc: '3+2', color: 'w' } });
+    const B = h.device('B', { create: { tc: '3+2', color: 'B', size: 19 } });
     await h.settle();
     expect(B.ctrl.snapshot).toMatchObject({ role: 'anchor', seat: 0, lock: 'open' });
     // The creator comes back and dials.
     const A2 = h.device('A2', { storage: A.storage });
     await h.settle();
-    expect(A2.ctrl.snapshot).toMatchObject({ role: 'dialer', live: true, seat: 0, color: 'w', lock: 'locked', tc: null });
-    expect(B.ctrl.snapshot).toMatchObject({ role: 'anchor', live: true, seat: 1, color: 'b', lock: 'locked', tc: null });
-    expect(ucis(A2)).toEqual(['e2e4']);
-    expect(ucis(B)).toEqual(['e2e4']);
+    expect(A2.ctrl.snapshot).toMatchObject({ role: 'dialer', live: true, seat: 0, color: 'B', lock: 'locked', tc: null });
+    expect(B.ctrl.snapshot).toMatchObject({ role: 'anchor', live: true, seat: 1, color: 'W', lock: 'locked', tc: null });
+    expect(B.ctrl.snapshot.game.settings.size).toBe(9);
+    expect(plies(A2)).toEqual(['cc']);
+    expect(plies(B)).toEqual(['cc']);
     expect(B.ctrl.snapshot.myTurn).toBe(true);
     expect(room(B)?.key).toBe(room(A2)?.key);
     expect(room(B)).toMatchObject({ seat: 1 });
-    expect(saved(B)).toEqual([expect.objectContaining({ id: `${CODE}.1`, color: 'b', tc: null })]);
+    expect(saved(B)).toEqual([expect.objectContaining({ id: `${CODE}.1`, color: 'W', tc: null, size: 9 })]);
     expect(A2.kinds()).not.toContain('restored-from-opponent');
   });
 
@@ -214,7 +247,7 @@ describe('join and lock', () => {
     expect(provisionalWins({ born: 100, len: 0 }, { born: 'x', len: -1 }, 'dialer')).toBe(false);
   });
 
-  it('neither device holds the room (two invite links): the anchor creates it', async () => {
+  it('neither device holds the room (two invite links): the anchor creates it on 9×9', async () => {
     const h = createHarness({ code: CODE });
     const A = h.device('A');
     await h.settle();
@@ -225,26 +258,27 @@ describe('join and lock', () => {
     expect(A.ctrl.snapshot).toMatchObject({ live: true, seat: 0, lock: 'locked' });
     expect(B.ctrl.snapshot).toMatchObject({ live: true, seat: 1 });
     expect(A.ctrl.snapshot.tc).toBeNull();
+    expect(B.ctrl.snapshot.game.settings).toEqual(makeSettings(9, 'area', 0));
     expect(room(A)?.key).toBe(room(B)?.key);
   });
 
   it('the creator moved while waiting (untimed): the joiner receives the move', async () => {
     const h = createHarness({ code: CODE });
-    const A = h.device('A', { create: { tc: null, color: 'w' } });
+    const A = h.device('A', { create: { tc: null, color: 'B' } });
     await h.settle();
     expect(A.ctrl.snapshot.canMove).toBe(true);
-    expect(A.ctrl.move('e2e4')).toBe(true);
+    expect(A.ctrl.move('cc')).toBe(true);
     expect(A.ctrl.snapshot.unsent).toBe(1);
     const B = h.device('B');
     await h.settle();
-    expect(ucis(B)).toEqual(['e2e4']);
+    expect(plies(B)).toEqual(['cc']);
     expect(B.ctrl.snapshot.myTurn).toBe(true);
     expect(A.ctrl.snapshot.unsent).toBe(0);
   });
 
   it('a lost welcome: the creator still holds an open room, the joiner its key; the next connection binds them', async () => {
     const h = createHarness({ code: CODE });
-    const A = h.device('A', { create: { tc: null, color: 'w' } });
+    const A = h.device('A', { create: { tc: null, color: 'B' } });
     await h.settle();
     // Drop everything after the welcome reached B (B's head never arrives).
     let welcomed = false;
@@ -273,16 +307,17 @@ describe('join and lock', () => {
 
 describe('rejoin', () => {
   async function playedRoom() {
-    const r = await joined({ tc: null, color: 'w' });
+    const r = await joined({ tc: null, color: 'B' });
     const { h, A, B } = r;
-    await play(h, [A, B], ['e2e4', 'e7e5']);
+    await play(h, [A, B], ['cc', 'gg']);
     expect(B.ctrl.resign()).toBe(true);
     await h.settle();
     expect(A.ctrl.ask('rematch')).toBe(true);
     await h.settle();
     expect(B.ctrl.reply('rematch', true)).toBe(true);
     await h.settle();
-    await play(h, [A, B], ['d2d4', 'd7d5', 'c2c4']);
+    // Game 2: colors swapped, B is Black.
+    await play(h, [A, B], ['dd', 'ff', 'df']);
     return r;
   }
 
@@ -293,25 +328,26 @@ describe('rejoin', () => {
       B.ctrl.leave();
       await h.settle();
       // B lost everything and starts the code again.
-      const B2 = h.device('B2', intent === 'typed code' ? { create: { tc: '5+0', color: 'w' } } : {});
+      const B2 = h.device('B2', intent === 'typed code' ? { create: { tc: '5+0', color: 'B', size: 19 } } : {});
       await h.settle();
       expect(A.ctrl.snapshot).toMatchObject({ requests: { incoming: 'rejoin' }, lock: 'rejoin-pending' });
       expect(B2.ctrl.snapshot.phase).toBe('joining');
       expect(A.ctrl.reply('rejoin', true)).toBe(true);
       await h.settle();
       expect(A.ctrl.snapshot).toMatchObject({ live: true, lock: 'locked', requests: {} });
-      expect(B2.ctrl.snapshot).toMatchObject({ live: true, seat: 1, n: 2, color: 'w', lock: 'locked' });
+      expect(B2.ctrl.snapshot).toMatchObject({ live: true, seat: 1, n: 2, color: 'B', lock: 'locked' });
+      expect(B2.ctrl.snapshot.game.settings.size).toBe(9);
       expect(B2.ctrl.snapshot.score).toEqual(A.ctrl.snapshot.score);
       expect(scoreView(B2.ctrl.snapshot.score, 1)).toEqual([0, 1]);
       expect(strip(B2.ctrl.snapshot.logs)).toEqual(strip(A.ctrl.snapshot.logs));
-      expect(ucis(B2)).toEqual(['d2d4', 'd7d5', 'c2c4']);
+      expect(plies(B2)).toEqual(['dd', 'ff', 'df']);
       expect(room(B2)).toMatchObject({ key, seat: 1, score: [2, 0], games: [`${CODE}.1`, `${CODE}.2`] });
       const g1 = saved(B2).find((g) => g.id === `${CODE}.1`);
-      expect(g1).toMatchObject({ result: '1-0', by: 'resign', color: 'b', mode: 'room' });
+      expect(g1).toMatchObject({ result: { winner: 'B', by: 'resign' }, color: 'W', mode: 'room' });
       expect(A.kinds()).not.toContain('challenge-failed');
       // Play continues normally.
-      await play(h, [A, B2], ['e7e6']);
-      expect(ucis(A)).toEqual(['d2d4', 'd7d5', 'c2c4', 'e7e6']);
+      await play(h, [A, B2], ['fd']);
+      expect(plies(A)).toEqual(['dd', 'ff', 'df', 'fd']);
     });
   }
 
@@ -319,8 +355,8 @@ describe('rejoin', () => {
     const h = createHarness({ code: CODE });
     const key = generateKey(seeded(5));
     // The survivor's oldest games fell out of the 100-game store; its score still counts them.
-    const g3 = endLog(buildLog(3, 0, null, ['e2e4', 'e7e5']), { result: '1-0', by: 'resign' });
-    const g4 = buildLog(4, 1, null, ['d2d4']);
+    const g3 = endLog(buildLog(3, 0, null, ['cc', 'gg']), W_RESIGNS);
+    const g4 = buildLog(4, 1, null, ['dd']);
     const storage = seededStorage(0, key, [g3, g4]);
     const st = createStore(storage);
     const rec = st.rooms()[0];
@@ -342,9 +378,9 @@ describe('rejoin', () => {
     const h = createHarness({ code: CODE });
     const key = generateKey(seeded(6));
     // Games 1 and 2 were evicted on the survivor; games 3 and 4 are finished, game 5 is current.
-    const g3 = endLog(buildLog(3, 0, null, ['e2e4', 'e7e5']), { result: '1-0', by: 'resign' });
-    const g4 = endLog(buildLog(4, 1, null, ['d2d4']), { result: '0-1', by: 'resign' });
-    const g5 = buildLog(5, 0, null, ['c2c4']);
+    const g3 = endLog(buildLog(3, 0, null, ['cc', 'gg']), W_RESIGNS);
+    const g4 = endLog(buildLog(4, 1, null, ['dd']), B_RESIGNS);
+    const g5 = buildLog(5, 0, null, ['cc']);
     const storage = seededStorage(0, key, [g3, g4, g5]);
     const st = createStore(storage);
     st.saveRoom({ ...st.rooms()[0], score: [8, 2] });
@@ -386,7 +422,7 @@ describe('rejoin', () => {
     const h = createHarness({ code: CODE });
     const pair = fakePair(h.time);
     const peer = scriptPeer(pair.b);
-    const A = h.deviceOn('A', pair.a, { storage: seededStorage(0, key, [buildLog(1, 1, null, ['e2e4'])]) });
+    const A = h.deviceOn('A', pair.a, { storage: seededStorage(0, key, [buildLog(1, 1, null, ['cc'])]) });
     await h.settle();
     peer.send({ t: 'hello', v: 1, hasKey: false, nonce: 'BBBBBBBBBBBBBBBBBBBBBB' });
     peer.send({ t: 'rejoin', v: 1 });
@@ -396,7 +432,7 @@ describe('rejoin', () => {
     await h.settle();
     const grant = peer.of('grant')[0];
     expect(grant).toMatchObject({ key, seat: 1, score: [0, 0] });
-    expect(grant.games.map((g) => g.plies.map((p) => p.m))).toEqual([['e2e4']]);
+    expect(grant.games.map((g) => g.plies.map((p) => p.m))).toEqual([['cc']]);
     expect(peer.of('head').length).toBe(1);
   });
 
@@ -429,7 +465,8 @@ describe('rejoin', () => {
     await h.settle();
     expect(C.ctrl.snapshot).toMatchObject({ phase: 'denied', locked: 'denied', seat: null });
     expect(C.kinds()).toEqual(['rejoin-denied']);
-    expect(C.ctrl.move('e2e4')).toBe(false);
+    expect(C.ctrl.move('cc')).toBe(false);
+    expect(C.ctrl.pass()).toBe(false);
     expect(room(C)).toBeUndefined();
     expect(saved(C)).toEqual([]);
     expect(h.sent().some((e) => e.msg.t === 'grant' || e.msg.t === 'head' || e.msg.t === 'logs')).toBe(false);
@@ -459,9 +496,9 @@ describe('rejoin', () => {
 
   it('a large room is granted in several messages that fit the size limit', async () => {
     const logs = [
-      endLog(buildLog(1, 0, null, ['e2e4', 'e7e5', 'g1f3', 'b8c6']), { result: '1-0', by: 'resign' }),
-      endLog(buildLog(2, 1, null, ['d2d4', 'd7d5', 'c2c4']), { result: '1/2-1/2', by: 'agreed' }),
-      buildLog(3, 0, null, ['c2c4']),
+      endLog(buildLog(1, 0, null, ['cc', 'gg', 'cg', 'gc']), W_RESIGNS),
+      endLog(buildLog(2, 1, null, ['dd', 'ff', 'df']), W_ON_TIME),
+      buildLog(3, 0, null, ['ee']),
     ];
     const key = generateKey(seeded(5));
     const h = createHarness({ code: CODE });
@@ -474,7 +511,8 @@ describe('rejoin', () => {
     expect(sizes.length).toBeGreaterThan(1);
     expect(C.ctrl.snapshot.live).toBe(true);
     expect(strip(C.ctrl.snapshot.logs)).toEqual(strip(logs));
-    expect(C.ctrl.snapshot.score).toEqual([3, 1]);
+    // Game 1: seat 0 (Black) wins; game 2: Black (seat 1) won on time.
+    expect(C.ctrl.snapshot.score).toEqual([2, 2]);
   });
 });
 
@@ -484,87 +522,118 @@ describe('rejoin', () => {
 
 describe('live play', () => {
   it('moves are acknowledged and every ply is stored on both devices', async () => {
-    const { h, A, B } = await joined({ tc: null, color: 'w' });
-    await play(h, [A, B], ['e2e4', 'e7e5', 'g1f3', 'b8c6'], 1500);
-    expect(ucis(A)).toEqual(['e2e4', 'e7e5', 'g1f3', 'b8c6']);
-    expect(ucis(B)).toEqual(ucis(A));
+    const { h, A, B } = await joined({ tc: null, color: 'B' });
+    await play(h, [A, B], ['cc', 'gg', 'cg', 'gc'], 1500);
+    expect(plies(A)).toEqual(['cc', 'gg', 'cg', 'gc']);
+    expect(plies(B)).toEqual(plies(A));
     expect(A.ctrl.snapshot.unsent).toBe(0);
     expect(B.ctrl.snapshot.unsent).toBe(0);
     const acks = h.sent().filter((e) => e.msg.t === 'ack');
     expect(acks.length).toBe(4);
     for (const d of [A, B]) {
       const g = saved(d)[0];
-      expect(zhess.decodeMoves(g.moves)).toEqual(['e2e4', 'e7e5', 'g1f3', 'b8c6']);
+      expect(zigo.decodeMoves(g.moves)).toEqual(['cc', 'gg', 'cg', 'gc']);
       expect(g.ms).toEqual([1500, 1500, 1500, 1500]);
       expect(g.lastPlayedAt).toBeGreaterThanOrEqual(WALL0);
     }
   });
 
-  it('refuses moves out of turn, illegal moves and moves after the end', async () => {
-    const { h, A, B } = await joined({ tc: null, color: 'w' });
-    expect(B.ctrl.move('e7e5')).toBe(false);
-    expect(A.ctrl.move('e2e5')).toBe(false);
+  it('captures are replayed on both devices and the prisoners agree', async () => {
+    const { h, A, B } = await joined({ tc: null, color: 'B' });
+    // Black surrounds White's corner stone at `aa`.
+    await play(h, [A, B], ['ba', 'aa', 'ab']);
+    for (const d of [A, B]) {
+      expect(d.ctrl.snapshot.game.prisoners).toEqual({ B: 1, W: 0 });
+      expect(d.ctrl.snapshot.game.board[0]).toBe(0);
+    }
+  });
+
+  it('refuses moves out of turn, illegal points, ko retakes and moves after the end', async () => {
+    const { h, A, B } = await joined({ tc: null, color: 'B' });
+    expect(B.ctrl.move('gg')).toBe(false); // White, not to move
+    expect(B.ctrl.pass()).toBe(false);
+    expect(A.ctrl.move('kk')).toBe(false); // off a 9×9 board
     expect(A.ctrl.move('nonsense')).toBe(false);
-    await play(h, [A, B], ['f2f3', 'e7e5', 'g2g4', 'd8h4']);
-    for (const d of [A, B]) expect(d.ctrl.snapshot.game.end).toEqual({ result: '0-1', by: 'mate' });
-    expect(A.ctrl.move('a2a3')).toBe(false);
+    expect(A.ctrl.move('D4')).toBe(false); // GTP is the UI's business, the protocol speaks SGF
+    await play(h, [A, B], ['dd', 'ed', 'ce', 'fe', 'df', 'ef', 'aa', 'de', 'ee']); // Black takes the ko
+    expect(B.ctrl.move('de')).toBe(false); // the immediate retake
+    expect(B.ctrl.move('ee')).toBe(false); // occupied
+    expect(B.ctrl.snapshot.myTurn).toBe(true);
+    expect(B.ctrl.resign()).toBe(true);
+    await h.settle();
+    for (const d of [A, B]) expect(d.ctrl.snapshot.game.end).toEqual({ result: { winner: 'B', by: 'resign' } });
+    expect(A.ctrl.move('gg')).toBe(false);
     expect(A.ctrl.resign()).toBe(false);
-    expect(A.ctrl.snapshot.score).toEqual([0, 2]);
-    expect(B.ctrl.snapshot.score).toEqual([0, 2]);
-    expect(scoreView(B.ctrl.snapshot.score, 1)).toEqual([1, 0]);
+    expect(A.ctrl.snapshot.score).toEqual([2, 0]);
+    expect(B.ctrl.snapshot.score).toEqual([2, 0]);
+    expect(scoreView(B.ctrl.snapshot.score, 1)).toEqual([0, 1]);
+  });
+
+  it('a pass is a normal move: sent, acknowledged and stored as `tt`', async () => {
+    const { h, A, B } = await joined({ tc: null, color: 'B' });
+    await play(h, [A, B], ['cc']);
+    expect(B.ctrl.pass(700)).toBe(true);
+    await h.settle();
+    for (const d of [A, B]) {
+      expect(plies(d)).toEqual(['cc', 'tt']);
+      expect(d.ctrl.snapshot.game.passes).toBe(1);
+      expect(saved(d)[0].moves).toBe('cctt');
+    }
+    expect(h.sent().filter((e) => e.msg.t === 'move').map((e) => (e.msg as Extract<Message, { t: 'move' }>).m)).toEqual(['cc', 'tt']);
+    expect(A.ctrl.snapshot.myTurn).toBe(true);
   });
 
   it('drop and resend: a lost move is sent again until it is acknowledged', async () => {
-    const { h, A, B } = await joined({ tc: null, color: 'w' });
+    const { h, A, B } = await joined({ tc: null, color: 'B' });
     let dropped = 0;
     h.net.link(CODE)?.setDrop((m) => m.t === 'move' && dropped++ < 2);
-    A.ctrl.move('e2e4');
+    A.ctrl.move('cc');
     await h.settle();
-    expect(ucis(B)).toEqual([]);
+    expect(plies(B)).toEqual([]);
     expect(A.ctrl.snapshot.unsent).toBe(1);
     await h.advance(ROOM_DEFAULTS.resendMs);
-    expect(ucis(B)).toEqual([]); // second copy dropped too
+    expect(plies(B)).toEqual([]); // second copy dropped too
     await h.advance(ROOM_DEFAULTS.resendMs);
-    expect(ucis(B)).toEqual(['e2e4']);
+    expect(plies(B)).toEqual(['cc']);
     expect(A.ctrl.snapshot.unsent).toBe(0);
     expect(h.sent().filter((e) => e.msg.t === 'move').length).toBe(3);
   });
 
   it('a lost ack: the resent move is a duplicate and is acknowledged again', async () => {
-    const { h, A, B } = await joined({ tc: null, color: 'w' });
+    const { h, A, B } = await joined({ tc: null, color: 'B' });
     let dropped = 0;
     h.net.link(CODE)?.setDrop((m) => m.t === 'ack' && dropped++ < 1);
-    A.ctrl.move('e2e4');
+    A.ctrl.move('cc');
     await h.settle();
-    expect(ucis(B)).toEqual(['e2e4']);
+    expect(plies(B)).toEqual(['cc']);
     expect(A.ctrl.snapshot.unsent).toBe(1);
     await h.advance(ROOM_DEFAULTS.resendMs);
     expect(A.ctrl.snapshot.unsent).toBe(0);
-    expect(ucis(B)).toEqual(['e2e4']);
+    expect(plies(B)).toEqual(['cc']);
   });
 
   it('resign is final and counts for the opponent', async () => {
-    const { h, A, B } = await joined({ tc: '5+0', color: 'w' });
-    await play(h, [A, B], ['e2e4']);
+    const { h, A, B } = await joined({ tc: '5+0', color: 'B' });
+    await play(h, [A, B], ['cc']);
     expect(A.ctrl.resign()).toBe(true);
     await h.settle();
-    for (const d of [A, B]) expect(d.ctrl.snapshot.game.end).toEqual({ result: '0-1', by: 'resign' });
+    for (const d of [A, B]) expect(d.ctrl.snapshot.game.end).toEqual({ result: { winner: 'W', by: 'resign' } });
     expect(room(A)?.score).toEqual([0, 2]);
     expect(room(B)?.score).toEqual([0, 2]);
-    expect(saved(B)[0]).toMatchObject({ result: '0-1', by: 'resign' });
+    expect(saved(B)[0]).toMatchObject({ result: { winner: 'W', by: 'resign' } });
     expect(B.ctrl.snapshot.clock.turnStart).toBeNull();
   });
 
   it('a resignation crossing a move: the finished copy wins on both devices', async () => {
-    const { h, A, B } = await joined({ tc: null, color: 'w' });
-    await play(h, [A, B], ['e2e4']);
+    const { h, A, B } = await joined({ tc: null, color: 'B' });
+    await play(h, [A, B], ['cc']);
     // B moves and A resigns at the same moment.
-    B.ctrl.move('e7e5');
+    B.ctrl.move('gg');
     A.ctrl.resign();
     await h.settle();
     for (const d of [A, B]) {
-      expect(d.ctrl.snapshot.game.end).toEqual({ result: '0-1', by: 'resign' });
-      expect(ucis(d)).toEqual(['e2e4']);
+      expect(d.ctrl.snapshot.game.end).toEqual({ result: { winner: 'W', by: 'resign' } });
+      expect(plies(d)).toEqual(['cc']);
     }
     expect(A.kinds()).not.toContain('restored-from-opponent');
   });
@@ -576,53 +645,68 @@ describe('live play', () => {
 
 describe('offline moves', () => {
   it('untimed: the player to move moves while the opponent is away; the move arrives when they return', async () => {
-    const { h, A, B } = await joined({ tc: null, color: 'w' });
-    await play(h, [A, B], ['e2e4', 'e7e5']);
+    const { h, A, B } = await joined({ tc: null, color: 'B' });
+    await play(h, [A, B], ['cc', 'gg']);
     B.ctrl.leave();
     await h.settle();
     expect(A.ctrl.snapshot).toMatchObject({ presence: 'reconnecting', locked: null, canMove: true });
-    expect(A.ctrl.move('g1f3')).toBe(true);
+    expect(A.ctrl.move('cg')).toBe(true);
     expect(A.ctrl.snapshot).toMatchObject({ unsent: 1, myTurn: false, canMove: false });
-    expect(zhess.decodeMoves(saved(A)[0].moves)).toEqual(['e2e4', 'e7e5', 'g1f3']);
+    expect(zigo.decodeMoves(saved(A)[0].moves)).toEqual(['cc', 'gg', 'cg']);
     // B reopens the room later (same storage, new page).
     const B2 = h.device('B2', { storage: B.storage });
-    expect(ucis(B2)).toEqual(['e2e4', 'e7e5']);
+    expect(plies(B2)).toEqual(['cc', 'gg']);
     await h.settle();
-    expect(ucis(B2)).toEqual(['e2e4', 'e7e5', 'g1f3']);
+    expect(plies(B2)).toEqual(['cc', 'gg', 'cg']);
     expect(A.ctrl.snapshot.unsent).toBe(0);
     expect(B2.ctrl.snapshot.myTurn).toBe(true);
-    expect(zhess.decodeMoves(saved(B2)[0].moves)).toEqual(['e2e4', 'e7e5', 'g1f3']);
+    expect(zigo.decodeMoves(saved(B2)[0].moves)).toEqual(['cc', 'gg', 'cg']);
     expect(A.kinds().at(-1)).toBe('reconnected');
     expect(B2.kinds()).toEqual(['opponent-connected']);
   });
 
+  it('untimed: a pass made while the opponent is away arrives when they return (DESIGN 9.3)', async () => {
+    const { h, A, B } = await joined({ tc: null, color: 'B' });
+    await play(h, [A, B], ['cc', 'gg']);
+    B.ctrl.leave();
+    await h.settle();
+    expect(A.ctrl.pass()).toBe(true);
+    expect(A.ctrl.snapshot.unsent).toBe(1);
+    const B2 = h.device('B2', { storage: B.storage });
+    await h.settle();
+    expect(plies(B2)).toEqual(['cc', 'gg', 'tt']);
+    expect(B2.ctrl.snapshot.game.passes).toBe(1);
+    expect(B2.ctrl.snapshot.myTurn).toBe(true);
+    expect(A.ctrl.snapshot.unsent).toBe(0);
+  });
+
   it('correspondence: both close the app; the moves cross whenever both are online', async () => {
-    const { h, A, B } = await joined({ tc: null, color: 'w' });
+    const { h, A, B } = await joined({ tc: null, color: 'B' });
     A.ctrl.leave();
     B.ctrl.leave();
     await h.settle();
     const A2 = h.device('A2', { storage: A.storage });
     await h.settle();
     expect(A2.ctrl.snapshot.presence).toBe('waiting');
-    expect(A2.ctrl.move('d2d4')).toBe(true);
+    expect(A2.ctrl.move('dd')).toBe(true);
     A2.ctrl.leave();
     await h.settle();
     const B2 = h.device('B2', { storage: B.storage });
     await h.settle();
     expect(B2.ctrl.snapshot).toMatchObject({ presence: 'waiting', live: false });
-    expect(ucis(B2)).toEqual([]);
-    expect(B2.ctrl.move('d7d5')).toBe(false); // not B's turn as far as B knows
+    expect(plies(B2)).toEqual([]);
+    expect(B2.ctrl.move('ff')).toBe(false); // not B's turn as far as B knows
     const A3 = h.device('A3', { storage: A.storage });
     await h.settle();
-    expect(ucis(B2)).toEqual(['d2d4']);
-    expect(B2.ctrl.move('d7d5')).toBe(true);
+    expect(plies(B2)).toEqual(['dd']);
+    expect(B2.ctrl.move('ff')).toBe(true);
     await h.settle();
-    expect(ucis(A3)).toEqual(['d2d4', 'd7d5']);
+    expect(plies(A3)).toEqual(['dd', 'ff']);
   });
 
   it('timed: the board locks while disconnected and the strips pause', async () => {
-    const { h, A, B } = await joined({ tc: '5+0', color: 'w' });
-    await play(h, [A, B], ['e2e4', 'e7e5']);
+    const { h, A, B } = await joined({ tc: '5+0', color: 'B' });
+    await play(h, [A, B], ['cc', 'gg']);
     h.net.link(CODE)?.disconnect();
     await h.settle();
     for (const d of [A, B]) {
@@ -630,30 +714,31 @@ describe('offline moves', () => {
       expect(d.ctrl.snapshot.clock.paused).toBe(true);
       expect(d.ctrl.snapshot.clock.turnStart).toBeNull();
     }
-    expect(A.ctrl.move('g1f3')).toBe(false);
+    expect(A.ctrl.move('cg')).toBe(false);
+    expect(A.ctrl.pass()).toBe(false);
     expect(A.kinds()).toEqual(['opponent-joined', 'opponent-disconnected']);
   });
 
   it('both reconnect: a dropped channel comes back and play continues', async () => {
-    const { h, A, B } = await joined({ tc: null, color: 'w' });
-    await play(h, [A, B], ['e2e4']);
+    const { h, A, B } = await joined({ tc: null, color: 'B' });
+    await play(h, [A, B], ['cc']);
     h.net.link(CODE)?.disconnect();
     await h.settle();
     expect(A.ctrl.snapshot.presence).toBe('reconnecting');
     expect(B.ctrl.snapshot.presence).toBe('reconnecting');
     // B moves offline meanwhile (untimed).
-    expect(B.ctrl.move('c7c5')).toBe(true);
+    expect(B.ctrl.move('ec')).toBe(true);
     h.net.link(CODE)?.reconnect();
     await h.settle();
     for (const d of [A, B]) {
       expect(d.ctrl.snapshot).toMatchObject({ presence: 'connected', live: true, unsent: 0 });
-      expect(ucis(d)).toEqual(['e2e4', 'c7c5']);
+      expect(plies(d)).toEqual(['cc', 'ec']);
       expect(d.kinds().slice(-2)).toEqual(['opponent-disconnected', 'reconnected']);
     }
   });
 
   it('liveness: three missed pongs mark the peer disconnected and reconnect the transport', async () => {
-    const { h, A, B } = await joined({ tc: '5+0', color: 'w' });
+    const { h, A, B } = await joined({ tc: '5+0', color: 'B' });
     const link = h.net.link(CODE);
     link?.setDrop(true);
     // The first tick still counts the join traffic; then three silent intervals.
@@ -676,13 +761,14 @@ describe('offline moves', () => {
   });
 
   it('a page reload keeps the room: the record and the games come from the store', async () => {
-    const { h, A, B } = await joined({ tc: '10+5', color: 'b' });
-    await play(h, [A, B], ['e2e4', 'c7c5', 'g1f3']);
+    const { h, A, B } = await joined({ tc: '10+5', color: 'W', size: 13 });
+    await play(h, [A, B], ['cc', 'ec', 'cg']);
     A.ctrl.leave();
     await h.settle();
     const A2 = h.device('A2', { storage: A.storage });
-    expect(A2.ctrl.snapshot).toMatchObject({ seat: 0, color: 'b', n: 1, lock: 'locked', presence: 'connecting' });
-    expect(ucis(A2)).toEqual(['e2e4', 'c7c5', 'g1f3']);
+    expect(A2.ctrl.snapshot).toMatchObject({ seat: 0, color: 'W', n: 1, lock: 'locked', presence: 'connecting' });
+    expect(A2.ctrl.snapshot.game.settings.size).toBe(13);
+    expect(plies(A2)).toEqual(['cc', 'ec', 'cg']);
     await h.settle();
     expect(A2.ctrl.snapshot.live).toBe(true);
   });
@@ -694,32 +780,34 @@ describe('offline moves', () => {
 
 describe('requests', () => {
   it('takeback accepted: cut before the requester last move, epoch + 1, same on both devices', async () => {
-    const { h, A, B } = await joined({ tc: '5+0', color: 'w' });
-    await play(h, [A, B], ['e2e4', 'e7e5', 'g1f3']);
+    const { h, A, B } = await joined({ tc: '5+0', color: 'B' });
+    await play(h, [A, B], ['cc', 'gg', 'cg']);
     expect(A.ctrl.snapshot.canAsk.takeback).toBe(true);
     expect(A.ctrl.ask('takeback')).toBe(true);
     expect(A.ctrl.snapshot.requests).toEqual({ outgoing: 'takeback' });
-    expect(A.ctrl.ask('draw')).toBe(false); // one request at a time
+    expect(A.ctrl.ask('takeback')).toBe(false); // one request at a time
+    expect(A.ctrl.ask('rematch')).toBe(false);
     await h.settle();
     expect(B.ctrl.snapshot.requests).toEqual({ incoming: 'takeback' });
     expect(B.ctrl.reply('takeback', true)).toBe(true);
     await h.settle();
     for (const d of [A, B]) {
-      expect(ucis(d)).toEqual(['e2e4', 'e7e5']);
+      expect(plies(d)).toEqual(['cc', 'gg']);
       expect(d.ctrl.snapshot).toMatchObject({ epoch: 1, requests: {} });
       expect(saved(d)[0].room).toEqual({ n: 1, epoch: 1 });
     }
     expect(A.ctrl.snapshot.myTurn).toBe(true);
     // Clocks return to the stamps of that position (derived from the log).
-    expect(zhess.clocks(A.ctrl.snapshot.game, A.ctrl.snapshot.tc)).toEqual(zhess.clocks(zhess.replay(A.ctrl.snapshot.game.plies), A.ctrl.snapshot.tc));
+    const g = A.ctrl.snapshot.game;
+    expect(zigo.clocks(g, A.ctrl.snapshot.tc)).toEqual(zigo.clocks(zigo.replay(g.settings, g.plies), A.ctrl.snapshot.tc));
     expect(A.ctrl.snapshot.clock.turnUsed).toBe(0);
-    await play(h, [A, B], ['d2d4']);
-    expect(ucis(B)).toEqual(['e2e4', 'e7e5', 'd2d4']);
+    await play(h, [A, B], ['dd']);
+    expect(plies(B)).toEqual(['cc', 'gg', 'dd']);
   });
 
   it('takeback declined: the requester is told', async () => {
     const { h, A, B } = await joined();
-    await play(h, [A, B], ['e2e4']);
+    await play(h, [A, B], ['cc']);
     A.ctrl.ask('takeback');
     await h.settle();
     B.ctrl.reply('takeback', false);
@@ -727,131 +815,113 @@ describe('requests', () => {
     expect(A.notices.at(-1)).toMatchObject({ kind: 'request-declined', request: 'takeback' });
     expect(A.ctrl.snapshot.notice).toMatchObject({ kind: 'request-declined', request: 'takeback' });
     expect(A.ctrl.snapshot.requests).toEqual({});
-    expect(ucis(A)).toEqual(['e2e4']);
+    expect(plies(A)).toEqual(['cc']);
   });
 
   it('takeback is withdrawn when the requester moves', async () => {
     const { h, A, B } = await joined();
-    await play(h, [A, B], ['e2e4', 'e7e5']);
+    await play(h, [A, B], ['cc', 'gg']);
     A.ctrl.ask('takeback');
     await h.settle();
     expect(B.ctrl.snapshot.requests.incoming).toBe('takeback');
-    A.ctrl.move('g1f3');
+    A.ctrl.move('cg');
     expect(A.ctrl.snapshot.requests).toEqual({});
     await h.settle();
     expect(B.ctrl.snapshot.requests).toEqual({});
     expect(B.ctrl.reply('takeback', true)).toBe(false);
-    expect(ucis(B)).toEqual(['e2e4', 'e7e5', 'g1f3']);
+    expect(plies(B)).toEqual(['cc', 'gg', 'cg']);
+  });
+
+  it('takeback of a pass', async () => {
+    const { h, A, B } = await joined();
+    await play(h, [A, B], ['cc', 'gg', 'tt']);
+    A.ctrl.ask('takeback');
+    await h.settle();
+    B.ctrl.reply('takeback', true);
+    await h.settle();
+    for (const d of [A, B]) {
+      expect(plies(d)).toEqual(['cc', 'gg']);
+      expect(d.ctrl.snapshot.game.passes).toBe(0);
+    }
   });
 
   it('takeback cannot be asked before moving, while disconnected, or after the end', async () => {
     const { h, A, B } = await joined();
     expect(A.ctrl.ask('takeback')).toBe(false);
-    await play(h, [A, B], ['e2e4']);
+    await play(h, [A, B], ['cc']);
     expect(B.ctrl.ask('takeback')).toBe(false);
     h.net.link(CODE)?.disconnect();
     await h.settle();
     expect(A.ctrl.ask('takeback')).toBe(false);
-    expect(A.ctrl.ask('draw')).toBe(false);
+    expect(A.ctrl.ask('rematch')).toBe(false);
+  });
+
+  it('there is no draw request in Go', async () => {
+    const { h, A, B } = await joined();
+    await play(h, [A, B], ['cc']);
+    expect(A.ctrl.ask('draw' as never)).toBe(false);
+    expect(A.ctrl.snapshot.canAsk).toEqual({ takeback: true, rematch: false });
+    expect(h.sent().some((e) => e.msg.t === 'ask')).toBe(false);
   });
 
   it('a takeback accepted while the reply is lost: reconcile brings the requester to the new epoch', async () => {
     const { h, A, B } = await joined();
-    await play(h, [A, B], ['e2e4', 'e7e5']);
+    await play(h, [A, B], ['cc', 'gg']);
     A.ctrl.ask('takeback');
     await h.settle();
     h.net.link(CODE)?.setDrop((m) => m.t === 'reply');
     B.ctrl.reply('takeback', true);
     await h.settle();
-    expect(ucis(A)).toEqual(['e2e4', 'e7e5']);
-    expect(ucis(B)).toEqual([]);
+    expect(plies(A)).toEqual(['cc', 'gg']);
+    expect(plies(B)).toEqual([]);
     h.net.link(CODE)?.setDrop(false);
     h.net.link(CODE)?.disconnect();
     h.net.link(CODE)?.reconnect();
     await h.settle();
     for (const d of [A, B]) expect(d.ctrl.snapshot).toMatchObject({ epoch: 1, live: true, requests: {} });
-    expect(ucis(A)).toEqual([]);
-  });
-
-  it('draw declined, then accepted: 1/2-1/2 by agreement, half a point each', async () => {
-    const { h, A, B } = await joined({ tc: '5+0', color: 'w' });
-    await play(h, [A, B], ['e2e4', 'e7e5']);
-    expect(A.ctrl.ask('draw')).toBe(true);
-    await h.settle();
-    expect(B.ctrl.snapshot.requests.incoming).toBe('draw');
-    B.ctrl.reply('draw', false);
-    await h.settle();
-    expect(A.notices.at(-1)).toMatchObject({ kind: 'request-declined', request: 'draw' });
-    expect(B.ctrl.ask('draw')).toBe(true);
-    await h.settle();
-    A.ctrl.reply('draw', true);
-    await h.settle();
-    for (const d of [A, B]) {
-      expect(d.ctrl.snapshot.game.end).toEqual({ result: '1/2-1/2', by: 'agreed' });
-      expect(d.ctrl.snapshot.score).toEqual([1, 1]);
-      expect(saved(d)[0]).toMatchObject({ result: '1/2-1/2', by: 'agreed' });
-    }
-    expect(scoreView(A.ctrl.snapshot.score, 0)).toEqual([0.5, 0.5]);
-  });
-
-  it('a draw offer expires when the opponent moves', async () => {
-    const { h, A, B } = await joined();
-    await play(h, [A, B], ['e2e4']);
-    A.ctrl.ask('draw');
-    await h.settle();
-    expect(B.ctrl.snapshot.requests.incoming).toBe('draw');
-    B.ctrl.move('e7e5');
-    expect(B.ctrl.snapshot.requests).toEqual({});
-    await h.settle();
-    expect(A.ctrl.snapshot.requests).toEqual({});
-    expect(A.ctrl.snapshot.game.end).toBeUndefined();
-  });
-
-  it('crossing draw offers are an agreement', async () => {
-    const { h, A, B } = await joined();
-    await play(h, [A, B], ['e2e4']);
-    A.ctrl.ask('draw');
-    B.ctrl.ask('draw');
-    await h.settle();
-    for (const d of [A, B]) expect(d.ctrl.snapshot.game.end).toEqual({ result: '1/2-1/2', by: 'agreed' });
-    expect(A.ctrl.snapshot.requests).toEqual({});
+    expect(plies(A)).toEqual([]);
   });
 
   it('disconnect mid-request: the toast goes away, the request is asked again after the reconnect', async () => {
     const { h, A, B } = await joined();
-    await play(h, [A, B], ['e2e4', 'e7e5']);
-    A.ctrl.ask('draw');
+    await play(h, [A, B], ['cc', 'gg']);
+    A.ctrl.ask('takeback');
     await h.settle();
-    expect(B.ctrl.snapshot.requests.incoming).toBe('draw');
+    expect(B.ctrl.snapshot.requests.incoming).toBe('takeback');
     h.net.link(CODE)?.disconnect();
     await h.settle();
     expect(B.ctrl.snapshot.requests).toEqual({});
-    expect(B.ctrl.reply('draw', true)).toBe(false);
-    expect(A.ctrl.snapshot.requests).toEqual({ outgoing: 'draw' });
+    expect(B.ctrl.reply('takeback', true)).toBe(false);
+    expect(A.ctrl.snapshot.requests).toEqual({ outgoing: 'takeback' });
     h.net.link(CODE)?.reconnect();
     await h.settle();
-    expect(B.ctrl.snapshot.requests.incoming).toBe('draw');
-    B.ctrl.reply('draw', true);
+    expect(B.ctrl.snapshot.requests.incoming).toBe('takeback');
+    B.ctrl.reply('takeback', true);
     await h.settle();
-    for (const d of [A, B]) expect(d.ctrl.snapshot.game.end?.by).toBe('agreed');
+    for (const d of [A, B]) {
+      expect(plies(d)).toEqual([]); // cut before A's (Black's) last stone
+      expect(d.ctrl.snapshot.epoch).toBe(1);
+    }
   });
 
   it('a lost ask is sent again', async () => {
     const { h, A, B } = await joined();
-    await play(h, [A, B], ['e2e4']);
+    await play(h, [A, B], ['cc']);
     let dropped = 0;
     h.net.link(CODE)?.setDrop((m) => m.t === 'ask' && dropped++ < 1);
-    A.ctrl.ask('draw');
+    A.ctrl.ask('takeback');
     await h.settle();
     expect(B.ctrl.snapshot.requests).toEqual({});
     await h.advance(ROOM_DEFAULTS.resendMs);
-    expect(B.ctrl.snapshot.requests.incoming).toBe('draw');
+    expect(B.ctrl.snapshot.requests.incoming).toBe('takeback');
   });
 
-  it('rematch: n + 1, colors swapped, same time control, score kept; again swaps back', async () => {
-    const { h, A, B } = await joined({ tc: '3+2', color: 'w' });
+  it('rematch: n + 1, colors swapped, same settings and time control, score kept; again swaps back', async () => {
+    const { h, A, B } = await joined({ tc: '3+2', color: 'B', size: 13, rules: 'territory' });
     expect(A.ctrl.ask('rematch')).toBe(false); // game not over
-    await play(h, [A, B], ['f2f3', 'e7e5', 'g2g4', 'd8h4']); // B (black) mates
+    await play(h, [A, B], ['cc', 'gg']);
+    A.ctrl.resign(); // B (White) wins
+    await h.settle();
     expect(B.ctrl.snapshot.canAsk.rematch).toBe(true);
     expect(B.ctrl.ask('rematch')).toBe(true);
     await h.settle();
@@ -860,16 +930,17 @@ describe('requests', () => {
     await h.settle();
     for (const d of [A, B]) {
       expect(d.ctrl.snapshot).toMatchObject({ n: 2, epoch: 0, requests: {} });
-      expect(d.ctrl.snapshot.tc).toEqual({ baseMs: 180_000, incMs: 2000 });
+      expect(d.ctrl.snapshot.tc).toEqual({ kind: 'fischer', baseMs: 180_000, incMs: 2000 });
+      expect(d.ctrl.snapshot.game.settings).toEqual(makeSettings(13, 'territory', 0));
       expect(d.ctrl.snapshot.game.plies).toEqual([]);
       expect(d.ctrl.snapshot.score).toEqual([0, 2]);
       expect(room(d)?.games).toEqual([`${CODE}.1`, `${CODE}.2`]);
     }
-    expect(A.ctrl.snapshot.color).toBe('b');
-    expect(B.ctrl.snapshot.color).toBe('w');
-    expect(saved(A).find((g) => g.id === `${CODE}.2`)).toMatchObject({ color: 'b', tc: '3+2', room: { n: 2, epoch: 0 } });
-    // Game 2: B (white) resigns; A wins.
-    await play(h, [A, B], ['e2e4']);
+    expect(A.ctrl.snapshot.color).toBe('W');
+    expect(B.ctrl.snapshot.color).toBe('B');
+    expect(saved(A).find((g) => g.id === `${CODE}.2`)).toMatchObject({ color: 'W', tc: '3+2', size: 13, rules: 'territory', room: { n: 2, epoch: 0 } });
+    // Game 2: B (Black) moves, then resigns; A wins.
+    await play(h, [A, B], ['cc']);
     B.ctrl.resign();
     await h.settle();
     expect(A.ctrl.snapshot.score).toEqual([2, 2]);
@@ -879,10 +950,220 @@ describe('requests', () => {
     B.ctrl.ask('rematch');
     await h.settle();
     for (const d of [A, B]) expect(d.ctrl.snapshot.n).toBe(3);
-    expect(A.ctrl.snapshot.color).toBe('w');
-    expect(B.ctrl.snapshot.color).toBe('b');
+    expect(A.ctrl.snapshot.color).toBe('B');
+    expect(B.ctrl.snapshot.color).toBe('W');
     expect(room(B)?.score).toEqual([2, 2]);
     expect(room(B)?.games).toEqual([`${CODE}.1`, `${CODE}.2`, `${CODE}.3`]);
+  });
+
+  it('rematch of a handicap game: the player who took Black keeps it (DESIGN 9.4)', async () => {
+    const { h, A, B } = await joined({ tc: null, color: 'W', size: 9, handicap: 2 });
+    expect(B.ctrl.snapshot.color).toBe('B');
+    expect(A.ctrl.snapshot.myTurn).toBe(true); // White moves first
+    await play(h, [A, B], ['ee']);
+    A.ctrl.resign();
+    await h.settle();
+    B.ctrl.ask('rematch');
+    await h.settle();
+    A.ctrl.reply('rematch', true);
+    await h.settle();
+    for (const d of [A, B]) {
+      expect(d.ctrl.snapshot.n).toBe(2);
+      expect(d.ctrl.snapshot.game.settings.handicap).toBe(2);
+    }
+    expect(A.ctrl.snapshot.color).toBe('W');
+    expect(B.ctrl.snapshot.color).toBe('B');
+  });
+});
+
+/* ---------------------------------------------------------------------------------------------- */
+/* Scoring in a room (DESIGN 9.5)                                                                   */
+/* ---------------------------------------------------------------------------------------------- */
+
+describe('scoring', () => {
+  /** A game where both pass at once after one stone each: scoring round 1. */
+  async function toScoring(create: RoomCreateSettings = { tc: null, color: 'B' }, opts: Parameters<typeof joined>[2] = {}) {
+    const r = await joined(create, {}, opts);
+    await play(r.h, [r.A, r.B], ['cc', 'gg', 'tt', 'tt']);
+    return r;
+  }
+
+  it('two passes enter scoring; seat 0 proposes at once (every stone alive without an engine)', async () => {
+    const { h, A, B } = await toScoring();
+    for (const d of [A, B]) {
+      const s = d.ctrl.snapshot;
+      expect(s.game.scoring).toEqual({ round: 1, rev: 1, dead: [], accepted: [0, 0] });
+      expect(s).toMatchObject({ myTurn: false, canMove: false, canMark: true, canAccept: true, canResume: true });
+      expect(s.clock.turnStart).toBeNull();
+      expect(saved(d)[0].scoring).toEqual({ round: 1, rev: 1, dead: [], accepted: [0, 0] });
+    }
+    expect(A.ctrl.move('ee')).toBe(false);
+    expect(A.ctrl.pass()).toBe(false);
+    const marks = h.sent().filter((e) => e.msg.t === 'mark');
+    expect(marks.map((e) => [e.from.endsWith('#1') ? 'A' : 'B', (e.msg as Extract<Message, { t: 'mark' }>).rev])).toEqual([['A', 1]]);
+  });
+
+  it("seat 0's proposal comes from its engine when it has one", async () => {
+    const { A, B } = await toScoring({ tc: null, color: 'B' }, { propose: () => ['gg'] });
+    for (const d of [A, B]) expect(d.ctrl.snapshot.game.scoring).toMatchObject({ rev: 1, dead: ['gg'] });
+  });
+
+  it('a toggle shows on both boards and clears both acceptances; both accepting the same rev ends the game alike', async () => {
+    const { h, A, B } = await toScoring();
+    expect(A.ctrl.accept()).toBe(true);
+    await h.settle();
+    expect(B.ctrl.snapshot.game.scoring?.accepted).toEqual([1, 0]);
+    expect(A.ctrl.snapshot.canAccept).toBe(false); // already accepted this rev
+    // B toggles White's stone dead: rev 2, nobody has accepted.
+    expect(B.ctrl.mark(scoringApi.toggle(B.ctrl.snapshot.game, [], 'gg'))).toBe(true);
+    await h.settle();
+    for (const d of [A, B]) expect(d.ctrl.snapshot.game.scoring).toEqual({ round: 1, rev: 2, dead: ['gg'], accepted: [0, 0] });
+    expect(A.ctrl.accept()).toBe(true);
+    await h.settle();
+    expect(A.ctrl.snapshot.game.end).toBeUndefined();
+    expect(B.ctrl.accept()).toBe(true);
+    await h.settle();
+    const want = scoringApi.result(A.ctrl.snapshot.game, scoringApi.score(A.ctrl.snapshot.game, ['gg']));
+    for (const d of [A, B]) {
+      expect(d.ctrl.snapshot.game.end).toEqual({ result: want });
+      expect(d.ctrl.snapshot.score).toEqual([2, 0]);
+      expect(saved(d)[0]).toMatchObject({ result: want, scoring: { rev: 2, dead: ['gg'], accepted: [2, 2] } });
+    }
+    expect(want).toMatchObject({ winner: 'B', by: 'score' });
+    expect(strip(A.ctrl.snapshot.logs)).toEqual(strip(B.ctrl.snapshot.logs));
+  });
+
+  it('accepting a marking that was toggled meanwhile is stale and ends nothing', async () => {
+    const { h, A, B } = await toScoring();
+    // A accepts rev 1 while B toggles: the toggle reaches A after A's accept left.
+    A.ctrl.accept();
+    B.ctrl.mark(['gg']);
+    await h.settle();
+    for (const d of [A, B]) {
+      expect(d.ctrl.snapshot.game.scoring).toMatchObject({ rev: 2, dead: ['gg'], accepted: [0, 0] });
+      expect(d.ctrl.snapshot.game.end).toBeUndefined();
+    }
+    expect(strip(A.ctrl.snapshot.logs)).toEqual(strip(B.ctrl.snapshot.logs));
+  });
+
+  it('resume: play continues; the next double pass is scored at once from seat 0 (round 2)', async () => {
+    const { h, A, B } = await toScoring({ tc: null, color: 'B' }, { propose: () => ['gg'] });
+    expect(B.ctrl.resume()).toBe(true);
+    await h.settle();
+    for (const d of [A, B]) {
+      expect(d.ctrl.snapshot.game.scoring).toBeUndefined();
+      expect(d.ctrl.snapshot.game.passes).toBe(0);
+    }
+    expect(A.ctrl.snapshot.myTurn).toBe(true); // Black is to move after the two passes
+    await play(h, [A, B], ['ee', 'tt', 'tt']);
+    const want = scoringApi.result(A.ctrl.snapshot.game, scoringApi.score(A.ctrl.snapshot.game, ['gg']));
+    for (const d of [A, B]) {
+      expect(d.ctrl.snapshot.game.end).toEqual({ result: want });
+      expect(d.ctrl.snapshot.game.scoring).toMatchObject({ round: 2, dead: ['gg'] });
+    }
+    expect(h.sent().filter((e) => e.msg.t === 'end')).toEqual([
+      expect.objectContaining({ msg: expect.objectContaining({ by: 'score', dead: ['gg'], result: want }) }),
+    ]);
+    expect(strip(A.ctrl.snapshot.logs)).toEqual(strip(B.ctrl.snapshot.logs));
+    expect(A.kinds()).not.toContain('sync-error');
+    expect(B.kinds()).not.toContain('sync-error');
+  });
+
+  it("round 2 adopts seat 0's proposal as data even if seat 1's engine would disagree", async () => {
+    const h = createHarness({ code: CODE });
+    const A = h.device('A', { create: { tc: null, color: 'W' }, propose: () => [] });
+    await h.settle();
+    const B = h.device('B', { propose: () => ['cc', 'ee'] });
+    await h.settle();
+    await play(h, [A, B], ['cc', 'gg', 'tt', 'tt']);
+    A.ctrl.resume();
+    await h.settle();
+    await play(h, [A, B], ['ee', 'tt', 'tt']);
+    for (const d of [A, B]) expect(d.ctrl.snapshot.game.scoring).toMatchObject({ round: 2, dead: [] });
+    expect(strip(A.ctrl.snapshot.logs)).toEqual(strip(B.ctrl.snapshot.logs));
+  });
+
+  it('takeback during scoring cuts the second pass and ends scoring', async () => {
+    const { h, A, B } = await toScoring();
+    expect(B.ctrl.snapshot.canAsk.takeback).toBe(true);
+    B.ctrl.ask('takeback'); // B made the second pass
+    await h.settle();
+    A.ctrl.reply('takeback', true);
+    await h.settle();
+    for (const d of [A, B]) {
+      expect(plies(d)).toEqual(['cc', 'gg', 'tt']);
+      expect(d.ctrl.snapshot.game.scoring).toBeUndefined();
+      expect(d.ctrl.snapshot.epoch).toBe(1);
+    }
+    expect(B.ctrl.snapshot.myTurn).toBe(true);
+  });
+
+  it('a resignation during scoring keeps the marking and ends the game', async () => {
+    const { h, A, B } = await toScoring();
+    expect(B.ctrl.resign()).toBe(true);
+    await h.settle();
+    for (const d of [A, B]) {
+      expect(d.ctrl.snapshot.game.end).toEqual({ result: { winner: 'B', by: 'resign' } });
+      expect(d.ctrl.snapshot.game.scoring?.rev).toBe(1);
+    }
+  });
+
+  it('while disconnected, marks are kept and synced through rev; accept and resume wait for the opponent', async () => {
+    const { h, A, B } = await toScoring();
+    h.net.link(CODE)?.disconnect();
+    await h.settle();
+    for (const d of [A, B]) expect(d.ctrl.snapshot).toMatchObject({ canAccept: false, canResume: false, canMark: true });
+    expect(A.ctrl.accept()).toBe(false);
+    expect(B.ctrl.resume()).toBe(false);
+    expect(B.ctrl.mark(['gg'])).toBe(true);
+    h.net.link(CODE)?.reconnect();
+    await h.settle();
+    for (const d of [A, B]) {
+      expect(d.ctrl.snapshot.game.scoring).toEqual({ round: 1, rev: 2, dead: ['gg'], accepted: [0, 0] });
+      expect(d.kinds()).not.toContain('restored-from-opponent');
+    }
+  });
+
+  it("seat 1 waits for seat 0's proposal before marking", async () => {
+    const { h, A, B } = await joined({ tc: null, color: 'B' });
+    await play(h, [A, B], ['cc', 'gg', 'tt']);
+    A.ctrl.leave(); // B (seat 1) passes second while seat 0 is away (untimed)
+    await h.settle();
+    expect(B.ctrl.pass()).toBe(true);
+    expect(B.ctrl.snapshot.game.scoring).toMatchObject({ rev: 0 });
+    expect(B.ctrl.snapshot.canMark).toBe(false);
+    expect(B.ctrl.mark(['cc'])).toBe(false);
+    const A2 = h.device('A2', { storage: A.storage });
+    await h.settle();
+    for (const d of [A2, B]) expect(d.ctrl.snapshot.game.scoring).toMatchObject({ rev: 1, dead: [] });
+    expect(B.ctrl.snapshot.canMark).toBe(true);
+  });
+
+  it('a lost acceptance reaches the other side with the next reconcile and ends the game there', async () => {
+    const { h, A, B } = await toScoring();
+    A.ctrl.accept();
+    await h.settle();
+    h.net.link(CODE)?.setDrop((m) => m.t === 'accept');
+    B.ctrl.accept(); // B's game ends; A never hears of it
+    await h.settle();
+    expect(B.ctrl.snapshot.game.end).toBeDefined();
+    expect(A.ctrl.snapshot.game.end).toBeUndefined();
+    h.net.link(CODE)?.setDrop(false);
+    h.net.link(CODE)?.disconnect();
+    h.net.link(CODE)?.reconnect();
+    await h.settle();
+    expect(A.ctrl.snapshot.game.end).toEqual(B.ctrl.snapshot.game.end);
+    expect(strip(A.ctrl.snapshot.logs)).toEqual(strip(B.ctrl.snapshot.logs));
+  });
+
+  it('clocks stop during scoring: no flag falls', async () => {
+    const { h, A, B } = await toScoring({ tc: '1+0', color: 'B' });
+    await h.advance(180_000);
+    for (const d of [A, B]) {
+      expect(d.ctrl.snapshot.game.end).toBeUndefined();
+      expect(d.ctrl.snapshot.clock).toMatchObject({ turnStart: null, paused: false });
+      expect(d.ctrl.flag()).toBe(false);
+    }
   });
 });
 
@@ -893,18 +1174,18 @@ describe('requests', () => {
 describe('clocks', () => {
   it('pause on disconnect, resume from the stamps the mover reports', async () => {
     const h = createHarness({ code: CODE, memory: { delayMs: 100 } });
-    const A = h.device('A', { create: { tc: '1+0', color: 'w' } });
+    const A = h.device('A', { create: { tc: '1+0', color: 'B' } });
     const B = h.device('B');
     await h.advance(1000);
     expect(A.ctrl.snapshot.live && B.ctrl.snapshot.live).toBe(true);
-    const step = async (d: Device, uci: string, think: number) => {
+    const step = async (d: Device, point: string, think: number) => {
       await h.advance(think);
-      expect(d.ctrl.move(uci)).toBe(true);
+      expect(d.ctrl.move(point)).toBe(true);
       await h.advance(200);
     };
-    await step(A, 'e2e4', 1000);
-    await step(B, 'e7e5', 1000);
-    await step(A, 'g1f3', 2000); // B's turn from here; B's clock runs (its first move was free)
+    await step(A, 'cc', 1000);
+    await step(B, 'gg', 1000);
+    await step(A, 'cg', 2000); // B's turn from here; B's clock runs (its first move was free)
     await h.advance(4800);
     // B's own view started when the move arrived (100 ms after A's view).
     expect(B.ctrl.elapsed()).toBe(5000 - 100);
@@ -932,32 +1213,48 @@ describe('clocks', () => {
     expect(A.ctrl.elapsed() - B.ctrl.elapsed()).toBeLessThanOrEqual(200);
     expect(Math.abs(A.ctrl.elapsed() - B.ctrl.elapsed())).toBeLessThanOrEqual(200);
     // B moves; its ms is what it measured, and A takes it.
-    expect(B.ctrl.move('b8c6')).toBe(true);
+    expect(B.ctrl.move('gc')).toBe(true);
     await h.advance(200);
     expect(A.ctrl.snapshot.game.plies[3].ms).toBe(B.ctrl.snapshot.game.plies[3].ms);
   });
 
   it('the first move of each side is untimed; own flag falls at zero', async () => {
-    const { h, A, B } = await joined({ tc: '1+0', color: 'w' });
-    await h.advance(90_000); // white's first move: no clock yet
+    const { h, A, B } = await joined({ tc: '1+0', color: 'B' });
+    await h.advance(90_000); // Black's first move: no clock yet
     expect(A.ctrl.snapshot.game.end).toBeUndefined();
-    await play(h, [A, B], ['e2e4', 'e7e5']);
+    await play(h, [A, B], ['cc', 'gg']);
     expect(A.ctrl.flag()).toBe(false);
     await h.advance(59_999);
     expect(A.ctrl.snapshot.game.end).toBeUndefined();
     await h.advance(1);
-    for (const d of [A, B]) expect(d.ctrl.snapshot.game.end).toEqual({ result: '0-1', by: 'time' });
+    for (const d of [A, B]) expect(d.ctrl.snapshot.game.end).toEqual({ result: { winner: 'W', by: 'time' } });
     expect(B.ctrl.snapshot.score).toEqual([0, 2]);
+  });
+
+  it('byo-yomi: main time, then every period; a move inside a period keeps it', async () => {
+    const { h, A, B } = await joined({ tc: '1m2x10', color: 'B' });
+    await play(h, [A, B], ['cc', 'gg']); // both first moves untimed
+    const g = A.ctrl.snapshot.game;
+    const tc = A.ctrl.snapshot.tc!;
+    expect(timeLeft(zigo, g, tc, 0)).toBe(60_000 + 2 * 10_000);
+    // Black uses the main time and 9 s of the first period, then moves: both periods are kept.
+    await h.advance(69_000);
+    await play(h, [A, B], ['cg', 'gc'], 69_000);
+    expect(A.ctrl.snapshot.game.end).toBeUndefined();
+    expect(zigo.clocks(A.ctrl.snapshot.game, tc).B).toEqual({ mainMs: 0, periodMs: 10_000, periods: 2 });
+    // Black now overruns both periods.
+    await h.advance(20_000);
+    for (const d of [A, B]) expect(d.ctrl.snapshot.game.end).toEqual({ result: { winner: 'W', by: 'time' } });
   });
 
   it("flag claim timing: the opponent's flag is claimed after its clock has read zero for 2 seconds", async () => {
     const h = createHarness({ code: CODE });
     let frozenAt: number | null = null;
-    const nowA = () => (frozenAt ?? h.time.t);
-    const A = h.device('A', { create: { tc: '1+0', color: 'w' }, now: nowA });
+    const nowA = () => frozenAt ?? h.time.t;
+    const A = h.device('A', { create: { tc: '1+0', color: 'B' }, now: nowA });
     const B = h.device('B');
     await h.settle();
-    await play(h, [A, B], ['e2e4', 'e7e5']);
+    await play(h, [A, B], ['cc', 'gg']);
     frozenAt = h.time.t; // A's device stalls (e.g. a frozen tab): it never sees its own flag fall
     await h.advance(60_000);
     expect(B.ctrl.flag()).toBe(false);
@@ -965,17 +1262,17 @@ describe('clocks', () => {
     expect(B.ctrl.snapshot.game.end).toBeUndefined();
     expect(B.ctrl.flag()).toBe(false);
     await h.advance(1);
-    for (const d of [A, B]) expect(d.ctrl.snapshot.game.end).toEqual({ result: '0-1', by: 'time' });
+    for (const d of [A, B]) expect(d.ctrl.snapshot.game.end).toEqual({ result: { winner: 'W', by: 'time' } });
     expect(h.sent().filter((e) => e.msg.t === 'end').map((e) => e.from.endsWith('#2'))).toEqual([true]);
   });
 
   it('no claim on a disconnected opponent: the clock is paused', async () => {
     const h = createHarness({ code: CODE });
     let frozenAt: number | null = null;
-    const A = h.device('A', { create: { tc: '1+0', color: 'w' }, now: () => frozenAt ?? h.time.t });
+    const A = h.device('A', { create: { tc: '1+0', color: 'B' }, now: () => frozenAt ?? h.time.t });
     const B = h.device('B');
     await h.settle();
-    await play(h, [A, B], ['e2e4', 'e7e5']);
+    await play(h, [A, B], ['cc', 'gg']);
     frozenAt = h.time.t;
     await h.advance(30_000);
     h.net.link(CODE)?.disconnect();
@@ -984,22 +1281,22 @@ describe('clocks', () => {
     expect(B.ctrl.flag()).toBe(false);
   });
 
-  it('a timed game loaded from storage flags on both devices with the result of the position', async () => {
+  it('a timed game loaded from storage flags on both devices with the same result', async () => {
     const key = generateKey(seeded(3));
-    const logs = [buildLog(1, 0, '1+0', ['e2e4', 'e7e5'])];
+    const logs = [buildLog(1, 0, '1+0', ['cc', 'gg'])];
     const h = createHarness({ code: CODE });
     const A = h.device('A', { storage: seededStorage(0, key, logs) });
     const B = h.device('B', { storage: seededStorage(1, key, logs) });
     await h.settle();
     expect(A.ctrl.snapshot.live).toBe(true);
     await h.advance(60_000);
-    expect(A.ctrl.snapshot.game.end).toEqual(zhess.timeoutResult(zhess.replay(logs[0].plies), 'w'));
+    expect(A.ctrl.snapshot.game.end).toEqual({ result: { winner: 'W', by: 'time' } }); // Black was to move
     expect(B.ctrl.snapshot.game.end).toEqual(A.ctrl.snapshot.game.end);
   });
 
   it('untimed: the own turn keeps counting while offline; the opponent turn waits', async () => {
-    const { h, A, B } = await joined({ tc: null, color: 'w' });
-    await play(h, [A, B], ['e2e4']);
+    const { h, A, B } = await joined({ tc: null, color: 'B' });
+    await play(h, [A, B], ['cc']);
     B.ctrl.leave();
     await h.settle();
     // B's turn: A cannot see B think while B is away.
@@ -1020,7 +1317,7 @@ describe('clocks', () => {
 describe('sync on connect', () => {
   it('stale epoch: a device restored from an older backup adopts the takeback', async () => {
     const { h, A, B } = await joined();
-    await play(h, [A, B], ['e2e4', 'e7e5', 'g1f3']);
+    await play(h, [A, B], ['cc', 'gg', 'cg']);
     const backup = B.storage.dump();
     A.ctrl.ask('takeback');
     await h.settle();
@@ -1031,10 +1328,10 @@ describe('sync on connect', () => {
     await h.settle();
     const B2 = h.device('B2', { storage: memoryStorage(backup) });
     expect(B2.ctrl.snapshot).toMatchObject({ epoch: 0 });
-    expect(ucis(B2)).toEqual(['e2e4', 'e7e5', 'g1f3']);
+    expect(plies(B2)).toEqual(['cc', 'gg', 'cg']);
     await h.settle();
     expect(B2.ctrl.snapshot).toMatchObject({ epoch: 1, live: true });
-    expect(ucis(B2)).toEqual(['e2e4', 'e7e5']);
+    expect(plies(B2)).toEqual(['cc', 'gg']);
     expect(saved(B2)[0].room).toEqual({ n: 1, epoch: 1 });
     expect(B2.kinds()).not.toContain('restored-from-opponent');
   });
@@ -1042,14 +1339,14 @@ describe('sync on connect', () => {
   it('an older backup several games behind catches up (rule 1)', async () => {
     const { h, A, B } = await joined();
     const backup = B.storage.dump();
-    await play(h, [A, B], ['e2e4']);
+    await play(h, [A, B], ['cc']);
     A.ctrl.resign();
     await h.settle();
     B.ctrl.ask('rematch');
     await h.settle();
     A.ctrl.reply('rematch', true);
     await h.settle();
-    await play(h, [A, B], ['e2e4']);
+    await play(h, [A, B], ['cc']);
     B.ctrl.leave();
     await h.settle();
     const B2 = h.device('B2', { storage: memoryStorage(backup) });
@@ -1061,23 +1358,23 @@ describe('sync on connect', () => {
 
   it("fork resolution: seat 0's copy wins and each device shows the restore toast once", async () => {
     const key = generateKey(seeded(11));
-    const mine = buildLog(1, 0, null, ['e2e4', 'e7e5']);
-    const theirs = buildLog(1, 0, null, ['d2d4', 'd7d5']);
+    const mine = buildLog(1, 0, null, ['cc', 'gg']);
+    const theirs = buildLog(1, 0, null, ['dd', 'ff']);
     const h = createHarness({ code: CODE });
     const A = h.device('A', { storage: seededStorage(0, key, [mine]) });
     const B = h.device('B', { storage: seededStorage(1, key, [theirs]) });
     await h.settle();
     for (const d of [A, B]) {
-      expect(ucis(d)).toEqual(['e2e4', 'e7e5']);
+      expect(plies(d)).toEqual(['cc', 'gg']);
       expect(d.kinds().filter((k) => k === 'restored-from-opponent').length).toBe(1);
       expect(d.ctrl.snapshot.live).toBe(true);
     }
-    expect(zhess.decodeMoves(saved(B)[0].moves)).toEqual(['e2e4', 'e7e5']);
+    expect(zigo.decodeMoves(saved(B)[0].moves)).toEqual(['cc', 'gg']);
   });
 
   it('a stale or conflicting live move is ignored and answered with a head', async () => {
     const key = generateKey(seeded(21));
-    const log = buildLog(1, 0, null, ['e2e4', 'e7e5']);
+    const log = buildLog(1, 0, null, ['cc', 'gg']);
     const h = createHarness({ code: CODE });
     const pair = fakePair(h.time);
     const peer = scriptPeer(pair.b);
@@ -1094,30 +1391,65 @@ describe('sync on connect', () => {
     expect(A.ctrl.snapshot.live).toBe(true);
     const heads = () => peer.of('head').length;
     // Stale epoch.
-    peer.send({ t: 'move', v: 1, n: 1, epoch: 0, i: 1, m: 'e7e6', ms: 5 });
+    peer.send({ t: 'move', v: 1, n: 1, epoch: 0, i: 1, m: 'ee', ms: 5 });
     await h.settle();
     expect(heads()).toBe(2);
-    // A ply for A's own color (white to move at i = 2).
-    peer.send({ t: 'move', v: 1, n: 1, epoch: 0, i: 2, m: 'g1f3', ms: 5 });
+    // A ply for A's own color (Black to move at i = 2).
+    peer.send({ t: 'move', v: 1, n: 1, epoch: 0, i: 2, m: 'cg', ms: 5 });
     await h.settle();
     expect(heads()).toBe(3);
     // An older game number.
-    peer.send({ t: 'move', v: 1, n: 0, epoch: 0, i: 0, m: 'e2e4', ms: 5 });
+    peer.send({ t: 'move', v: 1, n: 0, epoch: 0, i: 0, m: 'cc', ms: 5 });
     await h.settle();
-    expect(ucis(A)).toEqual(['e2e4', 'e7e5']);
+    expect(plies(A)).toEqual(['cc', 'gg']);
     // Garbage does not break anything.
     peer.send({ t: 'move', v: 1 } as unknown as Message);
-    peer.send({ t: 'ask', v: 1, kind: 'nonsense' } as unknown as Message);
-    peer.send({ t: 'logs', v: 1, games: [{ n: 1, epoch: 9, white: 0, tc: null, plies: [{ m: 'e2e5', ms: 0 }] }] } as unknown as Message);
+    peer.send({ t: 'ask', v: 1, kind: 'draw' } as unknown as Message);
+    peer.send({ t: 'mark', v: 1, n: 1, epoch: 0, rev: 'x', dead: 'gg' } as unknown as Message);
+    peer.send({ t: 'accept', v: 1, n: 1, rev: 3 });
+    peer.send({ t: 'resume', v: 1, n: 1, epoch: 0 });
+    peer.send({
+      t: 'logs',
+      v: 1,
+      games: [{ n: 1, epoch: 9, black: 0, tc: null, size: 9, rules: 'area', handicap: 0, plies: [{ m: 'cc', ms: 0 }, { m: 'cc', ms: 0 }] }],
+    } as unknown as Message);
     await h.settle();
     expect(A.kinds()).toContain('sync-error');
-    expect(ucis(A)).toEqual(['e2e4', 'e7e5']);
+    expect(plies(A)).toEqual(['cc', 'gg']);
+    expect(A.ctrl.snapshot.game.scoring).toBeUndefined();
     expect(A.ctrl.snapshot.live).toBe(true);
+  });
+
+  it('a scored end that does not match the dead stones is not adopted', async () => {
+    const key = generateKey(seeded(23));
+    const log = buildLog(1, 1, null, ['cc', 'gg', 'tt', 'tt', 'ee', 'tt', 'tt']); // round 2, seat 0 (White) must end it
+    const h = createHarness({ code: CODE });
+    const pair = fakePair(h.time);
+    const peer = scriptPeer(pair.b);
+    const A = h.deviceOn('A', pair.a, { storage: seededStorage(1, key, [log]) });
+    await h.settle();
+    const hello = peer.of('hello')[0];
+    peer.send({ t: 'hello', v: 1, hasKey: true, nonce: 'BBBBBBBBBBBBBBBBBBBBBB' });
+    await h.settle();
+    peer.send({ t: 'proof', v: 1, mac: await proveSeat(key, hello.nonce, CODE, 0) });
+    await h.settle();
+    peer.send(makeHead(log));
+    await h.settle();
+    expect(A.ctrl.snapshot.live).toBe(true);
+    expect(A.ctrl.snapshot.game.scoring).toMatchObject({ round: 2, rev: 0 }); // seat 1 waits for seat 0
+    peer.send({ t: 'end', v: 1, n: 1, result: { winner: 'W', by: 'score', margin: 999 }, by: 'score', dead: ['gg'] });
+    await h.settle();
+    expect(A.ctrl.snapshot.game.end).toBeUndefined();
+    const g = A.ctrl.snapshot.game;
+    const right = scoringApi.result(g, scoringApi.score(g, ['gg']));
+    peer.send({ t: 'end', v: 1, n: 1, result: right, by: 'score', dead: ['gg'] });
+    await h.settle();
+    expect(A.ctrl.snapshot.game.end).toEqual({ result: right });
   });
 
   it('messages from an unauthenticated peer are ignored', async () => {
     const key = generateKey(seeded(22));
-    const log = buildLog(1, 0, null, ['e2e4']);
+    const log = buildLog(1, 0, null, ['cc']);
     const h = createHarness({ code: CODE });
     const pair = fakePair(h.time);
     const peer = scriptPeer(pair.b);
@@ -1126,11 +1458,11 @@ describe('sync on connect', () => {
     peer.send({ t: 'hello', v: 1, hasKey: true, nonce: 'BBBBBBBBBBBBBBBBBBBBBB' });
     peer.send({ t: 'head', v: 1, n: 5, epoch: 0, len: 0, hash: 'x', ended: false });
     peer.send({ t: 'logs', v: 1, games: [buildLog(2, 0, null, [])] });
-    peer.send({ t: 'move', v: 1, n: 1, epoch: 0, i: 1, m: 'e7e5', ms: 0 });
-    peer.send({ t: 'end', v: 1, n: 1, result: '1-0', by: 'resign' });
+    peer.send({ t: 'move', v: 1, n: 1, epoch: 0, i: 1, m: 'gg', ms: 0 });
+    peer.send({ t: 'end', v: 1, n: 1, result: { winner: 'W', by: 'resign' }, by: 'resign' });
     await h.settle();
     expect(A.ctrl.snapshot).toMatchObject({ live: false, n: 1, phase: 'handshake' });
-    expect(ucis(A)).toEqual(['e2e4']);
+    expect(plies(A)).toEqual(['cc']);
     expect(peer.of('head')).toEqual([]);
     expect(peer.of('proof').length).toBe(1);
   });
@@ -1145,14 +1477,14 @@ describe('protocol version', () => {
     const h = createHarness({ code: CODE });
     const pair = fakePair(h.time);
     const peer = scriptPeer(pair.b);
-    const A = h.deviceOn('A', pair.a, { create: { tc: null, color: 'w' } });
+    const A = h.deviceOn('A', pair.a, { create: { tc: null, color: 'B' } });
     await h.settle();
     peer.send({ t: 'hello', v: 2, hasKey: true, nonce: 'BBBBBBBBBBBBBBBBBBBBBB' } as unknown as Message);
     await h.settle();
     expect(A.ctrl.snapshot).toMatchObject({ locked: 'version', phase: 'version', canMove: false, live: false });
     expect(A.kinds()).toEqual(['version-mismatch']);
     expect(peer.inbox.map((m) => m.t)).toEqual(['hello']);
-    expect(A.ctrl.move('e2e4')).toBe(false);
+    expect(A.ctrl.move('cc')).toBe(false);
     expect(A.ctrl.resign()).toBe(false);
     // Our own hello carried v 1, so the other side can show its toast too.
     expect(peer.of('hello')[0].v).toBe(1);
@@ -1161,7 +1493,7 @@ describe('protocol version', () => {
   it('two controllers: both lock when one side runs another version', async () => {
     const h = createHarness({ code: CODE });
     const pair = fakePair(h.time);
-    const A = h.deviceOn('A', pair.a, { create: { tc: null, color: 'w' } });
+    const A = h.deviceOn('A', pair.a, { create: { tc: null, color: 'B' } });
     // B stands for a device on version 2: its messages carry v 2, and it sees everything with
     // another version than its own (rewritten to 2 here, since this controller only speaks v 1).
     const b = pair.b;
@@ -1181,27 +1513,28 @@ describe('protocol version', () => {
 describe('misc', () => {
   it('the snapshot keeps the same logs array until a game changes (no needless history reloads)', async () => {
     const { h, A, B } = await joined();
-    const first = A.ctrl.snapshot.logs;
-    expect(B.ctrl.ask('draw')).toBe(true);
+    await play(h, [A, B], ['cc']);
+    const first = B.ctrl.snapshot.logs;
+    expect(A.ctrl.ask('takeback')).toBe(true);
     await h.settle();
-    expect(A.ctrl.snapshot.requests.incoming).toBe('draw');
-    expect(A.ctrl.snapshot.logs).toBe(first);
+    expect(B.ctrl.snapshot.requests.incoming).toBe('takeback');
+    expect(B.ctrl.snapshot.logs).toBe(first);
     expect(Object.isFrozen(first)).toBe(true);
-    A.ctrl.reply('draw', false);
+    B.ctrl.reply('takeback', false);
     await h.settle();
-    expect(A.ctrl.snapshot.logs).toBe(first);
-    expect(A.ctrl.move('e2e4')).toBe(true);
-    expect(A.ctrl.snapshot.logs).not.toBe(first);
-    expect(A.ctrl.snapshot.logs[0].plies.map((p) => p.m)).toEqual(['e2e4']);
+    expect(B.ctrl.snapshot.logs).toBe(first);
+    expect(B.ctrl.move('gg')).toBe(true);
+    expect(B.ctrl.snapshot.logs).not.toBe(first);
+    expect(B.ctrl.snapshot.logs[0].plies.map((p) => p.m)).toEqual(['cc', 'gg']);
   });
 
   it('read-only (another tab): loads the room, never connects, board locked', async () => {
     const { h, A, B } = await joined();
-    await play(h, [A, B], ['e2e4']);
+    await play(h, [A, B], ['cc']);
     const R = h.deviceOn('R', null, { storage: A.storage, readOnly: true, factory: h.net.factory });
     await h.settle();
     expect(R.ctrl.snapshot).toMatchObject({ locked: 'other-tab', phase: 'read-only', seat: 0, canMove: false });
-    expect(ucis(R)).toEqual(['e2e4']);
+    expect(plies(R)).toEqual(['cc']);
     expect(R.ctrl.transport).toBeNull();
     expect(h.net.peers(CODE).length).toBe(2);
   });
@@ -1213,7 +1546,7 @@ describe('misc', () => {
     A.ctrl.leave();
     await h.settle();
     expect(A.ctrl.snapshot.phase).toBe('closed');
-    expect(A.ctrl.move('e2e4')).toBe(false);
+    expect(A.ctrl.move('cc')).toBe(false);
     expect(A.kinds()).toEqual(['opponent-joined']);
     expect(B.ctrl.snapshot.presence).toBe('reconnecting');
     expect(seen).toEqual(['closed']);
@@ -1224,24 +1557,24 @@ describe('misc', () => {
     const snaps: unknown[] = [];
     const off = A.ctrl.subscribe((s) => snaps.push(s));
     const before = A.ctrl.snapshot;
-    await play(h, [A, B], ['e2e4']);
+    await play(h, [A, B], ['cc']);
     expect(snaps.length).toBeGreaterThan(0);
     expect(Object.isFrozen(A.ctrl.snapshot)).toBe(true);
     expect(before.game.plies).toEqual([]);
     off();
     const n = snaps.length;
-    await play(h, [A, B], ['e7e5']);
+    await play(h, [A, B], ['gg']);
     expect(snaps.length).toBe(n);
   });
 
   it('attach() switches to another transport (manual connection, then back)', async () => {
     const h = createHarness({ code: CODE });
     const p1 = fakePair(h.time);
-    const A = h.deviceOn('A', p1.a, { create: { tc: null, color: 'w' } });
+    const A = h.deviceOn('A', p1.a, { create: { tc: null, color: 'B' } });
     const B = h.deviceOn('B', p1.b);
     await h.settle();
     expect(A.ctrl.snapshot.live).toBe(true);
-    await play(h, [A, B], ['e2e4']);
+    await play(h, [A, B], ['cc']);
     p1.close();
     await h.settle();
     expect(A.ctrl.snapshot.live).toBe(false);
@@ -1251,13 +1584,13 @@ describe('misc', () => {
     await h.settle();
     expect(A.ctrl.snapshot.live).toBe(true);
     expect(A.kinds().at(-1)).toBe('reconnected');
-    await play(h, [A, B], ['e7e5']);
-    expect(ucis(A)).toEqual(['e2e4', 'e7e5']);
+    await play(h, [A, B], ['gg']);
+    expect(plies(A)).toEqual(['cc', 'gg']);
   });
 
   it('a failing factory is reported as broker-unreachable', async () => {
     const h = createHarness({ code: CODE });
-    const D = h.deviceOn('D', null, { create: { tc: null, color: 'w' }, factory: () => Promise.reject(new Error('no')) });
+    const D = h.deviceOn('D', null, { create: { tc: null, color: 'B' }, factory: () => Promise.reject(new Error('no')) });
     await h.settle();
     expect(D.ctrl.snapshot.failure).toBe('broker-unreachable');
   });
@@ -1279,11 +1612,11 @@ describe('misc', () => {
 /* ---------------------------------------------------------------------------------------------- */
 
 describe('randomized sessions', () => {
-  it('moves, takebacks, draws, resignations, rematches and disconnects: both devices end equal', async () => {
+  it('stones, passes, scoring, takebacks, resignations, rematches and disconnects: both devices end equal', async () => {
     for (let seed = 1; seed <= 16; seed++) {
       const rnd = seeded(seed * 104729);
       const pick = <T,>(xs: readonly T[]): T => xs[Math.floor(rnd() * xs.length)];
-      const { h, A, B } = await joined({ tc: null, color: pick(['w', 'b'] as const) });
+      const { h, A, B } = await joined({ tc: null, color: pick(['B', 'W'] as const) });
       const devs = [A, B];
       const link = () => h.net.link(CODE);
       let up = true;
@@ -1291,23 +1624,46 @@ describe('randomized sessions', () => {
       const t0 = (x: string) => trace.push(x);
       A.ctrl.onNotice((n) => t0(`A!${n.kind}`));
       B.ctrl.onNotice((n) => t0(`B!${n.kind}`));
+      /** A random legal point of the side to move, or a pass now and then (so games reach scoring). */
+      const randomMove = (g: import('./types').Game): Point => {
+        if (rnd() < 0.25) return 'tt';
+        const size = g.settings.size;
+        for (let tries = 0; tries < 30; tries++) {
+          const p = String.fromCharCode(97 + Math.floor(rnd() * size), 97 + Math.floor(rnd() * size));
+          if (zigo.isLegal(g, p)) return p;
+        }
+        return 'tt';
+      };
       for (let step = 0; step < 60; step++) {
         const r = rnd();
         const mover = devs.find((d) => d.ctrl.snapshot.myTurn);
         const g = mover?.ctrl.snapshot.game;
-        t0(`#${step} up=${up} A=${A.ctrl.snapshot.n}/${A.ctrl.snapshot.epoch}/${A.ctrl.snapshot.game.plies.length}${A.ctrl.snapshot.game.end ? 'E' : ''} B=${B.ctrl.snapshot.n}/${B.ctrl.snapshot.epoch}/${B.ctrl.snapshot.game.plies.length}${B.ctrl.snapshot.game.end ? 'E' : ''} r=${r.toFixed(2)}`);
+        const scoringNow = up && devs.some((d) => d.ctrl.snapshot.game.scoring && !d.ctrl.snapshot.game.end);
+        const s = (d: Device) => `${d.ctrl.snapshot.n}/${d.ctrl.snapshot.epoch}/${d.ctrl.snapshot.game.plies.length}${d.ctrl.snapshot.game.scoring ? `S${d.ctrl.snapshot.game.scoring.rev}` : ''}${d.ctrl.snapshot.game.end ? 'E' : ''}`;
+        t0(`#${step} up=${up} A=${s(A)} B=${s(B)} r=${r.toFixed(2)}`);
         if (up && r < 0.08) {
           link()?.disconnect();
           up = false;
         } else if (!up && r < 0.35) {
           link()?.reconnect();
           up = true;
+        } else if (scoringNow && r < 0.75) {
+          const d = pick(devs);
+          const snap = d.ctrl.snapshot;
+          const k = rnd();
+          if (k < 0.4 && snap.canMark && snap.game.scoring) {
+            const stones: string[] = [];
+            snap.game.board.forEach((v, i) => {
+              if (v) stones.push(String.fromCharCode(97 + (i % snap.game.settings.size), 97 + Math.floor(i / snap.game.settings.size)));
+            });
+            if (stones.length) d.ctrl.mark(scoringApi.toggle(snap.game, snap.game.scoring.dead, pick(stones)));
+          } else if (k < 0.85) d.ctrl.accept();
+          else d.ctrl.resume();
         } else if (r < 0.75 && mover && g && !g.end) {
-          const moves = zhess.legalMoves(g);
-          if (moves.length) mover.ctrl.move(pick(moves).uci, Math.floor(rnd() * 5000));
+          mover.ctrl.move(randomMove(g), Math.floor(rnd() * 5000));
         } else if (up && r < 0.85) {
           const asker = pick(devs);
-          const kind = pick(['takeback', 'draw', 'rematch'] as const);
+          const kind = pick(['takeback', 'rematch'] as const);
           if (asker.ctrl.ask(kind)) {
             await h.settle();
             const other = devs.find((d) => d !== asker) as Device;
@@ -1331,7 +1687,7 @@ describe('randomized sessions', () => {
         }
         await h.settle();
         if (up) {
-          expect(strip(A.ctrl.snapshot.logs), `seed ${seed} step ${step}`).toEqual(strip(B.ctrl.snapshot.logs));
+          expect(strip(A.ctrl.snapshot.logs), `seed ${seed} step ${step}\n${trace.join('\n')}`).toEqual(strip(B.ctrl.snapshot.logs));
         }
       }
       link()?.reconnect();
@@ -1346,8 +1702,9 @@ describe('randomized sessions', () => {
       for (const d of devs) {
         expect(d.kinds(), `seed ${seed}`).not.toContain('sync-error');
         expect(d.kinds(), `seed ${seed}`).not.toContain('restored-from-opponent');
-        const stored = saved(d).map((x) => [x.id, x.moves, x.result ?? '', x.room?.epoch]).sort();
-        const other = saved(d === A ? B : A).map((x) => [x.id, x.moves, x.result ?? '', x.room?.epoch]).sort();
+        const row = (x: SavedGame) => [x.id, x.moves, JSON.stringify(x.result ?? ''), x.room?.epoch, JSON.stringify(x.scoring ?? null)];
+        const stored = saved(d).map(row).sort();
+        const other = saved(d === A ? B : A).map(row).sort();
         expect(stored).toEqual(other);
       }
     }
@@ -1356,18 +1713,18 @@ describe('randomized sessions', () => {
 
 describe('both devices end the game while apart', () => {
   it('two finished copies of different length are a fork: seat 0 wins and both are told once', async () => {
-    const { h, A, B } = await joined({ tc: null, color: 'w' });
-    await play(h, [A, B], ['e2e4', 'e7e5']);
+    const { h, A, B } = await joined({ tc: null, color: 'B' });
+    await play(h, [A, B], ['cc', 'gg']);
     h.net.link(CODE)?.disconnect();
     await h.settle();
-    A.ctrl.move('g1f3');
+    A.ctrl.move('cg');
     A.ctrl.resign();
     B.ctrl.resign();
     h.net.link(CODE)?.reconnect();
     await h.settle();
     for (const d of [A, B]) {
-      expect(ucis(d)).toEqual(['e2e4', 'e7e5', 'g1f3']);
-      expect(d.ctrl.snapshot.game.end).toEqual({ result: '0-1', by: 'resign' });
+      expect(plies(d)).toEqual(['cc', 'gg', 'cg']);
+      expect(d.ctrl.snapshot.game.end).toEqual({ result: { winner: 'W', by: 'resign' } });
       expect(d.kinds().filter((k) => k === 'restored-from-opponent').length).toBe(1);
     }
     expect(A.ctrl.snapshot.score).toEqual([0, 2]);
@@ -1376,7 +1733,7 @@ describe('both devices end the game while apart', () => {
 
 describe('plain transports', () => {
   /** Only the `Transport` contract of types.ts: no state, no reconnect, no unsubscribe. */
-  function plain(t: import('./transport/memory').MemoryTransport): import('./chessTypes').Transport {
+  function plain(t: import('./transport/memory').MemoryTransport): import('./types').Transport {
     return {
       get role() {
         return t.role;
@@ -1395,11 +1752,11 @@ describe('plain transports', () => {
   it('work end to end, and a dead channel without reconnect() is handshaken again in place', async () => {
     const h = createHarness({ code: CODE });
     const pair = fakePair(h.time);
-    const A = h.deviceOn('A', null, { create: { tc: null, color: 'w' }, transport: plain(pair.a) });
+    const A = h.deviceOn('A', null, { create: { tc: null, color: 'B' }, transport: plain(pair.a) });
     const B = h.deviceOn('B', null, { transport: plain(pair.b) });
     await h.settle();
     expect(A.ctrl.snapshot.live && B.ctrl.snapshot.live).toBe(true);
-    await play(h, [A, B], ['e2e4']);
+    await play(h, [A, B], ['cc']);
     pair.setDrop(true);
     await h.advance(ROOM_DEFAULTS.pingMs * 4);
     expect(A.ctrl.snapshot.live).toBe(false);
@@ -1407,7 +1764,7 @@ describe('plain transports', () => {
     pair.setDrop(false);
     await h.advance(ROOM_DEFAULTS.pingMs * 5);
     expect(A.ctrl.snapshot.live && B.ctrl.snapshot.live).toBe(true);
-    await play(h, [A, B], ['e7e5']);
-    expect(ucis(A)).toEqual(['e2e4', 'e7e5']);
+    await play(h, [A, B], ['gg']);
+    expect(plies(A)).toEqual(['cc', 'gg']);
   });
 });

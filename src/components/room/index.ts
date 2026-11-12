@@ -1,5 +1,5 @@
 /**
- * Room UI (DESIGN 9, PLAN milestone 3, package 3D). The state comes from `useRoom`
+ * Room UI (DESIGN 9; package 1G ported it to Go, 3C extends it). The state comes from `useRoom`
  * (`src/hooks/useRoom.ts`); these components only render it.
  */
 export { InviteSheet, type InviteSheetProps } from './InviteSheet';

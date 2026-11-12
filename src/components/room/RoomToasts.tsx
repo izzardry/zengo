@@ -1,5 +1,5 @@
 /**
- * The room's one-line toasts (DESIGN 9.5, 9.7, 9.10, 9.11), through sonner:
+ * The room's one-line toasts (DESIGN 9), through sonner:
  *
  * - Presence transitions: `Opponent joined`, `Opponent connected`, `Opponent disconnected`,
  *   `Reconnected`. They share one slot (`toastSlot.ts`), so a quick flap shows only the latest.
@@ -20,7 +20,7 @@ import { useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 import type { ManualCause } from '@/hooks/useRoom';
 import { useI18n } from '@/lib/i18n';
-import type { RequestKind, RoomNotice } from '@/lib/chessTypes';
+import type { RequestKind, RoomNotice } from '@/lib/types';
 import { RequestToasts } from './RequestToasts';
 import { manualCauseKey, noticeKey } from './text';
 import { createToastSlot } from './toastSlot';
@@ -53,7 +53,7 @@ export interface RoomToastsProps {
   quiet?: boolean;
   /** `Connect manually`; without it the failure message has no action. */
   onConnectManually?: () => void;
-  /** Triggered on a version mismatch (the service worker update check, DESIGN 9.11). */
+  /** Triggered on a version mismatch (the service worker update check, DESIGN 9). */
   onUpdateCheck?: () => void;
   /** The Reload action of the version toast. Default `location.reload()`. */
   onReload?: () => void;
@@ -65,7 +65,7 @@ export function RoomToasts({ room, onNotice, requests, onReply, manualCause, liv
   cb.current = { t, onConnectManually, onUpdateCheck, onReload };
   const quietRef = useRef(quiet);
   quietRef.current = quiet;
-  /** Failure causes already announced (each once, DESIGN 9.10). */
+  /** Failure causes already announced (each once, DESIGN 9). */
   const shown = useRef(new Set<string>());
   /** The announced cause whose message is still owed: not answered, not swiped away, not live. */
   const outstanding = useRef<ManualCause | null>(null);

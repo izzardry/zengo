@@ -24,7 +24,7 @@
  * `peerjs` is imported lazily on the first claim, so it stays out of the main bundle. Tests inject
  * a fake `Peer` class; PeerJS itself is only touched by the best-effort e2e (PLAN 7).
  */
-import type { Message, Rng, TransportState } from '../chessTypes';
+import type { Message, Rng, TransportState } from '../types';
 import {
   backoffMs,
   defaultTimers,

@@ -7,7 +7,7 @@ import { createRoomController, type RoomControllerApi, type RoomControllerOption
 import { createHarness, seeded, type Harness } from '@/lib/room/testkit';
 import { createStore, memoryStorage } from '@/lib/storage';
 import { createMemoryPair, ManualError, type MemoryPair, type RoomTransport, type TransportFailureKind, type TransportRole } from '@/lib/transport';
-import type { Message, RoomNotice, Store, Transport, TransportFactory, TransportState } from '@/lib/chessTypes';
+import type { Message, RoomNotice, Store, Transport, TransportFactory, TransportState } from '@/lib/types';
 import {
   bankRoomTurn,
   createRoomSession,
@@ -318,7 +318,7 @@ describe('room helpers', () => {
 describe('room session · broker', () => {
   it('creates, invites and plays: two devices meet over the broker transport', async () => {
     const r = rig();
-    const a = r.session({ create: { tc: null, color: 'w' } });
+    const a = r.session({ create: { tc: null, color: 'B' } });
     await r.settle();
     expect(a.view.tab).toBe('owner');
     expect(a.view.guarded).toBe(false);
@@ -334,11 +334,11 @@ describe('room session · broker', () => {
     expect(a.view.state?.live).toBe(true);
     expect(b.view.state?.live).toBe(true);
     expect(b.view.state?.seat).toBe(1);
-    expect(b.view.state?.color).toBe('b');
+    expect(b.view.state?.color).toBe('W');
 
-    expect(a.controller?.move('e2e4')).toBe(true);
+    expect(a.controller?.move('cc')).toBe(true);
     await r.settle();
-    expect(b.view.state?.game.plies.map((p) => p.m)).toEqual(['e2e4']);
+    expect(b.view.state?.game.plies.map((p) => p.m)).toEqual(['cc']);
 
     expect(b.controller?.resign()).toBe(true);
     await r.settle();
@@ -348,7 +348,7 @@ describe('room session · broker', () => {
 
   it('keeps the view object stable while nothing changes (useSyncExternalStore contract)', async () => {
     const r = rig();
-    const a = r.session({ create: { tc: null, color: 'w' } });
+    const a = r.session({ create: { tc: null, color: 'B' } });
     await r.settle();
     const v1 = a.view;
     const listener = vi.fn();
@@ -360,7 +360,7 @@ describe('room session · broker', () => {
 
   it('forwards notices of the current controller and stops after dispose', async () => {
     const r = rig();
-    const a = r.session({ create: { tc: null, color: 'w' } });
+    const a = r.session({ create: { tc: null, color: 'B' } });
     const seen: RoomNotice[] = [];
     a.onNotice((n) => seen.push(n));
     await r.settle();
@@ -379,7 +379,7 @@ describe('room session · broker', () => {
 
   it('runs the room without a broker: the manual exchange is offered at once', async () => {
     const r = rig();
-    const a = r.session({ broker: null, create: { tc: null, color: 'w' } });
+    const a = r.session({ broker: null, create: { tc: null, color: 'B' } });
     await r.settle();
     expect(a.view.via).toBeNull();
     expect(a.view.manualCause).toBe('no-broker');
@@ -391,7 +391,7 @@ describe('room session · broker', () => {
   it('offers the manual exchange at once when the broker is unreachable', async () => {
     const r = rig();
     const factory: TransportFactory = () => Promise.reject(new Error('down'));
-    const a = r.session({ broker: factory, create: { tc: null, color: 'w' } });
+    const a = r.session({ broker: factory, create: { tc: null, color: 'B' } });
     await r.settle();
     expect(a.view.manualCause).toBe('broker-unreachable');
   });
@@ -399,7 +399,7 @@ describe('room session · broker', () => {
   it('follows a broker transport that reports the broker unreachable or ICE failure', async () => {
     const r = rig();
     const t = new FakeTransport('anchor');
-    const a = r.session({ broker: async () => t, create: { tc: null, color: 'w' } });
+    const a = r.session({ broker: async () => t, create: { tc: null, color: 'B' } });
     await r.settle();
     expect(a.view.manualCause).toBeNull();
     t.fail('broker-unreachable');
@@ -444,7 +444,7 @@ describe('room session · broker', () => {
 });
 
 /* ---------------------------------------------------------------------------------------------- */
-/* Tab guard (DESIGN 9.12)                                                                          */
+/* Tab guard (DESIGN 9)                                                                             */
 /* ---------------------------------------------------------------------------------------------- */
 
 describe('room session · tab guard', () => {
@@ -452,7 +452,7 @@ describe('room session · tab guard', () => {
     const r = rig();
     const locks = new FakeLocks();
     const store = r.newStore();
-    const one = r.session({ store, locks, create: { tc: null, color: 'w' } });
+    const one = r.session({ store, locks, create: { tc: null, color: 'B' } });
     expect(one.view.tab).toBe('pending');
     await r.settle();
     expect(one.view.tab).toBe('owner');
@@ -461,7 +461,7 @@ describe('room session · tab guard', () => {
     const transports = r.h.net.created.length;
     expect(transports).toBe(1);
 
-    const two = r.session({ store, locks, create: { tc: null, color: 'w' } });
+    const two = r.session({ store, locks, create: { tc: null, color: 'B' } });
     await r.settle();
     expect(two.view.tab).toBe('other');
     expect(two.view.state?.locked).toBe('other-tab');
@@ -491,7 +491,7 @@ describe('room session · tab guard', () => {
     const r = rig();
     const locks = new FakeLocks();
     const store = r.newStore();
-    const one = r.session({ store, locks, create: { tc: null, color: 'w' } });
+    const one = r.session({ store, locks, create: { tc: null, color: 'B' } });
     await r.settle();
     const two = r.session({ store, locks });
     await r.settle();
@@ -508,7 +508,7 @@ describe('room session · tab guard', () => {
 
   it('owns the room without Web Locks, or when the lock manager throws', async () => {
     const r = rig();
-    const a = r.session({ locks: null, create: { tc: null, color: 'w' } });
+    const a = r.session({ locks: null, create: { tc: null, color: 'B' } });
     expect(a.view.tab).toBe('owner');
     const throwing: LockManagerLike = {
       request: () => {
@@ -525,7 +525,7 @@ describe('room session · tab guard', () => {
 
   it('falls back to no guard where navigator.locks is missing (jsdom)', async () => {
     const r = rig();
-    const a = r.session({ locks: undefined, create: { tc: null, color: 'w' } });
+    const a = r.session({ locks: undefined, create: { tc: null, color: 'B' } });
     expect(a.view.tab).toBe('owner');
     expect(a.view.guarded).toBe(false);
   });
@@ -536,25 +536,25 @@ describe('room session · tab guard', () => {
     const storage = memoryStorage();
     const store = createStore(storage);
     const win = new EventTarget();
-    r.session({ store, locks, create: { tc: null, color: 'w' } });
+    r.session({ store, locks, create: { tc: null, color: 'B' } });
     await r.settle();
     const two = r.session({ store, locks, window: win });
     await r.settle();
     expect(two.view.tab).toBe('other');
     r.session({ store: r.newStore() }); // the opponent joins the first tab
     await r.settle();
-    expect(r.sessions[0].controller?.move('d2d4')).toBe(true);
+    expect(r.sessions[0].controller?.move('dd')).toBe(true);
     await r.settle();
     expect(two.view.state?.game.plies.length).toBe(0); // no event yet
     const ev = Object.assign(new Event('storage'), { key: 'zigo:games' });
     win.dispatchEvent(ev);
-    expect(two.view.state?.game.plies.map((p) => p.m)).toEqual(['d2d4']);
+    expect(two.view.state?.game.plies.map((p) => p.m)).toEqual(['dd']);
     expect(two.view.state?.locked).toBe('other-tab');
   });
 });
 
 /* ---------------------------------------------------------------------------------------------- */
-/* Manual fallback (DESIGN 9.9)                                                                     */
+/* Manual fallback (DESIGN 9)                                                                       */
 /* ---------------------------------------------------------------------------------------------- */
 
 describe('room session · manual connection', () => {
@@ -562,7 +562,7 @@ describe('room session · manual connection', () => {
     const r = rig();
     const m = fakeManual(r.h.time);
     const brokerT = new FakeTransport('dialer');
-    const host = r.session({ broker: async () => brokerT, manualApi: m.api, create: { tc: null, color: 'w' } });
+    const host = r.session({ broker: async () => brokerT, manualApi: m.api, create: { tc: null, color: 'B' } });
     await r.settle();
     host.openManual();
     expect(host.view.manual.step).toBe('preparing');
@@ -611,7 +611,7 @@ describe('room session · manual connection', () => {
         return new FakeTransport('anchor');
       },
       manualApi: m.api,
-      create: { tc: null, color: 'w' },
+      create: { tc: null, color: 'B' },
     });
     await r.settle();
     expect(calls).toBe(1);
@@ -644,7 +644,7 @@ describe('room session · manual connection', () => {
     await r.settle();
     expect(m.pairs).toHaveLength(1);
 
-    const creator = r.h.deviceOn('creator', m.pairs[0].a, { create: { tc: null, color: 'w' } });
+    const creator = r.h.deviceOn('creator', m.pairs[0].a, { create: { tc: null, color: 'B' } });
     m.pairs[0].reconnect();
     await r.settle();
     expect(guest.view.manual.step).toBe('connected');
@@ -733,7 +733,7 @@ describe('room session · manual connection', () => {
     const r = rig();
     const m = fakeManual(r.h.time);
     const used = vi.fn();
-    const host = r.session({ broker: null, manualApi: m.api, create: { tc: null, color: 'w' }, onSignalUsed: used });
+    const host = r.session({ broker: null, manualApi: m.api, create: { tc: null, color: 'B' }, onSignalUsed: used });
     host.openManual();
     await r.settle();
     host.signal({ answer: 'ANSWER1' });
@@ -747,7 +747,7 @@ describe('room session · manual connection', () => {
   it('start over, a failing host, and an exchange whose ICE fails', async () => {
     const r = rig();
     const m = fakeManual(r.h.time);
-    const host = r.session({ broker: null, manualApi: m.api, create: { tc: null, color: 'w' } });
+    const host = r.session({ broker: null, manualApi: m.api, create: { tc: null, color: 'B' } });
     host.openManual();
     await r.settle();
     host.restartManual();
@@ -775,7 +775,7 @@ describe('room session · manual connection', () => {
   it('closing the sheet drops a pending exchange; a broker win drops it too', async () => {
     const r = rig();
     const m = fakeManual(r.h.time);
-    const host = r.session({ manualApi: m.api, create: { tc: null, color: 'w' } });
+    const host = r.session({ manualApi: m.api, create: { tc: null, color: 'B' } });
     host.openManual();
     await r.settle();
     host.closeManual();
@@ -806,7 +806,7 @@ describe('room session · manual connection', () => {
 });
 
 /* ---------------------------------------------------------------------------------------------- */
-/* Turn banking (DESIGN 9.8)                                                                        */
+/* Turn banking (DESIGN 9.7)                                                                        */
 /* ---------------------------------------------------------------------------------------------- */
 
 describe('room session · turn banking', () => {
@@ -816,14 +816,14 @@ describe('room session · turn banking', () => {
     const win = new EventTarget();
     const doc = Object.assign(new EventTarget(), { visibilityState: 'visible' });
     const storeA = r.newStore();
-    const a = r.session({ store: storeA, create: { tc: '5+0', color: 'w' }, turnStorage, window: win, document: doc });
+    const a = r.session({ store: storeA, create: { tc: '5+0', color: 'B' }, turnStorage, window: win, document: doc });
     r.session({ store: r.newStore() });
     await r.settle();
     expect(a.view.state?.live).toBe(true);
-    // Both first moves are untimed; then white's clock runs.
-    a.controller!.move('e2e4');
+    // Both first moves are untimed; then Black's clock runs.
+    a.controller!.move('cc');
     await r.settle();
-    r.sessions[1].controller!.move('e7e5');
+    r.sessions[1].controller!.move('gg');
     await r.settle();
     await r.advance(7000);
     expect(a.controller!.elapsed()).toBe(7000);
@@ -862,12 +862,12 @@ describe('room session · turn banking', () => {
     expect(turnStorage.getItem(ROOM_TURN_KEY)).toBeNull();
   });
 
-  it('banks in localStorage by default, so closing the app keeps the turn time (DESIGN 9.8)', async () => {
+  it('banks in localStorage by default, so closing the app keeps the turn time (DESIGN 9.7)', async () => {
     localStorage.removeItem(ROOM_TURN_KEY);
     sessionStorage.removeItem(ROOM_TURN_KEY);
     const r = rig();
     const storeA = r.newStore();
-    const a = r.session({ store: storeA, create: { tc: null, color: 'w' }, turnStorage: undefined });
+    const a = r.session({ store: storeA, create: { tc: null, color: 'B' }, turnStorage: undefined });
     r.session({ store: r.newStore() });
     await r.settle();
     expect(a.view.state?.live).toBe(true);
@@ -894,7 +894,7 @@ describe('room session · turn banking', () => {
   it('does not bank when it is the opponent to move', async () => {
     const r = rig();
     const turnStorage = memoryStorage();
-    const a = r.session({ create: { tc: null, color: 'b' }, turnStorage });
+    const a = r.session({ create: { tc: null, color: 'W' }, turnStorage });
     r.session();
     await r.settle();
     await r.advance(3000);

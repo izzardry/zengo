@@ -19,36 +19,51 @@
  *      whichever device came online first. The losing device drops its provisional room and asks
  *      for a seat with `join`; the winner welcomes it.
  * 3. A device without a record sends `join`. The keyholder answers:
- *    - open room (never synced): `welcome {key, seat, tc, color}` — the first join (DESIGN 9.3);
+ *    - open room (never synced): `welcome {key, seat, tc, color, size, rules, handicap}` — the first
+ *      join (DESIGN 9.1: the joiner learns the creator's settings);
  *    - locked room: a pending `rejoin` request (`requests.incoming = 'rejoin'`); `reply('rejoin', ok)`
- *      sends `grant {key, seat, score, games}` or `deny` (DESIGN 9.5);
+ *      sends `grant {key, seat, score, games}` or `deny`;
  *    - no record on either side: the anchor creates the room and welcomes the dialer.
- * 4. Once authenticated (or welcomed / granted) both send `head` and reconcile through 3A's
- *    `reconcile` (DESIGN 9.4). The first `head` from the other side makes the room live.
+ * 4. Once authenticated (or welcomed / granted) both send `head` and reconcile through `sync.ts`'s
+ *    `reconcile`. The first `head` from the other side makes the room live.
  *
- * Live play: `move {n, epoch, i, m, ms}` is acknowledged with `ack`; unacknowledged moves are sent
- * again after `resendMs` and are covered by the reconcile on the next connection. Untimed games
- * accept this device's move while disconnected (DESIGN 9.6); timed games lock the board. Requests
- * (`ask` / `reply`) carry the game context `(n, epoch, len)` and lapse when it changes. `end` carries
- * the same context as an addition so a resignation crossing a move is settled by reconcile.
+ * Live play: `move {n, epoch, i, m, ms}` (`m` two SGF letters, `tt` = pass) is acknowledged with
+ * `ack`; unacknowledged moves are sent again after `resendMs` and are covered by the reconcile on the
+ * next connection. Untimed games accept this device's stone or pass while disconnected (DESIGN 9.3);
+ * timed games lock the board. Requests (`ask` / `reply`: takeback and rematch, no draws in Go) carry
+ * the game context `(n, epoch, len)` and lapse when it changes. `end` carries the same context as an
+ * addition so a resignation crossing a move is settled by reconcile.
  *
- * Clocks (DESIGN 9.8): the running turn is `turnUsed + (now - turnStart)`. A disconnect pauses it
+ * Scoring (DESIGN 9.5), a first cut that milestone 3 extends: the second consecutive pass puts the
+ * log in scoring. Seat 0 proposes at once (`mark` rev 1, from the injected `propose`, or every stone
+ * alive). Either seat toggles with `mark` (rev + 1, both acceptances cleared); `accept {n, rev}`
+ * records a seat's acceptance and both seats on the same rev end the game on each device from the
+ * shared dead set. `resume {n, epoch}` drops scoring. A second scoring after a resume (round 2) is
+ * ended at once by seat 0 and sent as `end {…, by: 'score', dead}`, which seat 1 adopts as data.
+ * Marks are kept offline and settle through `rev` in the reconcile; accept and resume need the
+ * opponent connected.
+ *
+ * Clocks (DESIGN 9.7): the running turn is `turnUsed + (now - turnStart)`. A disconnect pauses it
  * (timed games; in untimed games this device's own turn keeps counting because it may move
  * offline). On reconnect the side to move reports its turn time in `head.turnMs`. This device's
  * own flag falls at zero; the opponent's is claimed after it has read zero for `graceMs` while live.
+ * Clocks stop during scoring.
  *
  * Liveness: `ping` every `pingMs`; `missLimit` intervals without any message mark the peer
  * disconnected and reconnect the transport.
  */
 import type {
+  AcceptMsg,
   AckMsg,
   AskMsg,
   Color,
   DenyMsg,
   EndMsg,
   Game,
-  GameEnd,
   GameLog,
+  MarkMsg,
+  Point,
+  ResumeMsg,
   GrantMsg,
   HeadMsg,
   HelloMsg,
@@ -72,38 +87,49 @@ import type {
   TransportFailure,
   TransportState,
   WelcomeMsg,
-  ZhessApi,
-} from '../chessTypes';
-import { PROTOCOL_VERSION } from '../chessTypes';
-import zhessDefault, { parseTc } from '../zhess';
-import { remaining } from '../clock';
+  ZigoApi,
+} from '../types';
+import { PROTOCOL_VERSION } from '../types';
+import zigoDefault, { makeSettings, normalizeHandicap, parseTc, PASS } from '../zigo';
 import { defaultTimers, type RoomTransport, type Timers, type TransportFailureKind, type TransportRole } from '../transport/common';
 import {
+  acceptLog,
   appendPly,
   applyMoveMsg,
+  bothAccepted,
   colorOf,
   currentLog,
+  DEFAULT_LOG_SETTINGS,
   endLog,
   gamePoints,
   generateKey,
   generateNonce,
+  isPly,
+  isScoring,
   isValidKey,
   logToGame,
   logToSaved,
   makeHead,
+  markLog,
   mergeLogs,
   newLog,
+  otherColor,
   otherSeat,
   proveSeat,
   reconcile,
   rematchLog,
+  resumeLog,
   roomGameId,
   roomScore,
+  roundTwoEnd,
   savedToLog,
+  scoreEnd,
   seatToMove,
   sortLogs,
   takebackLog,
   verifySeat,
+  type LogEnd,
+  type LogSettings,
 } from '../sync';
 import type { InitialTurn, RoomControllerApi, RoomControllerOptions, RoomCreateSettings, RoomPhase, RoomState } from './types';
 
@@ -122,8 +148,8 @@ export const DEFAULTS = Object.freeze({
 });
 
 const V = PROTOCOL_VERSION;
-const REQUEST_KINDS: ReadonlySet<string> = new Set<RequestKind>(['takeback', 'draw', 'rematch']);
-const END_BY: ReadonlySet<string> = new Set(['resign', 'time', 'agreed']);
+const REQUEST_KINDS: ReadonlySet<string> = new Set<RequestKind>(['takeback', 'rematch']);
+const END_BY: ReadonlySet<string> = new Set(['resign', 'time', 'score']);
 
 /** Game context a request or an `end` refers to. */
 interface Ctx {
@@ -166,8 +192,36 @@ function sameCtx(a: Ctx | null, b: Ctx | null): boolean {
   return !!a && !!b && a.n === b.n && a.epoch === b.epoch && a.len === b.len;
 }
 
-function lossFor(color: Color): GameEnd['result'] {
-  return color === 'w' ? '0-1' : '1-0';
+/** `color` resigns: the other color wins. */
+function resignation(color: Color): LogEnd {
+  return { result: { winner: otherColor(color), by: 'resign' }, by: 'resign' };
+}
+
+/** `color`, the side to move, ran out of time. */
+function timeout(color: Color): LogEnd {
+  return { result: { winner: otherColor(color), by: 'time' }, by: 'time' };
+}
+
+/**
+ * Time left on the running turn of the side to move after `turnMs` (DESIGN 11): Fischer's remaining
+ * time, or byo-yomi's main time plus every period left (a move inside a period keeps it).
+ */
+export function timeLeft(api: ZigoApi, game: Game, tc: NonNullable<TimeControl>, turnMs: number): number {
+  const c = api.clocks(game, tc)[game.turn];
+  const total = tc.kind === 'fischer' ? c.mainMs : c.mainMs + c.periods * c.periodMs;
+  return total - turnMs;
+}
+
+/** Rules-core settings of log settings (default komi). */
+function newSettings(s: LogSettings) {
+  return makeSettings(s.size, s.rules, s.handicap);
+}
+
+/** The settings a creator's start screen chose, normalized; 9×9 area without handicap by default. */
+function createdSettings(c: RoomCreateSettings | null): LogSettings {
+  if (!c) return DEFAULT_LOG_SETTINGS;
+  const size = c.size === 13 || c.size === 19 ? c.size : 9;
+  return { size, rules: c.rules === 'territory' ? 'territory' : 'area', handicap: normalizeHandicap(size, c.handicap ?? 0) };
 }
 
 function defaultNow(): number {
@@ -207,7 +261,8 @@ class Controller implements RoomControllerApi {
   /* config */
   private readonly code: string;
   private readonly store: Store;
-  private readonly api: ZhessApi;
+  private readonly api: ZigoApi;
+  private readonly propose: ((game: Game) => readonly Point[] | null) | null;
   private readonly now: () => number;
   private readonly wall: () => number;
   private readonly rng: (() => number) | undefined;
@@ -288,7 +343,8 @@ class Controller implements RoomControllerApi {
   constructor(opts: RoomControllerOptions) {
     this.code = opts.code;
     this.store = opts.store;
-    this.api = opts.zhess ?? zhessDefault;
+    this.api = opts.zigo ?? zigoDefault;
+    this.propose = opts.propose ?? null;
     this.now = opts.now ?? defaultNow;
     this.wall = opts.wallNow ?? Date.now;
     this.rng = opts.rng;
@@ -302,11 +358,12 @@ class Controller implements RoomControllerApi {
     this.resendMs = opts.resendMs ?? DEFAULTS.resendMs;
     this.retryMs = opts.retryMs ?? DEFAULTS.retryMs;
     this.maxBytes = opts.maxMessageBytes ?? DEFAULTS.maxMessageBytes;
-    this.game = this.api.newGame();
+    this.game = this.blankGame();
 
     this.load();
     if (!this.room && this.create && !this.readOnly) this.createRoom(this.create);
     this.recomputeClock();
+    if (!this.readOnly) this.autoScore();
     this.snap = this.build();
 
     if (this.readOnly) return;
@@ -368,14 +425,14 @@ class Controller implements RoomControllerApi {
     return Math.max(0, this.turnUsed + (this.turnStart !== null ? Math.max(0, this.now() - this.turnStart) : 0));
   }
 
-  move(uci: string, ms?: number): boolean {
+  move(point: Point, ms?: number): boolean {
     const cur = this.cur();
-    if (!this.room || !cur || cur.end || this.lockReason() !== null) return false;
-    if (seatToMove(cur) !== this.room.seat) return false;
+    if (!this.room || !cur || cur.end || cur.scoring || this.lockReason() !== null) return false;
+    if (seatToMove(cur) !== this.room.seat || !isPly(point, cur.size)) return false;
     const used = typeof ms === 'number' && Number.isFinite(ms) && ms >= 0 ? ms : this.elapsed();
     let next: GameLog;
     try {
-      next = appendPly(cur, uci, used, this.api);
+      next = appendPly(cur, point, used, this.api);
     } catch {
       return false;
     }
@@ -384,6 +441,46 @@ class Controller implements RoomControllerApi {
     this.pending.push({ msg, sentAt: null });
     this.setLogs(this.replaceCur(next));
     if (this.live) this.sendMove(this.pending[this.pending.length - 1]);
+    this.autoScore();
+    this.emit();
+    return true;
+  }
+
+  pass(ms?: number): boolean {
+    return this.move(PASS, ms);
+  }
+
+  mark(dead: readonly Point[]): boolean {
+    const cur = this.cur();
+    if (!this.canMark() || !isScoring(cur) || !Array.isArray(dead)) return false;
+    const next = markLog(cur, dead, undefined, this.api);
+    if (!next) return false;
+    this.setLogs(this.replaceCur(next));
+    this.sendMark(next);
+    this.emit();
+    return true;
+  }
+
+  accept(): boolean {
+    const cur = this.cur();
+    const room = this.room;
+    if (!room || !this.canAccept() || !isScoring(cur)) return false;
+    let next = acceptLog(cur, room.seat);
+    if (!next) return false;
+    this.send({ t: 'accept', v: V, n: cur.n, rev: cur.scoring.rev } satisfies AcceptMsg);
+    if (bothAccepted(next)) next = endLog(next, scoreEnd(next, this.api) as LogEnd);
+    this.setLogs(this.replaceCur(next));
+    this.emit();
+    return true;
+  }
+
+  resume(): boolean {
+    const cur = this.cur();
+    if (!this.canResume() || !isScoring(cur)) return false;
+    const next = resumeLog(cur);
+    if (!next) return false;
+    this.setLogs(this.replaceCur(next));
+    this.send({ t: 'resume', v: V, n: cur.n, epoch: cur.epoch } satisfies ResumeMsg);
     this.emit();
     return true;
   }
@@ -424,8 +521,7 @@ class Controller implements RoomControllerApi {
   resign(): boolean {
     const cur = this.cur();
     if (!this.room || !cur || cur.end || this.closed || this.readOnly || this.versionLocked || this.denied) return false;
-    const end: GameEnd = { result: lossFor(colorOf(cur, this.room.seat)), by: 'resign' };
-    this.finish(end);
+    this.finish(resignation(colorOf(cur, this.room.seat)));
     return true;
   }
 
@@ -516,12 +612,12 @@ class Controller implements RoomControllerApi {
   /** Creates an open room with this device in seat 0 (DESIGN 9.3: the creator generates the key). */
   private createRoom(settings: RoomCreateSettings): void {
     const pick = this.rng ?? Math.random;
-    const white: Seat = settings.color === 'w' ? 0 : settings.color === 'b' ? 1 : pick() < 0.5 ? 0 : 1;
+    const black: Seat = settings.color === 'B' ? 0 : settings.color === 'W' ? 1 : pick() < 0.5 ? 0 : 1;
     const tc = settings.tc && parseTc(settings.tc) ? settings.tc : null;
     const at = this.wall();
     this.room = { code: this.code, key: generateKey(this.rng), seat: 0, createdAt: at, lastSeenAt: 0, score: [0, 0], games: [] };
     this.logs = [];
-    this.setLogs([newLog(1, white, tc)]);
+    this.setLogs([newLog(1, black, tc, createdSettings(settings))]);
   }
 
   /** Drops this device's provisional (never synced) room after a code collision. */
@@ -617,16 +713,22 @@ class Controller implements RoomControllerApi {
     return [...this.logs.filter((l) => l.n !== log.n), log];
   }
 
+  /** The empty board of the settings this device would create the room with. */
+  private blankGame(): Game {
+    const s = createdSettings(this.create);
+    return this.api.newGame(newSettings(s));
+  }
+
   private refreshGame(): void {
     const cur = this.cur();
     if (!cur) {
-      this.game = this.api.newGame();
+      this.game = this.blankGame();
       return;
     }
     try {
       this.game = logToGame(cur, this.api);
     } catch {
-      this.game = this.api.newGame();
+      this.game = this.api.newGame(newSettings(cur));
     }
   }
 
@@ -844,6 +946,12 @@ class Controller implements RoomControllerApi {
         return this.onReply(m);
       case 'end':
         return this.onEnd(m);
+      case 'mark':
+        return this.onMark(m);
+      case 'accept':
+        return this.onAccept(m);
+      case 'resume':
+        return this.onResume(m);
       default:
         return;
     }
@@ -979,24 +1087,37 @@ class Controller implements RoomControllerApi {
     const cur = this.cur();
     if (!r || !room || !cur) return;
     const seat = otherSeat(room.seat);
-    this.send({ t: 'welcome', v: V, key: room.key, seat, tc: cur.tc, color: colorOf(cur, seat) } satisfies WelcomeMsg);
+    this.send({
+      t: 'welcome',
+      v: V,
+      key: room.key,
+      seat,
+      tc: cur.tc,
+      color: colorOf(cur, seat),
+      size: cur.size,
+      rules: cur.rules,
+      handicap: cur.handicap,
+    } satisfies WelcomeMsg);
     this.authenticate();
   }
 
   private onWelcome(m: WelcomeMsg): void {
     const r = this.round;
     if (!r || r.stage !== 'joining') return;
-    if (!isValidKey(m.key) || !isSeat(m.seat) || (m.color !== 'w' && m.color !== 'b')) return;
+    if (!isValidKey(m.key) || !isSeat(m.seat) || (m.color !== 'B' && m.color !== 'W')) return;
     if (m.tc !== null && (typeof m.tc !== 'string' || !parseTc(m.tc))) return;
+    if (m.size !== 9 && m.size !== 13 && m.size !== 19) return;
+    if (m.rules !== 'area' && m.rules !== 'territory') return;
+    if (typeof m.handicap !== 'number' || normalizeHandicap(m.size, m.handicap) !== m.handicap) return;
     if (this.room) {
       if (this.room.lastSeenAt !== 0) return;
       this.discardProvisional();
     }
     const at = this.wall();
-    const white: Seat = m.color === 'w' ? m.seat : otherSeat(m.seat);
+    const black: Seat = m.color === 'B' ? m.seat : otherSeat(m.seat);
     this.room = { code: this.code, key: m.key, seat: m.seat, createdAt: at, lastSeenAt: Math.max(1, at), score: [0, 0], games: [] };
     this.logs = [];
-    this.setLogs([newLog(1, white, m.tc)]);
+    this.setLogs([newLog(1, black, m.tc, { size: m.size, rules: m.rules, handicap: m.handicap })]);
     this.authenticate();
   }
 
@@ -1059,6 +1180,7 @@ class Controller implements RoomControllerApi {
     this.scoreFloor = (res.adopt ?? []).reduce((min, l) => Math.min(min, l.n), Infinity);
     if (!Number.isFinite(this.scoreFloor)) this.scoreFloor = 0;
     this.authenticate();
+    this.autoScore();
   }
 
   private onDeny(_m: DenyMsg): void {
@@ -1075,8 +1197,7 @@ class Controller implements RoomControllerApi {
 
   private sendHead(): void {
     const cur = this.cur();
-    const mine = !!cur && !cur.end && !!this.room && seatToMove(cur) === this.room.seat;
-    this.send(makeHead(cur, mine ? this.elapsed() : undefined));
+    this.send(makeHead(cur, this.myTurn() ? this.elapsed() : undefined));
   }
 
   /** Sends logs, split so that no message exceeds `maxMessageBytes`; the current game goes last. */
@@ -1120,7 +1241,7 @@ class Controller implements RoomControllerApi {
     }
     // DESIGN 9.8: the side to move reports the time it already used on its running turn.
     const cur = this.cur();
-    if (cur && !cur.end && typeof m.turnMs === 'number' && Number.isFinite(m.turnMs) && m.turnMs >= 0) {
+    if (cur && !cur.end && !cur.scoring && typeof m.turnMs === 'number' && Number.isFinite(m.turnMs) && m.turnMs >= 0) {
       if (sameCtx(ctxOf(cur), { n: m.n, epoch: m.epoch, len: m.len }) && seatToMove(cur) !== room.seat) {
         this.recomputeClock();
         this.turnUsed = m.turnMs;
@@ -1146,6 +1267,7 @@ class Controller implements RoomControllerApi {
     if (res.send?.length) this.sendLogs(res.send);
     if (res.adopt?.length) this.sendHead(); // tells the other side what this device holds now
     if (!res.send?.length) this.markSynced();
+    if (res.adopt?.length) this.autoScore();
     this.emit();
   }
 
@@ -1184,6 +1306,7 @@ class Controller implements RoomControllerApi {
       case 'applied':
         this.setLogs(this.replaceCur(out.log));
         this.send({ t: 'ack', v: V, n: m.n, epoch: m.epoch, i: m.i } satisfies AckMsg);
+        this.autoScore();
         break;
       case 'duplicate':
         this.send({ t: 'ack', v: V, n: m.n, epoch: m.epoch, i: m.i } satisfies AckMsg);
@@ -1305,7 +1428,7 @@ class Controller implements RoomControllerApi {
     }
     if (this.incoming === m.kind && sameCtx(this.incomingCtx, ctx)) return; // asked again
     if (this.outgoing === m.kind && m.kind !== 'takeback' && sameCtx(this.outgoingCtx, ctx)) {
-      // Both offered a draw, or both asked for a rematch: agreed.
+      // Both asked for a rematch: agreed.
       this.incoming = m.kind;
       this.incomingCtx = ctx;
       this.reply(m.kind, true);
@@ -1341,8 +1464,6 @@ class Controller implements RoomControllerApi {
     if (kind === 'takeback') {
       const next = takebackLog(cur, requester);
       if (next) this.setLogs(this.replaceCur(next));
-    } else if (kind === 'draw') {
-      this.setLogs(this.replaceCur(endLog(cur, { result: '1/2-1/2', by: 'agreed' })));
     } else if (cur.end) {
       this.setLogs([...this.logs, rematchLog(cur)]);
     }
@@ -1350,7 +1471,7 @@ class Controller implements RoomControllerApi {
 
   /* ---- end of a game ---- */
 
-  private finish(end: GameEnd): void {
+  private finish(end: LogEnd): void {
     const cur = this.cur();
     if (!cur || cur.end) return;
     const ctx = ctxOf(cur) as Ctx;
@@ -1376,17 +1497,158 @@ class Controller implements RoomControllerApi {
       this.sendHead();
       return;
     }
-    const game = this.game;
-    let end: GameEnd;
-    if (m.by === 'time') end = this.api.timeoutResult(game, game.turn);
-    else if (m.by === 'resign') end = { result: lossFor(colorOf(cur, otherSeat(room.seat))), by: 'resign' };
-    else end = { result: '1/2-1/2', by: 'agreed' };
+    if (m.by === 'score') {
+      // Round 2 (DESIGN 9.5): seat 0 scored the game from its proposal; adopt it as data.
+      const next = isScoring(cur) && Array.isArray(m.dead) ? roundTwoEnd(cur, m.dead.filter((p) => typeof p === 'string'), this.api) : null;
+      const r = m.result as Partial<EndMsg['result']> | undefined;
+      const want = next?.end?.result;
+      if (!next || !want || !r || r.winner !== want.winner || r.margin !== want.margin) {
+        this.sendHead();
+        return;
+      }
+      this.setLogs(this.replaceCur(next));
+      this.emit();
+      return;
+    }
+    const end = m.by === 'time' ? timeout(this.game.turn) : resignation(colorOf(cur, otherSeat(room.seat)));
     this.setLogs(this.replaceCur(endLog(cur, end)));
     this.emit();
   }
 
+  /* ---- scoring (DESIGN 9.5) ---- */
+
+  private sendMark(log: GameLog): void {
+    if (!this.live || !log.scoring) return;
+    this.send({ t: 'mark', v: V, n: log.n, epoch: log.epoch, rev: log.scoring.rev, dead: [...log.scoring.dead] } satisfies MarkMsg);
+  }
+
+  /**
+   * Seat 0's duties when the current game is in scoring: the first proposal (rev 1) of round 1, and
+   * the immediate end of round 2 from its proposal (DESIGN 9.5). Without an engine (`propose` null)
+   * every stone counts alive.
+   */
+  private autoScore(): void {
+    const room = this.room;
+    const cur = this.cur();
+    if (!room || room.seat !== 0 || !isScoring(cur) || this.lockedHard()) return;
+    let dead: readonly Point[] = [];
+    try {
+      dead = this.propose?.(this.game) ?? [];
+    } catch {
+      dead = [];
+    }
+    if (cur.scoring.round === 2) {
+      const next = roundTwoEnd(cur, dead, this.api);
+      if (!next?.end || !next.scoring) return;
+      this.setLogs(this.replaceCur(next));
+      if (this.live) {
+        const msg: EndOut = {
+          t: 'end',
+          v: V,
+          n: next.n,
+          result: next.end.result,
+          by: 'score',
+          dead: [...next.scoring.dead],
+          epoch: next.epoch,
+          len: next.plies.length,
+        };
+        this.send(msg);
+      }
+      this.emit();
+      return;
+    }
+    if (cur.scoring.rev !== 0) return;
+    const next = markLog(cur, dead, 1, this.api);
+    if (!next) return;
+    this.setLogs(this.replaceCur(next));
+    this.sendMark(next);
+    this.emit();
+  }
+
+  private onMark(m: MarkMsg): void {
+    const cur = this.cur();
+    if (!this.room || !cur || !isInt(m.n) || !isInt(m.epoch) || !isInt(m.rev) || !Array.isArray(m.dead)) return;
+    if (m.n !== cur.n || m.epoch !== cur.epoch) {
+      if (m.n > cur.n || (m.n === cur.n && m.epoch > cur.epoch)) this.sendHead();
+      return;
+    }
+    if (!isScoring(cur)) {
+      if (!cur.end) this.sendHead(); // the double pass has not arrived here yet, or a resume crossed
+      return;
+    }
+    const dead = m.dead.filter((p): p is Point => typeof p === 'string');
+    if (m.rev > cur.scoring.rev) {
+      const next = markLog(cur, dead, m.rev, this.api);
+      if (next) this.setLogs(this.replaceCur(next));
+      this.emit();
+      return;
+    }
+    const same = m.rev === cur.scoring.rev && [...new Set(dead)].sort().join() === cur.scoring.dead.join();
+    if (!same) this.sendHead(); // crossing toggles: the reconcile settles it by rev (seat 0 on a tie)
+  }
+
+  private onAccept(m: AcceptMsg): void {
+    const room = this.room;
+    const cur = this.cur();
+    if (!room || !cur || !isInt(m.n) || !isInt(m.rev)) return;
+    if (m.n !== cur.n) {
+      if (m.n > cur.n) this.sendHead();
+      return;
+    }
+    if (!isScoring(cur)) {
+      if (!cur.end) this.sendHead();
+      return;
+    }
+    if (m.rev !== cur.scoring.rev) {
+      // An acceptance of a marking this device has not seen yet: reconcile. An older one is stale
+      // (a toggle crossed it and cleared it on both sides).
+      if (m.rev > cur.scoring.rev) this.sendHead();
+      return;
+    }
+    let next = acceptLog(cur, otherSeat(room.seat));
+    if (!next) return;
+    if (bothAccepted(next)) next = endLog(next, scoreEnd(next, this.api) as LogEnd);
+    this.setLogs(this.replaceCur(next));
+    this.emit();
+  }
+
+  private onResume(m: ResumeMsg): void {
+    const cur = this.cur();
+    if (!this.room || !cur || !isInt(m.n) || !isInt(m.epoch)) return;
+    if (m.n !== cur.n || m.epoch !== cur.epoch) {
+      if (m.n > cur.n || (m.n === cur.n && m.epoch > cur.epoch)) this.sendHead();
+      return;
+    }
+    if (!isScoring(cur)) return; // already left (or ended): nothing to do
+    const next = resumeLog(cur);
+    if (next) this.setLogs(this.replaceCur(next));
+    this.emit();
+  }
+
+  /** Marks are possible: scoring round 1, seated; seat 1 waits for seat 0's proposal (rev ≥ 1). Offline too. */
+  private canMark(): boolean {
+    const room = this.room;
+    const cur = this.cur();
+    if (!room || !isScoring(cur) || this.lockedHard() || cur.scoring.round === 2) return false;
+    return room.seat === 0 || cur.scoring.rev >= 1;
+  }
+
+  /** Accepting is possible: a proposal this seat has not accepted yet, opponent connected. */
+  private canAccept(): boolean {
+    const room = this.room;
+    const cur = this.cur();
+    if (!room || !isScoring(cur) || !this.live || this.lockedHard() || cur.scoring.round === 2) return false;
+    return cur.scoring.rev >= 1 && cur.scoring.accepted[room.seat] !== cur.scoring.rev;
+  }
+
+  /** Resuming is possible: scoring round 1, opponent connected. */
+  private canResume(): boolean {
+    const cur = this.cur();
+    return !!this.room && isScoring(cur) && this.live && !this.lockedHard() && cur.scoring.round === 1;
+  }
+
   /* ============================================================================================ */
-  /* Clock (DESIGN 9.8)                                                                            */
+  /* Clock (DESIGN 9.7)                                                                            */
   /* ============================================================================================ */
 
   private tc(): TimeControl {
@@ -1396,12 +1658,12 @@ class Controller implements RoomControllerApi {
 
   private myTurn(): boolean {
     const cur = this.cur();
-    return !!this.room && !!cur && !cur.end && seatToMove(cur) === this.room.seat;
+    return !!this.room && !!cur && !cur.end && !cur.scoring && seatToMove(cur) === this.room.seat;
   }
 
   private shouldRun(): boolean {
     const cur = this.cur();
-    if (!cur || cur.end || !this.room || this.closed || this.readOnly || this.versionLocked || this.denied) return false;
+    if (!cur || cur.end || cur.scoring || !this.room || this.closed || this.readOnly || this.versionLocked || this.denied) return false;
     if (this.live) return true;
     return !this.tc() && this.myTurn();
   }
@@ -1409,7 +1671,7 @@ class Controller implements RoomControllerApi {
   /** Restarts the turn when the position changed; pauses or resumes it to match the connection. */
   private recomputeClock(): void {
     const cur = this.cur();
-    const key = cur ? `${cur.n}|${cur.epoch}|${cur.plies.length}|${cur.end ? 1 : 0}` : '-';
+    const key = cur ? `${cur.n}|${cur.epoch}|${cur.plies.length}|${cur.end ? 1 : 0}|${cur.scoring ? 1 : 0}` : '-';
     if (key !== this.turnKey) {
       this.turnKey = key;
       this.turnUsed = 0;
@@ -1436,10 +1698,10 @@ class Controller implements RoomControllerApi {
     const tc = this.tc();
     if (!tc || this.turnStart === null || this.closed) return;
     const game = this.game;
-    if (game.end || !this.api.clockRunning(game)) return;
+    if (game.end || game.scoring || !this.api.clockRunning(game)) return;
     const mine = this.myTurn();
     if (!mine && !this.live) return;
-    const left = remaining(game, tc, this.elapsed())[game.turn];
+    const left = timeLeft(this.api, game, tc, this.elapsed());
     const delay = Math.max(0, mine ? left : left + this.graceMs);
     this.flagTimer = this.timers.setTimeout(() => {
       this.flagTimer = null;
@@ -1447,18 +1709,18 @@ class Controller implements RoomControllerApi {
     }, delay);
   }
 
-  /** Ends the game on time when the running clock allows it (DESIGN 9.8). */
+  /** Ends the game on time when the running clock allows it (DESIGN 9.7). */
   private flagCheck(): boolean {
     const cur = this.cur();
     const tc = this.tc();
     if (!this.room || !cur || cur.end || !tc || this.closed || this.readOnly || this.versionLocked || this.denied) return false;
     const game = this.game;
-    if (!this.api.clockRunning(game)) return false;
-    const left = remaining(game, tc, this.elapsed())[game.turn];
+    if (cur.scoring || game.scoring || !this.api.clockRunning(game)) return false;
+    const left = timeLeft(this.api, game, tc, this.elapsed());
     if (this.myTurn()) {
       if (left > 0) return false;
     } else if (!this.live || left > -this.graceMs) return false;
-    this.finish(this.api.timeoutResult(game, game.turn));
+    this.finish(timeout(game.turn));
     return true;
   }
 
@@ -1525,7 +1787,7 @@ class Controller implements RoomControllerApi {
     const cur = this.cur();
     const room = this.room;
     const seat = room ? room.seat : null;
-    const color: Color = cur && room ? colorOf(cur, room.seat) : this.create?.color === 'b' ? 'b' : 'w';
+    const color: Color = cur && room ? colorOf(cur, room.seat) : this.create?.color === 'W' ? 'W' : 'B';
     const locked = this.lockReason();
     const myTurn = this.myTurn();
     const tc = this.tc();
@@ -1547,7 +1809,7 @@ class Controller implements RoomControllerApi {
       requests: Object.freeze(requests),
       locked,
       unsent: this.pending.length,
-      clock: Object.freeze({ paused: !!tc && !!cur && !cur.end && !this.live && !!room, turnStart: this.turnStart, turnUsed: this.turnUsed }),
+      clock: Object.freeze({ paused: !!tc && !!cur && !cur.end && !cur.scoring && !this.live && !!room, turnStart: this.turnStart, turnUsed: this.turnUsed }),
       notice: this.lastNotice,
       failure: this.failure,
       phase: this.phase(),
@@ -1555,7 +1817,10 @@ class Controller implements RoomControllerApi {
       logs: this.frozenLogs(),
       myTurn,
       canMove: myTurn && locked === null,
-      canAsk: Object.freeze({ takeback: this.canAsk('takeback'), draw: this.canAsk('draw'), rematch: this.canAsk('rematch') }),
+      canMark: this.canMark(),
+      canAccept: this.canAccept(),
+      canResume: this.canResume(),
+      canAsk: Object.freeze({ takeback: this.canAsk('takeback'), rematch: this.canAsk('rematch') }),
       failureKind: this.failureKind,
       lastSeenAt: room?.lastSeenAt ?? 0,
     });

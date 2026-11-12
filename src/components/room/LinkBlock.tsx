@@ -1,5 +1,5 @@
 /**
- * A link to pass to the other device (DESIGN 9.2, 9.9): its QR code (drawn in the app, `lib/qr.ts`),
+ * A link to pass to the other device (DESIGN 9): its QR code (drawn in the app, `lib/qr.ts`),
  * the link itself in a read-only field, and Copy / Share (native share sheet where it exists).
  * A link too long for a QR code (above version 25) is shown alone with a short note.
  */

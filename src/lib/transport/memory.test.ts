@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Message, TransportFactory, TransportState } from '../chessTypes';
+import type { Message, TransportFactory, TransportState } from '../types';
 import { createMemoryNetwork, createMemoryPair, type MemoryTransport } from './memory';
 
 const ping: Message = { t: 'ping', v: 1 };
