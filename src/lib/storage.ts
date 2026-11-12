@@ -4,20 +4,11 @@
  * Keys are `zigo:<key>`. Values are JSON. Every read and write is wrapped in try/catch: private
  * mode, a full quota or corrupt data never break the app; reads fall back to defaults.
  *
- * Transition (package 0b): `createStore` / `store` still hold the chess-era `SavedGame` the copied
- * Zhess modules use. `createGoStore` / `goStore` are the same store over Go's `SavedGame`
- * (DESIGN 12.1), and the `read…` / `write…` helpers below cover the Go preference keys. Milestone 1
- * switches the app over and drops the chess variant.
+ * `createStore` / `store` hold Go's `SavedGame` (DESIGN 12.1); stored entries of any other shape
+ * (for example games written by an older build) are dropped on read. The `read…` / `write…`
+ * helpers below cover the preference keys whose values need validation.
  */
-import type { Room, SavedGame, Store } from './chessTypes';
-import type {
-  ColorChoice,
-  SavedGame as GoSavedGame,
-  Rules,
-  Size,
-  Store as GoStore,
-  TcString,
-} from './types';
+import type { ColorChoice, Result, Room, Rules, SavedGame, Scoring, Size, Store, TcString } from './types';
 import { formatTc, normalizeHandicap, parseTc } from './zigo';
 
 /** The key prefix of every stored value. */
@@ -53,23 +44,23 @@ export type StorageSource = StorageLike | null | undefined | (() => StorageLike 
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
-/** Shape check for a stored game; drops entries that would crash the UI. */
-export function isSavedGame(v: unknown): v is SavedGame {
-  return (
-    isObj(v) &&
-    typeof v.id === 'string' &&
-    typeof v.code === 'string' &&
-    (v.mode === 'computer' || v.mode === 'local' || v.mode === 'room') &&
-    (v.color === 'w' || v.color === 'b') &&
-    typeof v.moves === 'string' &&
-    Array.isArray(v.ms) &&
-    typeof v.createdAt === 'number' &&
-    typeof v.lastPlayedAt === 'number'
-  );
-}
+const isResult = (v: unknown): v is Result =>
+  isObj(v) &&
+  (v.winner === 'B' || v.winner === 'W') &&
+  (v.by === 'score' || v.by === 'resign' || v.by === 'time') &&
+  (v.margin === undefined || typeof v.margin === 'number');
+
+const isScoring = (v: unknown): v is Scoring =>
+  isObj(v) &&
+  (v.round === 1 || v.round === 2) &&
+  typeof v.rev === 'number' &&
+  Array.isArray(v.dead) &&
+  v.dead.every((p) => typeof p === 'string') &&
+  Array.isArray(v.accepted) &&
+  v.accepted.length === 2;
 
 /** Shape check for a stored Go game (DESIGN 12.1); drops entries that would crash the UI. */
-export function isGoSavedGame(v: unknown): v is GoSavedGame {
+export function isSavedGame(v: unknown): v is SavedGame {
   return (
     isObj(v) &&
     typeof v.id === 'string' &&
@@ -82,9 +73,14 @@ export function isGoSavedGame(v: unknown): v is GoSavedGame {
     typeof v.moves === 'string' &&
     Array.isArray(v.ms) &&
     typeof v.createdAt === 'number' &&
-    typeof v.lastPlayedAt === 'number'
+    typeof v.lastPlayedAt === 'number' &&
+    (v.result === undefined || isResult(v.result)) &&
+    (v.scoring === undefined || isScoring(v.scoring))
   );
 }
+
+/** Alias of `isSavedGame` (the phase-0 name). */
+export const isGoSavedGame = isSavedGame;
 
 /** Shape check for a stored room record. */
 export function isRoom(v: unknown): v is Room {
@@ -97,19 +93,6 @@ export function isRoom(v: unknown): v is Room {
     v.score.length === 2 &&
     Array.isArray(v.games)
   );
-}
-
-/** The store's shape over any saved-game type (`Store` of either contract file). */
-interface StoreOf<G> {
-  games(): G[];
-  saveGame(g: G): void;
-  deleteGame(id: string): G | undefined;
-  restoreGame(g: G): void;
-  rooms(): Room[];
-  saveRoom(r: Room): void;
-  deleteRoom(code: string): Room | undefined;
-  pref<T>(key: string, fallback: T): T;
-  setPref<T>(key: string, value: T): void;
 }
 
 interface Stamped {
@@ -125,17 +108,15 @@ function sortGames<G extends Stamped>(games: G[]): G[] {
     .map(([g]) => g);
 }
 
-/** A `Store` over any Storage-like object (tests pass an in-memory one). Chess-era `SavedGame`. */
+/** The `Store` (DESIGN 12.1, 13.1) over any Storage-like object (tests pass an in-memory one). */
 export function createStore(source: StorageSource): Store {
-  return createStoreOf<SavedGame>(source, isSavedGame);
+  return createStoreOf(source, isSavedGame);
 }
 
-/** The Go `Store` (DESIGN 12.1, 13.1) over any Storage-like object. */
-export function createGoStore(source: StorageSource): GoStore {
-  return createStoreOf<GoSavedGame>(source, isGoSavedGame);
-}
+/** Alias of `createStore` (the phase-0 name). */
+export const createGoStore = createStore;
 
-function createStoreOf<G extends Stamped>(source: StorageSource, isGame: (v: unknown) => v is G): StoreOf<G> {
+function createStoreOf(source: StorageSource, isGame: (v: unknown) => v is SavedGame): Store {
   const storage = (): StorageLike | null => {
     try {
       const s = typeof source === 'function' ? source() : source;
@@ -172,7 +153,7 @@ function createStoreOf<G extends Stamped>(source: StorageSource, isGame: (v: unk
     }
   };
 
-  const writeGames = (games: G[]) => write(KEYS.games, sortGames(games).slice(0, MAX_GAMES));
+  const writeGames = (games: SavedGame[]) => write(KEYS.games, sortGames(games).slice(0, MAX_GAMES));
 
   return {
     games: () => sortGames(readList(KEYS.games, isGame)),
@@ -247,15 +228,15 @@ const browserStorage = () => (typeof localStorage === 'undefined' ? null : local
 /** The app's store over `window.localStorage` (looked up lazily; absent storage reads as empty). */
 export const store: Store = createStore(browserStorage);
 
-/** The Go store over `window.localStorage`. */
-export const goStore: GoStore = createGoStore(browserStorage);
+/** Alias of `store` (the phase-0 name). */
+export const goStore: Store = store;
 
 /* ---------------------------------------------------------------------------------------------- */
 /* Go preferences (DESIGN 13.1)                                                                     */
 /* ---------------------------------------------------------------------------------------------- */
 
-/** What the preference helpers need: either store works. */
-export type PrefStore = Pick<GoStore, 'pref' | 'setPref'>;
+/** What the preference helpers need. */
+export type PrefStore = Pick<Store, 'pref' | 'setPref'>;
 
 /** Engine backend remembered after the WebGPU probe (`zigo:engine-backend`). */
 export type EngineBackend = 'webgpu' | 'wasm';
@@ -303,7 +284,7 @@ export function writeHandicap(s: PrefStore, size: Size, n: number): void {
 
 /**
  * `zigo:clock` for one size: a normalized time control (`5+7`, `20m5x30`), null for off, or
- * `fallback` when nothing valid is stored for that size (e.g. the chess-era plain string).
+ * `fallback` when nothing valid is stored for that size (e.g. an older single string).
  */
 export function readClock(s: PrefStore, size: Size, fallback: TcString | null = null): TcString | null {
   const per = readPerSize(s, KEYS.clock);
@@ -333,6 +314,10 @@ export function writeEngineBackend(s: PrefStore, b: EngineBackend | null): void 
 export function readColorChoice(s: PrefStore): ColorChoice {
   const v = s.pref<unknown>(KEYS.color, null);
   return v === 'B' || v === 'W' ? v : 'random';
+}
+
+export function writeColorChoice(s: PrefStore, c: ColorChoice): void {
+  s.setPref(KEYS.color, c === 'B' || c === 'W' ? c : 'random');
 }
 
 /** An in-memory Storage-like object for tests and for environments without storage. */

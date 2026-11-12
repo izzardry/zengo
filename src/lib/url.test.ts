@@ -18,23 +18,25 @@ import {
   useUrlParams,
   type ShareableGame,
 } from './url';
-import zhess from './zhess';
 import zigo from './zigo';
 
 const BASE = 'https://izzardry.github.io/zigo/';
 
 describe('parseUrl', () => {
   it('reads every parameter of DESIGN 13.2', () => {
-    const p = parseUrl('?s=k7qw2m&d=7&p=1&o=c&w=b&t=5%2B0&m=MceU&r=1-0.resign&x=OFFER&y=ANSWER');
+    const p = parseUrl('?s=k7qw2m&d=7&p=1&o=c&w=W&t=5%2B7&n=13&g=t&h=2&m=ddjjtt&r=B%2BR&x=OFFER&y=ANSWER');
     expect(p).toEqual({
       code: 'K7QW2M',
       level: 7,
       playing: true,
       mode: 'computer',
-      color: 'b',
-      tc: '5+0',
-      moves: 'MceU',
-      end: { result: '1-0', by: 'resign' },
+      color: 'W',
+      tc: '5+7',
+      size: 13,
+      rules: 'territory',
+      handicap: 2,
+      moves: 'ddjjtt',
+      result: { winner: 'B', by: 'resign' },
       offer: 'OFFER',
       answer: 'ANSWER',
     });
@@ -45,10 +47,13 @@ describe('parseUrl', () => {
     expect(parseUrl('o=r').mode).toBe('room');
     // A literal + in a query decodes to a space; parseTc trims it away only if it is a valid tc.
     expect(parseUrl('t=15%2B10').tc).toBe('15+10');
+    // `w` is B or W; a lowercase letter is read too.
+    expect(parseUrl('w=b').color).toBe('B');
+    expect(parseUrl('w=W').color).toBe('W');
   });
 
   it('drops invalid values instead of throwing', () => {
-    const p = parseUrl('s=!!!&d=13&p=0&o=z&w=x&t=fast&m=%25%25&r=win');
+    const p = parseUrl('s=!!!&d=13&p=0&o=z&w=x&t=fast&m=%25%25&r=win&n=10');
     expect(p).toEqual({});
     expect(parseUrl('d=0').level).toBeUndefined();
     expect(parseUrl('d=12').level).toBe(12);
@@ -62,48 +67,63 @@ describe('parseUrl', () => {
 });
 
 describe('serializeUrl', () => {
-  it('writes in the fixed order s d p o w t m r x y', () => {
+  it('writes in the fixed order s d p o w t n g h m r x y', () => {
     const q = urlQuery({
       answer: 'Y',
       offer: 'X',
-      end: { result: '1/2-1/2', by: 'agreed' },
-      moves: 'MceU',
-      tc: '3+2',
-      color: 'w',
+      result: { winner: 'W', by: 'score', margin: 9 },
+      moves: 'eecc',
+      handicap: 3,
+      rules: 'territory',
+      size: 13,
+      tc: '3+7',
+      color: 'W',
       mode: 'computer',
       playing: true,
       level: 5,
       code: 'K7QW2M',
     });
-    expect(q).toBe('s=K7QW2M&d=5&p=1&o=c&w=w&t=3%2B2&m=MceU&r=draw.agreed&x=X&y=Y');
+    expect(q).toBe('s=K7QW2M&d=5&p=1&o=c&w=W&t=3%2B7&n=13&g=t&h=3&m=eecc&r=W%2B4.5&x=X&y=Y');
   });
 
   it('never writes moves or a result for room games', () => {
-    const q = serializeUrl({ code: 'K7QW2M', playing: true, mode: 'room', moves: 'MceU', end: { result: '1-0', by: 'mate' } });
+    const q = serializeUrl({ code: 'K7QW2M', playing: true, mode: 'room', moves: 'eecc', result: { winner: 'B', by: 'resign' } });
     expect(q.has('m')).toBe(false);
     expect(q.has('r')).toBe(false);
   });
 
   it('round-trips', () => {
-    const plies = ['e2e4', 'e7e5', 'g1f3'].map((m) => ({ m, ms: 0 }));
+    const plies = ['ee', 'cc', 'gg'].map((m) => ({ m, ms: 0 }));
     const p = {
       code: 'ZZ9',
       level: 12,
       playing: true,
       mode: 'computer' as const,
-      color: 'b' as const,
+      color: 'W' as const,
       tc: '15+10',
-      moves: zhess.encodeMoves(plies),
-      end: { result: '0-1' as const, by: 'time' as const },
+      size: 9 as const,
+      moves: zigo.encodeMoves(plies),
+      result: { winner: 'W' as const, by: 'time' as const },
     };
     expect(parseUrl(serializeUrl(p))).toEqual(p);
   });
 
-  it('formats and parses endings', () => {
-    expect(formatEnd({ result: '1/2-1/2', by: 'stalemate' })).toBe('draw.stalemate');
-    expect(parseEnd('0-1.mate')).toEqual({ result: '0-1', by: 'mate' });
-    expect(parseEnd('0-1.bogus')).toBeUndefined();
+  it('formats and parses results as SGF writes RE', () => {
+    expect(formatEnd({ winner: 'B', by: 'score', margin: 9 })).toBe('B+4.5');
+    expect(formatEnd({ winner: 'W', by: 'resign' })).toBe('W+R');
+    expect(formatEnd({ winner: 'B', by: 'time' })).toBe('B+T');
+    expect(parseEnd('B+4.5')).toEqual({ winner: 'B', by: 'score', margin: 9 });
+    expect(parseEnd('w+r')).toEqual({ winner: 'W', by: 'resign' });
+    expect(parseEnd('B+T')).toEqual({ winner: 'B', by: 'time' });
+    // A raw + decoded as a space.
+    expect(parseEnd('W 12.5')).toEqual({ winner: 'W', by: 'score', margin: 25 });
+    expect(parseEnd('W+0.3')).toBeUndefined();
+    expect(parseEnd('1-0.resign')).toBeUndefined();
+    expect(parseEnd('B+X')).toBeUndefined();
     expect(parseEnd(null)).toBeUndefined();
+    // Through the query string both ways.
+    expect(parseUrl(urlQuery({ result: { winner: 'B', by: 'score', margin: 1 } })).result).toEqual({ winner: 'B', by: 'score', margin: 1 });
+    expect(parseUrl('r=B+0.5').result).toEqual({ winner: 'B', by: 'score', margin: 1 });
   });
 });
 
@@ -112,9 +132,12 @@ describe('share links', () => {
     code: 'K7QW2M',
     mode: 'computer',
     level: 5,
-    color: 'w',
-    tc: '5+0',
-    moves: zhess.encodeMoves([{ m: 'e2e4', ms: 0 }]),
+    color: 'W',
+    tc: '5+7',
+    size: 9,
+    rules: 'area',
+    handicap: 0,
+    moves: zigo.encodeMoves([{ m: 'ee', ms: 0 }]),
   };
 
   it('builds hash URLs on a base', () => {
@@ -130,13 +153,13 @@ describe('share links', () => {
 
   it('solo games carry the full state', () => {
     const url = soloShareUrl(solo, BASE);
-    expect(url).toBe(`${BASE}#/?s=K7QW2M&d=5&p=1&o=c&w=w&t=5%2B0&m=${solo.moves}`);
+    expect(url).toBe(`${BASE}#/?s=K7QW2M&d=5&p=1&o=c&w=W&t=5%2B7&n=9&m=${solo.moves}`);
     expect(shareUrl(solo, BASE)).toBe(url);
   });
 
   it('finished games carry their result and so open in review', () => {
-    const url = finishedShareUrl({ ...solo, result: '0-1', by: 'resign' }, BASE);
-    expect(parseUrl(url.split('#/?')[1]).end).toEqual({ result: '0-1', by: 'resign' });
+    const url = finishedShareUrl({ ...solo, result: { winner: 'W', by: 'resign' } }, BASE);
+    expect(parseUrl(url.split('#/?')[1]).result).toEqual({ winner: 'W', by: 'resign' });
   });
 
   it('pass-and-play links leave out w and d', () => {
@@ -215,7 +238,7 @@ describe('Go parameters n, g, h (DESIGN 13.2)', () => {
   });
 
   it('share links carry the settings; room invites do not', () => {
-    const g: ShareableGame = { code: 'K7QW2M', mode: 'local', color: 'w', tc: null, moves: 'eecc', size: 9, rules: 'territory', handicap: 2 };
+    const g: ShareableGame = { code: 'K7QW2M', mode: 'local', color: 'B', tc: null, moves: 'eecc', size: 9, rules: 'territory', handicap: 2 };
     expect(soloShareUrl(g, BASE)).toBe(`${BASE}#/?s=K7QW2M&p=1&o=l&n=9&g=t&h=2&m=eecc`);
     expect(shareUrl({ ...g, mode: 'room' }, BASE)).toBe(`${BASE}#/?s=K7QW2M&o=r`);
   });

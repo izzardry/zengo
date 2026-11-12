@@ -1,24 +1,32 @@
 /**
- * Pure game-session logic behind `useGameState` and `useSavedGames` (DESIGN 4.1, 10.3, 12, 13).
+ * Pure game-session logic behind `useGameState` and `useSavedGames` (DESIGN 4.1, 6.2, 8.3, 8.4,
+ * 10.3, 12, 13).
  *
  * No React, no DOM, no storage: every function takes what it needs (including `now`) and returns a
- * new value, so the rules are tested here without rendering anything.
+ * new value, so the rules are tested here without rendering anything. The rules of Go themselves
+ * are in `lib/zigo.ts`, counting in `lib/scoring.ts`.
  */
 import { generateCode } from './codes';
+import scoringApi from './scoring';
 import type {
   Color,
   ColorChoice,
   Game,
-  GameEnd,
   Mode,
   Opponent,
   Ply,
+  Point,
+  Result,
   Rng,
+  Rules,
   SavedGame,
+  Scoring,
+  Settings,
+  Size,
   TcString,
-} from './chessTypes';
+} from './types';
 import { normalizeTc } from './url';
-import zhess from './zhess';
+import zigo, { PASS, isPass, makeSettings, normalizeHandicap } from './zigo';
 
 /* ---------------------------------------------------------------------------------------------- */
 /* Settings                                                                                         */
@@ -28,10 +36,25 @@ import zhess from './zhess';
 export const DEFAULT_LEVEL = 5;
 /** First-run opponent: `COMPUTER 5 MEDIUM` (DESIGN 4.1). */
 export const DEFAULT_OPPONENT: Opponent = Object.freeze({ mode: 'computer', level: DEFAULT_LEVEL });
+/** First-run board size (DESIGN 4.1). */
+export const DEFAULT_SIZE: Size = 9;
 /** Time a resumed game must stay open before its "last played" time moves (DESIGN 12.1, Ztyle 11). */
 export const LAST_PLAYED_DELAY_MS = 15_000;
 /** History cards shown before `N more games` (DESIGN 12.2). */
 export const RECENT_COUNT = 5;
+
+/** The three settings every game has beyond the opponent (DESIGN 3). */
+export interface GameSettings {
+  readonly size: Size;
+  readonly rules: Rules;
+  /** 0 or 2–9 (2–5 on 9×9). */
+  readonly handicap: number;
+}
+
+/** The rules core's settings (komi from the rules and handicap, DESIGN 8.2). */
+export function settingsOf(s: GameSettings): Settings {
+  return makeSettings(s.size, s.rules, s.handicap);
+}
 
 /** A level as an integer 1–12, or undefined. */
 export function clampLevel(v: unknown): number | undefined {
@@ -51,15 +74,15 @@ export function parseOpponent(v: unknown): Opponent {
   return DEFAULT_OPPONENT;
 }
 
-/** Validates a stored color choice (`zigo:color`). Default random. */
+/** Validates a stored color choice (`zigo:color`): `random`, `B` or `W`. Default random. */
 export function parseColorChoice(v: unknown): ColorChoice {
-  return v === 'w' || v === 'b' ? v : 'random';
+  return v === 'B' || v === 'W' ? v : 'random';
 }
 
-/** Value stored under `zigo:clock` for "clock off". */
+/** Value that means "clock off" in the clock preference. */
 export const CLOCK_OFF = 'off';
 
-/** Validates a stored time control (`zigo:clock`): a normalized `m+s` string, or null for off. */
+/** Validates a time control (`5+7`, `20m5x30`): normalized, or null for off and anything else. */
 export function parseClockPref(v: unknown): TcString | null {
   return typeof v === 'string' ? (normalizeTc(v) ?? null) : null;
 }
@@ -77,11 +100,11 @@ export function opponentOf(g: { mode: Mode; level?: number }): Opponent {
   return { mode: 'computer', level: clampLevel(g.level) ?? DEFAULT_LEVEL };
 }
 
-/** This device's side for a new game: pass-and-play is always white; random flips a coin. */
+/** This device's side for a new game: pass-and-play is always Black (DESIGN 12.1); random flips a coin. */
 export function resolveColor(choice: ColorChoice, mode: Mode, rng: Rng): Color {
-  if (mode === 'local') return 'w';
-  if (choice === 'w' || choice === 'b') return choice;
-  return rng() < 0.5 ? 'w' : 'b';
+  if (mode === 'local') return 'B';
+  if (choice === 'B' || choice === 'W') return choice;
+  return rng() < 0.5 ? 'B' : 'W';
 }
 
 /** A fresh code that no stored game uses yet (as its code or id). */
@@ -98,13 +121,27 @@ export function freshCode(games: readonly SavedGame[], rng: Rng): string {
   return generateCode(rng);
 }
 
+/**
+ * The size a game link means when it has no `n`: the smallest board every move of `moves` fits
+ * on, or `fallback` without moves. Links always carry `n`; this only keeps a hand-cut link usable.
+ */
+export function sizeForMoves(moves: string, fallback: Size): Size {
+  const points = zigo.decodeMoves(moves).filter((p) => !isPass(p));
+  if (points.length === 0) return fallback;
+  let max = 0;
+  for (const p of points) max = Math.max(max, p.charCodeAt(0) - 97, p.charCodeAt(1) - 97);
+  return max < 9 ? 9 : max < 13 ? 13 : 19;
+}
+
+const other = (c: Color): Color => (c === 'B' ? 'W' : 'B');
+
 /* ---------------------------------------------------------------------------------------------- */
 /* Undo / redo rules (DESIGN 4.2, 10.3)                                                             */
 /* ---------------------------------------------------------------------------------------------- */
 
 /**
  * How the undo slot behaves in a mode:
- * - `ply`: pass-and-play, one half-move;
+ * - `ply`: pass-and-play, one move (a stone or a pass) back;
  * - `turn`: against the computer, one full turn (the computer's reply and the player's move);
  * - `request`: in a room, a takeback request (handled by the room controller, not here).
  */
@@ -116,16 +153,17 @@ export function undoRuleFor(mode: Mode): UndoRule {
 
 /** Side to move after `cursor` plies of `g`. */
 export function turnAt(g: Game, cursor: number): Color {
-  return zhess.colorOfPly(g, cursor);
+  return zigo.colorOfPly(g, cursor);
 }
 
 /**
- * Cursor that undo goes back to, or `g.cursor` when there is nothing to undo.
+ * Cursor that undo goes back to, or `g.cursor` when there is nothing to undo. Passes are plies
+ * like stones; undoing the second pass leaves scoring (`lib/zigo.ts`).
  * - `ply`: one back.
  * - `turn` (player `color`): back to the latest earlier position where the player is to move, so
  *   a computer reply and the player's move go together; when the computer is still thinking, only
- *   the player's move. When there is none (the player is black and undoes the first turn), back
- *   to the start, and the computer moves again (DESIGN 10.3).
+ *   the player's move. When there is none (the player undoes the very first turn while the
+ *   computer moved first), back to the start, and the computer moves again (DESIGN 10.3).
  * - `request`: no local undo.
  */
 export function undoTarget(g: Game, rule: UndoRule, color: Color): number {
@@ -160,13 +198,13 @@ export interface GameSession {
   readonly mode: Mode;
   /** Computer level 1–12; computer games only. */
   readonly level?: number;
-  /** This device's side; `w` in pass-and-play. */
+  /** This device's side; `B` in pass-and-play. */
   readonly color: Color;
-  /** Time control, e.g. `5+0`, or null. */
+  /** Time control, e.g. `5+7` or `20m5x30`, or null. */
   readonly tc: TcString | null;
-  /** The live game. Its redo tail beyond `cursor` lives only in this session (DESIGN 12.1). */
+  /** The live game (size, rules, handicap and komi in `game.settings`). Its redo tail beyond `cursor` lives only in this session (DESIGN 12.1). */
   readonly game: Game;
-  /** A hint or an undo was used (DESIGN 7.3). */
+  /** A hint, the territory preview, an undo or the guard was used (DESIGN 7). */
   readonly assisted: boolean;
   readonly createdAt: number;
   /** As it will be saved; moves to `now` on every change, or after 15 s (DESIGN 12.1). */
@@ -187,20 +225,22 @@ export interface NewGameSpec {
   level?: number;
   color: Color;
   tc: TcString | null;
-  /** Start from this game (its plies up to its cursor) instead of the standard start. */
+  /** Size, rules and handicap; ignored when `game` is given (its settings are used). */
+  settings?: GameSettings;
+  /** Start from this game value instead of a new one. */
   game?: Game;
   assisted?: boolean;
 }
 
 /** A brand-new game: saved at once, "last played" now (Zudoku: a new game counts as a change). */
 export function createSession(spec: NewGameSpec, now: number): GameSession {
-  const game = spec.game ?? zhess.newGame();
+  const game = spec.game ?? zigo.newGame(settingsOf(spec.settings ?? { size: DEFAULT_SIZE, rules: 'area', handicap: 0 }));
   return {
     id: spec.code,
     code: spec.code,
     mode: spec.mode,
     ...(spec.mode === 'computer' ? { level: clampLevel(spec.level) ?? DEFAULT_LEVEL } : {}),
-    color: spec.mode === 'local' ? 'w' : spec.color,
+    color: spec.mode === 'local' ? 'B' : spec.color,
     tc: spec.tc,
     game,
     assisted: spec.assisted ?? false,
@@ -212,13 +252,21 @@ export function createSession(spec: NewGameSpec, now: number): GameSession {
   };
 }
 
-/** Rebuilds a stored game. Unreadable tails are cut (lenient), never thrown. */
+/** The settings a stored game was played with (handicap normalized for its size). */
+export function savedSettings(saved: Pick<SavedGame, 'size' | 'rules' | 'handicap'>): GameSettings {
+  return { size: saved.size, rules: saved.rules, handicap: normalizeHandicap(saved.size, saved.handicap) };
+}
+
+/** Rebuilds a stored game, scoring marks and result included. Unreadable tails are cut (lenient), never thrown. */
 export function gameFromSaved(saved: SavedGame): Game {
-  const end: GameEnd | undefined = saved.result && saved.by ? { result: saved.result, by: saved.by } : undefined;
   try {
-    return zhess.fromRecord(saved.moves, saved.ms, end, { lenient: true });
+    return zigo.fromRecord(saved, { lenient: true });
   } catch {
-    return zhess.newGame();
+    try {
+      return zigo.newGame(settingsOf(savedSettings(saved)));
+    } catch {
+      return zigo.newGame(settingsOf({ size: DEFAULT_SIZE, rules: 'area', handicap: 0 }));
+    }
   }
 }
 
@@ -229,7 +277,8 @@ export function isFinished(saved: SavedGame): boolean {
 
 /**
  * Opens a stored game: unfinished games resume (redo empty, "last played" untouched until a change
- * or 15 s), finished games open in review at their last position.
+ * or 15 s), also in the scoring phase with their marks; finished games open in review at their
+ * last position.
  */
 export function sessionFromSaved(saved: SavedGame, now: number): GameSession {
   const game = gameFromSaved(saved);
@@ -238,7 +287,7 @@ export function sessionFromSaved(saved: SavedGame, now: number): GameSession {
     code: saved.code,
     mode: saved.mode,
     ...(saved.mode === 'computer' ? { level: clampLevel(saved.level) ?? DEFAULT_LEVEL } : {}),
-    color: saved.mode === 'local' ? 'w' : saved.color,
+    color: saved.mode === 'local' ? 'B' : saved.color,
     tc: saved.tc ?? null,
     game,
     assisted: !!saved.assisted,
@@ -251,26 +300,32 @@ export function sessionFromSaved(saved: SavedGame, now: number): GameSession {
   };
 }
 
-/** The stored form of a session. Only the plies up to the cursor are kept (redo is session-only). */
+/**
+ * The stored form of a session (DESIGN 12.1). Only the plies up to the cursor are kept (redo is
+ * session-only). The scoring state is kept during and after scoring, so a reload returns to the
+ * same marks (DESIGN 8.4).
+ */
 export function toSavedGame(s: GameSession): SavedGame {
-  const plies = s.game.plies.slice(0, s.game.cursor);
+  const g = s.game;
+  const plies = g.plies.slice(0, g.cursor);
   const out: SavedGame = {
     id: s.id,
     code: s.code,
     mode: s.mode,
     color: s.color,
+    size: g.settings.size,
+    rules: g.settings.rules,
+    handicap: g.settings.handicap,
     tc: s.tc,
-    moves: zhess.encodeMoves(plies),
+    moves: zigo.encodeMoves(plies),
     ms: plies.map((p) => p.ms),
     assisted: s.assisted,
     createdAt: s.createdAt,
     lastPlayedAt: s.lastPlayedAt,
   };
   if (s.mode === 'computer') out.level = s.level ?? DEFAULT_LEVEL;
-  if (s.game.end) {
-    out.result = s.game.end.result;
-    out.by = s.game.end.by;
-  }
+  if (g.scoring) out.scoring = { round: g.scoring.round, rev: g.scoring.rev, dead: [...g.scoring.dead], accepted: [g.scoring.accepted[0], g.scoring.accepted[1]] };
+  if (g.end) out.result = { ...g.end.result };
   if (s.room) out.room = s.room;
   return out;
 }
@@ -280,44 +335,57 @@ function changed(s: GameSession, game: Game, now: number, extra: Partial<GameSes
   return { ...s, ...extra, game, lastPlayedAt: now, touched: true };
 }
 
-/** Whether moves can be played on the board right now (live, not over, not a room). */
+/** Whether the board of the session is live and open (not reviewed, not over, not a room). Moves also need `!game.scoring`. */
 export function canPlay(s: GameSession | null): s is GameSession {
   return !!s && s.review === null && !s.game.end && s.mode !== 'room';
 }
 
+/** True while the live solo game is in the scoring phase (DESIGN 8.4). */
+export function isScoring(s: GameSession | null): s is GameSession {
+  return !!s && !!s.game.scoring && !s.game.end && s.mode !== 'room';
+}
+
 /**
- * Whether the solo game is running: not over, not a room. Unlike `canPlay` this ignores review: a
- * move-list jump in a live game does not stop its clock or the computer (DESIGN 11: solo clocks
- * pause only when the tab is hidden or on Back).
+ * Whether the solo game's clock runs: not over, not scoring (clocks stop, DESIGN 8.4), not a room.
+ * Unlike `canPlay` this ignores review: a move-list jump in a live game does not stop its clock or
+ * the computer (DESIGN 11: solo clocks pause only when the tab is hidden or on Back).
  */
 export function isRunning(s: GameSession | null): s is GameSession {
-  return !!s && !s.game.end && s.mode !== 'room';
+  return !!s && !s.game.end && !s.game.scoring && s.mode !== 'room';
 }
 
 /** The computer is to move in a running game against it (it moves on while the player reviews). */
-function computerToMove(s: GameSession): boolean {
+export function computerToMove(s: GameSession): boolean {
   return isRunning(s) && s.mode === 'computer' && s.game.turn !== s.color;
 }
 
 /**
- * Plays `uci` with `ms` used. Null if the move is illegal or the board is not playable. The
- * computer's move also lands while the player looks back through the moves (review stays put).
+ * Plays `p` (two SGF letters; `tt` passes) with `ms` used. Null if the move is illegal or the board
+ * is not playable. The computer's move also lands while the player looks back through the moves
+ * (review stays put).
  */
-export function applyMove(s: GameSession, uci: string, ms: number, now: number): GameSession | null {
+export function applyMove(s: GameSession, p: Point, ms: number, now: number): GameSession | null {
+  if (s.game.scoring) return null;
   if (!canPlay(s) && !computerToMove(s)) return null;
+  if (!zigo.isLegal(s.game, p)) return null;
   try {
-    return changed(s, zhess.play(s.game, uci, ms), now);
+    return changed(s, zigo.play(s.game, p, ms), now);
   } catch {
     return null;
   }
 }
 
-/** Undo per the mode's rule. Marks the game `assisted` (DESIGN 7.3). Null if nothing to undo. */
+/** A pass (DESIGN 6.2). The second consecutive pass enters scoring. */
+export function applyPass(s: GameSession, ms: number, now: number): GameSession | null {
+  return applyMove(s, PASS, ms, now);
+}
+
+/** Undo per the mode's rule, across passes and out of scoring. Marks the game `assisted` (DESIGN 7). Null if nothing to undo. */
 export function applyUndo(s: GameSession, now: number): GameSession | null {
-  if (s.review !== null || s.mode === 'room') return null;
+  if (s.review !== null || s.mode === 'room' || s.game.end) return null;
   const target = undoTarget(s.game, undoRuleFor(s.mode), s.color);
   if (target >= s.game.cursor) return null;
-  return changed(s, zhess.undo(s.game, s.game.cursor - target), now, { assisted: true });
+  return changed(s, zigo.undo(s.game, s.game.cursor - target), now, { assisted: true });
 }
 
 /** Redo per the mode's rule. Null if there is no redo tail. */
@@ -325,40 +393,69 @@ export function applyRedo(s: GameSession, now: number): GameSession | null {
   if (s.review !== null || s.mode === 'room' || s.game.end) return null;
   const target = redoTarget(s.game, undoRuleFor(s.mode), s.color);
   if (target <= s.game.cursor) return null;
-  return changed(s, zhess.redo(s.game, target - s.game.cursor), now);
+  return changed(s, zigo.redo(s.game, target - s.game.cursor), now);
+}
+
+/** The game cut back to its first `n` plies, with no redo tail (marks of a later scoring are gone). */
+function truncate(g: Game, n: number): Game {
+  if (n >= g.plies.length && !g.end) return g;
+  return zigo.replay(g.settings, g.plies.slice(0, n));
 }
 
 /**
- * Resignation. Against the computer the player resigns; in pass-and-play the side to move does.
- * Null if the game is over, in review, or a room game (the room controller resigns there).
+ * The 5-second undo toast of a pass (DESIGN 6.2), in solo modes: takes back the player's latest
+ * pass as if it had not happened. In pass-and-play the last ply must be a pass; against the computer
+ * the latest pass of the player's color, with only computer plies after it. Everything from that
+ * pass on is dropped (no redo tail), an ending caused by it (round 2 is scored at once) is lifted,
+ * and the game is not marked assisted (it is a correction, like the resign toast). Null if there is
+ * no such pass.
+ */
+export function applyUndoPass(s: GameSession, now: number): GameSession | null {
+  if (s.mode === 'room' || s.review !== null) return null;
+  const g = s.game;
+  // Only an ending the pass caused: a round-2 double pass is scored at once. An Accept is final.
+  if (g.end && (g.end.result.by !== 'score' || g.scoring?.round !== 2)) return null;
+  let i = g.cursor - 1;
+  if (s.mode === 'computer') {
+    while (i >= 0 && turnAt(g, i) !== s.color) i--;
+  }
+  if (i < 0 || !isPass(g.plies[i].m)) return null;
+  return changed(s, truncate(g, i), now, { review: null });
+}
+
+/**
+ * Resignation (DESIGN 8.3). Against the computer the player resigns; in pass-and-play the side to
+ * move does. Null if the game is over, in review, in scoring, or a room game (the room controller
+ * resigns there).
  */
 export function applyResign(s: GameSession, now: number): GameSession | null {
-  if (!canPlay(s)) return null;
+  if (!canPlay(s) || s.game.scoring) return null;
   const loser: Color = s.mode === 'local' ? s.game.turn : s.color;
-  return changed(s, zhess.end(s.game, loser === 'w' ? '0-1' : '1-0', 'resign'), now);
+  return changed(s, zigo.end(s.game, { winner: other(loser), by: 'resign' }), now);
 }
 
-/** Ends the game with any result (agreed draw, a time-out decided elsewhere). */
-export function applyEnd(s: GameSession, end: GameEnd, now: number): GameSession | null {
-  if (!canPlay(s)) return null;
-  return changed(s, zhess.end(s.game, end.result, end.by), now);
+/** Ends the game with a result decided elsewhere (the computer resigning, DESIGN 10.4). */
+export function applyEnd(s: GameSession, result: Result, now: number): GameSession | null {
+  if (s.mode === 'room' || s.game.end) return null;
+  return changed(s, zigo.end(s.game, result), now);
 }
 
 /**
- * `flagged` ran out of time: a loss, or a draw when the other side cannot mate (DESIGN 8.2). The
- * clock runs on in review, so a flag can fall there too.
+ * `flagged` ran out of time (DESIGN 8.3): the other side wins on time. The clock runs on in review,
+ * so a flag can fall there too; it never falls during scoring (clocks stop).
  */
 export function applyTimeout(s: GameSession, flagged: Color, now: number): GameSession | null {
   if (!isRunning(s)) return null;
-  return changed(s, zhess.timeout(s.game, flagged), now);
+  return changed(s, zigo.end(s.game, { winner: other(flagged), by: 'time' }), now);
 }
 
-/** Takes back a manual ending (the 5-second resign undo toast). Null if there is none. */
+/**
+ * Takes back a resignation or a time-out (the 5-second undo toast). A scored ending is final: an
+ * Accept cannot be reopened (Resume exists before it). Null if there is nothing to reopen.
+ */
 export function applyReopen(s: GameSession, now: number): GameSession | null {
-  if (s.mode === 'room' || !s.game.end) return null;
-  const game = zhess.reopen(s.game);
-  if (game === s.game) return null;
-  return changed(s, game, now, { review: null });
+  if (s.mode === 'room' || !s.game.end || s.game.end.result.by === 'score') return null;
+  return changed(s, zigo.reopen(s.game), now, { review: null });
 }
 
 /** The 15-second rule: the session now counts as played. */
@@ -367,9 +464,81 @@ export function applyTouch(s: GameSession, now: number): GameSession {
   return { ...s, lastPlayedAt: now, touched: true };
 }
 
-/** Marks the game as assisted (hint used). */
+/** Marks the game as assisted (hint, territory preview, guard). */
 export function applyAssisted(s: GameSession): GameSession {
   return s.assisted ? s : { ...s, assisted: true };
+}
+
+/* ---------------------------------------------------------------------------------------------- */
+/* Scoring (DESIGN 8.4)                                                                             */
+/* ---------------------------------------------------------------------------------------------- */
+
+/** New marks for a live scoring phase: `rev` up by one, both acceptances cleared. */
+function withMarks(g: Game, dead: readonly Point[]): Game {
+  const sc = g.scoring as Scoring;
+  return zigo.setScoring(g, { round: sc.round, rev: sc.rev + 1, dead: [...dead], accepted: [0, 0] });
+}
+
+/** Toggles the whole group at `p` between alive and dead (DESIGN 8.4 step 2). Null if not scoring or `p` is empty. */
+export function applyToggle(s: GameSession, p: Point, now: number): GameSession | null {
+  if (!isScoring(s) || s.review !== null) return null;
+  const g = s.game;
+  if (zigo.groupAt(g, p).length === 0) return null;
+  const dead = scoringApi.toggle(g, (g.scoring as Scoring).dead, p);
+  return changed(s, withMarks(g, dead), now);
+}
+
+/** Replaces the marks with a dead set (the engine's proposal, M2). Null if not scoring. */
+export function applyMarks(s: GameSession, dead: readonly Point[], now: number): GameSession | null {
+  if (!isScoring(s)) return null;
+  const g = s.game;
+  // Only stones count; the set is sorted and de-duplicated by `setScoring`.
+  const stones = dead.filter((p) => zigo.groupAt(g, p).length > 0);
+  return changed(s, withMarks(g, stones), now);
+}
+
+/** The result of the current marking: `scoring.result` of `scoring.score` (DESIGN 8.4). */
+export function scoredResult(g: Game, dead: readonly Point[]): Result {
+  return scoringApi.result(g, scoringApi.score(g, dead));
+}
+
+/**
+ * Ends a game in scoring with `dead` as the agreed marking: the marks are stored with the result,
+ * so review and history show them (DESIGN 12.3). Null if not scoring.
+ */
+export function applyScoreEnd(s: GameSession, dead: readonly Point[], now: number): GameSession | null {
+  if (!isScoring(s)) return null;
+  const sc = s.game.scoring as Scoring;
+  const same = dead.length === sc.dead.length && [...dead].sort().every((p, i) => p === sc.dead[i]);
+  const marked = same ? s.game : (applyMarks(s, dead, now)?.game ?? s.game);
+  return changed(s, zigo.end(marked, scoredResult(marked, (marked.scoring as Scoring).dead)), now, { review: null });
+}
+
+/**
+ * Accept (DESIGN 8.4 step 4). Without `side` (computer, side-by-side pass-and-play) the game ends
+ * at once with the marking as shown. With `side` (face-to-face pass-and-play: each player has an
+ * Accept) that side's acceptance of the current `rev` is recorded, and the game ends when both
+ * sides have accepted the same `rev`. `rev` 0 means "never marked", which `accepted` cannot tell
+ * from "not accepted", so the first Accept of an unmarked board moves `rev` to 1 (marks unchanged).
+ */
+export function applyAccept(s: GameSession, side: Color | null, now: number): GameSession | null {
+  if (!isScoring(s) || s.review !== null) return null;
+  const sc = s.game.scoring as Scoring;
+  if (side === null) return applyScoreEnd(s, sc.dead, now);
+  const rev = Math.max(1, sc.rev);
+  const idx = side === 'B' ? 0 : 1;
+  const accepted: [number, number] = [sc.accepted[0], sc.accepted[1]];
+  accepted[idx] = rev;
+  const game = zigo.setScoring(s.game, { round: sc.round, rev, dead: [...sc.dead], accepted });
+  const next = changed(s, game, now);
+  if (accepted[0] === rev && accepted[1] === rev) return applyScoreEnd(next, sc.dead, now);
+  return next;
+}
+
+/** Resume (DESIGN 8.4 step 5): back to play with the player to move; the next scoring is round 2. */
+export function applyResume(s: GameSession, now: number): GameSession | null {
+  if (!isScoring(s) || s.review !== null) return null;
+  return changed(s, zigo.resume(s.game), now);
 }
 
 /* ---------------------------------------------------------------------------------------------- */
@@ -394,14 +563,15 @@ export function applyGoto(s: GameSession, cursor: number): GameSession {
 
 /** The game value the board shows: the review position, or the live game. */
 export function viewOf(s: GameSession): Game {
-  return s.review === null ? s.game : zhess.goto(s.game, s.review);
+  return s.review === null ? s.game : zigo.goto(s.game, s.review);
 }
 
 /**
- * "Continue from here" (DESIGN 12.3): a new game from the shown position with a new code. Its
- * moves are the shown game's plies up to that position (so history and thumbnails work without a
- * start FEN), with times zeroed because clock times are not carried. Null if the shown position
- * is already over.
+ * "Continue from here" (DESIGN 12.3): a new solo game from the shown position with a new code, at
+ * the same size, rules and handicap. Its moves are the shown game's plies up to that position,
+ * replayed from a new game of the same settings (so history, thumbnails, links and SGF need no
+ * set-up position), with times zeroed because clock times are not carried. A position right after
+ * two passes continues in scoring (Resume plays on). Null if the plies cannot be replayed.
  */
 export function continueSpec(
   view: Game,
@@ -412,21 +582,42 @@ export function continueSpec(
   const plies: Ply[] = view.plies.slice(0, view.cursor).map((p) => ({ m: p.m, ms: 0 }));
   let game: Game;
   try {
-    game = zhess.replay(plies, view.start);
+    game = zigo.replay(view.settings, plies);
   } catch {
     return null;
   }
-  if (game.end) return null;
   const mode: Mode = solo.mode === 'computer' ? 'computer' : 'local';
   return {
     code,
     mode,
     level: solo.mode === 'computer' ? solo.level : undefined,
     // Against the computer the player takes over the side to move.
-    color: mode === 'local' ? 'w' : game.turn,
+    color: mode === 'local' ? 'B' : game.turn,
     tc,
     game,
   };
+}
+
+/* ---------------------------------------------------------------------------------------------- */
+/* SGF export (DESIGN 13.3)                                                                         */
+/* ---------------------------------------------------------------------------------------------- */
+
+/**
+ * `Copy SGF` for a session: the whole game (`zigo.sgf`), with `PB`/`PW` naming the computer
+ * (`Zigo Level 5`) against the computer, the date the game was created, and the time control.
+ */
+export function sgfOf(s: GameSession, version: string): string {
+  const level = s.mode === 'computer' ? `Zigo Level ${s.level ?? DEFAULT_LEVEL}` : undefined;
+  const d = new Date(s.createdAt);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const date = Number.isFinite(d.getTime()) ? `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` : undefined;
+  return zigo.sgf(s.game, {
+    version,
+    black: level && s.color === 'W' ? level : undefined,
+    white: level && s.color === 'B' ? level : undefined,
+    date,
+    tc: s.tc,
+  });
 }
 
 /* ---------------------------------------------------------------------------------------------- */
@@ -438,7 +629,7 @@ export type StartLabel = 'start' | 'resume' | 'review';
 export interface StartPill {
   /** `start` (new code or room), `resume` (unfinished local game), `review` (finished local game). */
   readonly label: StartLabel;
-  /** The stored game the code refers to; its settings are what the dimmed selectors show. */
+  /** The stored game the code refers to; its settings (opponent, color, size, rules, handicap, clock) are what the dimmed selectors show. */
   readonly saved: SavedGame | null;
 }
 

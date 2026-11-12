@@ -6,6 +6,7 @@ import {
   createGoStore,
   createStore,
   isGoSavedGame,
+  isSavedGame,
   memoryStorage,
   readClock,
   readColorChoice,
@@ -15,28 +16,36 @@ import {
   readSize,
   store as defaultStore,
   writeClock,
+  writeColorChoice,
   writeEngineBackend,
   writeHandicap,
   writeRules,
   writeSize,
 } from './storage';
-import type { Room, SavedGame } from './chessTypes';
-import type { SavedGame as GoSavedGame } from './types';
+import type { Room, SavedGame } from './types';
 
 function game(id: string, lastPlayedAt: number, extra: Partial<SavedGame> = {}): SavedGame {
   return {
     id,
     code: id.split('.')[0],
     mode: 'local',
-    color: 'w',
+    color: 'B',
+    size: 9,
+    rules: 'area',
+    handicap: 0,
     tc: null,
-    moves: 'Mc',
+    moves: 'ee',
     ms: [1000],
     assisted: false,
     createdAt: lastPlayedAt,
     lastPlayedAt,
     ...extra,
   };
+}
+
+/** A game as an older build stored it (lowercase colors, no Go settings). */
+function oldGame(id: string, lastPlayedAt: number): Record<string, unknown> {
+  return { id, code: id, mode: 'local', color: 'w', tc: null, moves: 'Mc', ms: [1000], assisted: false, createdAt: 1, lastPlayedAt };
 }
 
 function room(code: string): Room {
@@ -63,11 +72,11 @@ describe('storage', () => {
     s.saveGame(game('B', 3));
     s.saveGame(game('C', 2));
     expect(s.games().map((g) => g.id)).toEqual(['B', 'C', 'A']);
-    s.saveGame(game('A', 4, { moves: 'McUk' }));
+    s.saveGame(game('A', 4, { moves: 'eecc' }));
     expect(s.games().map((g) => g.id)).toEqual(['A', 'B', 'C']);
-    expect(s.games()[0].moves).toBe('McUk');
+    expect(s.games()[0].moves).toBe('eecc');
     // Saving without bumping lastPlayedAt (the 15 s rule) does not reorder.
-    s.saveGame(game('C', 2, { moves: 'Mc' }));
+    s.saveGame(game('C', 2, { moves: 'ee' }));
     expect(s.games().map((g) => g.id)).toEqual(['A', 'B', 'C']);
     for (let i = 0; i < 120; i++) s.saveGame(game(`G${i}`, 100 + i));
     const all = s.games();
@@ -140,7 +149,7 @@ describe('storage', () => {
     expect(s.rooms()).toEqual([]);
     const mixed = createStore(
       memoryStorage({
-        'zigo:games': JSON.stringify([game('OK', 1), { id: 'broken' }, null, 7]),
+        'zigo:games': JSON.stringify([game('OK', 1), { id: 'broken' }, oldGame('OLD', 2), null, 7]),
         'zigo:rooms': JSON.stringify([room('R1'), { code: 'R2' }]),
       }),
     );
@@ -182,9 +191,11 @@ describe('storage', () => {
     const mem = memoryStorage();
     Object.defineProperty(globalThis, 'localStorage', { value: mem, configurable: true, writable: true });
     try {
-      defaultStore.setPref('color', 'b');
-      expect(mem.getItem('zigo:color')).toBe('"b"');
-      expect(defaultStore.pref('color', 'random')).toBe('b');
+      defaultStore.setPref('color', 'B');
+      expect(mem.getItem('zigo:color')).toBe('"B"');
+      expect(defaultStore.pref('color', 'random')).toBe('B');
+      defaultStore.saveGame(game('LS0001', 1));
+      expect(defaultStore.games().map((g) => g.id)).toEqual(['LS0001']);
     } finally {
       if (original) Object.defineProperty(globalThis, 'localStorage', original);
       else delete (globalThis as { localStorage?: unknown }).localStorage;
@@ -193,24 +204,8 @@ describe('storage', () => {
 });
 
 describe('Go store and preferences (DESIGN 12.1, 13.1)', () => {
-  function goGame(id: string, lastPlayedAt: number, extra: Partial<GoSavedGame> = {}): GoSavedGame {
-    return {
-      id,
-      code: id.split('.')[0],
-      mode: 'local',
-      color: 'B',
-      size: 9,
-      rules: 'area',
-      handicap: 0,
-      tc: null,
-      moves: 'eecc',
-      ms: [1000, 900],
-      assisted: false,
-      createdAt: lastPlayedAt,
-      lastPlayedAt,
-      ...extra,
-    };
-  }
+  const goGame = (id: string, lastPlayedAt: number, extra: Partial<SavedGame> = {}): SavedGame =>
+    game(id, lastPlayedAt, { moves: 'eecc', ms: [1000, 900], ...extra });
 
   it('lists the new keys', () => {
     expect(KEYS.size).toBe('size');
@@ -232,13 +227,30 @@ describe('Go store and preferences (DESIGN 12.1, 13.1)', () => {
     expect(s.deleteGame('G109')?.id).toBe('G109');
   });
 
-  it('drops stored games that are not Go games', () => {
+  it('drops stored games that are not Go games, or carry a malformed result or scoring', () => {
     const mem = memoryStorage({
-      'zigo:games': JSON.stringify([goGame('OK', 1), game('CHESS', 2), { ...goGame('BAD', 3), size: 7 }, null]),
+      'zigo:games': JSON.stringify([
+        goGame('OK', 1),
+        oldGame('OLD', 2),
+        { ...goGame('BAD', 3), size: 7 },
+        { ...goGame('RES', 4), result: '1-0' },
+        { ...goGame('SCO', 5), scoring: { round: 3, rev: 0, dead: [], accepted: [0, 0] } },
+        null,
+      ]),
     });
     expect(createGoStore(mem).games().map((g) => g.id)).toEqual(['OK']);
+    expect(createStore(mem).games().map((g) => g.id)).toEqual(['OK']);
     expect(isGoSavedGame(goGame('X', 1))).toBe(true);
-    expect(isGoSavedGame({ ...goGame('X', 1), rules: 'chinese' })).toBe(false);
+    expect(isSavedGame({ ...goGame('X', 1), rules: 'chinese' })).toBe(false);
+    expect(isSavedGame(goGame('X', 1, { result: { winner: 'W', by: 'resign' } }))).toBe(true);
+  });
+
+  it('reads and writes the color pill', () => {
+    const s = createStore(memoryStorage());
+    writeColorChoice(s, 'W');
+    expect(readColorChoice(s)).toBe('W');
+    writeColorChoice(s, 'random');
+    expect(readColorChoice(s)).toBe('random');
   });
 
   it('reads and writes size, rules, handicap per size, clock per size and the engine backend', () => {
@@ -282,7 +294,7 @@ describe('Go store and preferences (DESIGN 12.1, 13.1)', () => {
     expect(mem.getItem('zigo:engine-backend')).toBeNull();
   });
 
-  it('falls back on corrupt or chess-era preference values', () => {
+  it('falls back on corrupt or older preference values', () => {
     const s = createGoStore(
       memoryStorage({
         'zigo:size': '"13"',

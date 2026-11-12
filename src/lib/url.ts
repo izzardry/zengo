@@ -12,25 +12,25 @@
  * | `d`   | computer level 1–12                                  |
  * | `p`   | `1` = playing                                        |
  * | `o`   | opponent: `c` computer, `l` local, `r` room          |
- * | `w`   | this side: `w` or `b`                                |
- * | `t`   | time control, e.g. `5+0`; Go also `20m5x30`          |
- * | `n`   | board size: `9`, `13`, `19` (Go, package 0b)         |
+ * | `w`   | this side: `B` or `W`                                |
+ * | `t`   | time control, e.g. `5+7` or `20m5x30`                |
+ * | `n`   | board size: `9`, `13`, `19`                          |
  * | `g`   | rules: `a` area (default, omitted), `t` territory    |
  * | `h`   | handicap stones: 0 or 2–9 (2–5 on 9×9)               |
  * | `m`   | moves (compact encoding, DESIGN 13.2)                |
- * | `r`   | result of a finished game, e.g. `1-0.resign` (addition, see below) |
+ * | `r`   | result of a finished game, e.g. `B+4.5`, `W+R` (see below) |
  * | `x`,`y` | manual signalling offer and answer (transient, reserved) |
  *
- * `r` is an addition to the design's table: a game ended by resignation, time or agreement cannot
- * be told apart from a running one by its moves, yet a shared finished game must open in review.
- * Values: `1-0.<by>`, `0-1.<by>`, `draw.<by>` with `by` a `Termination`.
+ * `r` carries the result of a finished game, so a shared finished game opens in review. It is
+ * written as SGF writes `RE` (`formatResult` in `lib/zigo.ts`): `B+4.5` (by score, the margin),
+ * `W+R` (resignation), `B+T` (time). The `+` is percent-encoded in the query; a raw `+` that
+ * arrives decoded as a space is accepted too.
  */
 import { useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { isValidCode, normalizeCode } from './codes';
-import type { Color, GameEnd, Mode, Result, TcString, Termination } from './chessTypes';
-import type { Rules, Size } from './types';
-import { formatTc, maxHandicap, parseTc } from './zigo';
+import type { Color, Mode, Result, Rules, Size, TcString } from './types';
+import { formatResult, formatTc, maxHandicap, parseTc } from './zigo';
 
 /** Parsed query parameters. Absent or invalid values are `undefined`. */
 export interface UrlParams {
@@ -42,9 +42,9 @@ export interface UrlParams {
   playing?: boolean;
   /** `o`: opponent mode. */
   mode?: Mode;
-  /** `w`: this device's side (in game), or the color pill's fixed choice (start screen). */
+  /** `w`: this device's side (in game), or the color pill's fixed choice (start screen). `B` or `W`. */
   color?: Color;
-  /** `t`: time control in its normalized text form, e.g. `5+0`. Absent = clock off. */
+  /** `t`: time control in its normalized text form, e.g. `5+7`, `20m5x30`. Absent = clock off. */
   tc?: TcString;
   /** `n`: board size. */
   size?: Size;
@@ -54,8 +54,8 @@ export interface UrlParams {
   handicap?: number;
   /** `m`: compact move list (DESIGN 13.2). Never written for room games. */
   moves?: string;
-  /** `r`: the ending of a finished game. */
-  end?: GameEnd;
+  /** `r`: the result of a finished game. */
+  result?: Result;
   /** `x`: manual signalling offer (transient; owned by the room UI). */
   offer?: string;
   /** `y`: manual signalling answer (transient; owned by the room UI). */
@@ -68,35 +68,24 @@ export const PARAM_ORDER = ['s', 'd', 'p', 'o', 'w', 't', 'n', 'g', 'h', 'm', 'r
 const MODE_TO_PARAM: Record<Mode, string> = { computer: 'c', local: 'l', room: 'r' };
 const PARAM_TO_MODE: Record<string, Mode> = { c: 'computer', l: 'local', r: 'room' };
 
-const TERMINATIONS: readonly Termination[] = [
-  'mate',
-  'resign',
-  'time',
-  'stalemate',
-  'repetition',
-  'fifty',
-  'material',
-  'agreed',
-];
+/** Characters of the move encoding: SGF letters `a`–`s` and `t` (pass `tt`); decoded leniently. */
+const MOVES_RE = /^[a-t]*$/;
 
-/** Characters of the move encoding: base64url plus `.` for promotions. */
-const MOVES_RE = /^[A-Za-z0-9_.-]*$/;
-
-/** `1-0.resign` ← `{ result: '1-0', by: 'resign' }`. */
-export function formatEnd(end: GameEnd): string {
-  const r = end.result === '1/2-1/2' ? 'draw' : end.result;
-  return `${r}.${end.by}`;
+/** `B+4.5` ← `{ winner: 'B', by: 'score', margin: 9 }`; `W+R`, `B+T`. Same as SGF's `RE`. */
+export function formatEnd(r: Result): string {
+  return formatResult(r);
 }
 
-/** Inverse of `formatEnd`; undefined for anything else. */
-export function parseEnd(s: string | null | undefined): GameEnd | undefined {
+/** Inverse of `formatEnd` (case-insensitive; a space for the `+`); undefined for anything else. */
+export function parseEnd(s: string | null | undefined): Result | undefined {
   if (!s) return undefined;
-  const m = /^(1-0|0-1|draw)\.([a-z]+)$/.exec(s.trim());
+  const m = /^([BW])[+ ](R|T|\d{1,3}(?:\.[05])?)$/i.exec(s.trim());
   if (!m) return undefined;
-  const by = m[2] as Termination;
-  if (!TERMINATIONS.includes(by)) return undefined;
-  const result: Result = m[1] === 'draw' ? '1/2-1/2' : (m[1] as Result);
-  return { result, by };
+  const winner = m[1].toUpperCase() as Color;
+  const v = m[2].toUpperCase();
+  if (v === 'R') return { winner, by: 'resign' };
+  if (v === 'T') return { winner, by: 'time' };
+  return { winner, by: 'score', margin: Math.round(Number(v) * 2) };
 }
 
 /** Normalizes a time-control string (Fischer `5+0`, `15+10`, or byo-yomi `20m5x30`); undefined if it is not one. */
@@ -127,8 +116,8 @@ export function parseUrl(search: URLSearchParams | string): UrlParams {
   const o = q.get('o');
   if (o !== null && PARAM_TO_MODE[o.trim().toLowerCase()]) out.mode = PARAM_TO_MODE[o.trim().toLowerCase()];
 
-  const w = q.get('w');
-  if (w === 'w' || w === 'b') out.color = w;
+  const w = q.get('w')?.trim().toUpperCase();
+  if (w === 'B' || w === 'W') out.color = w;
 
   const tc = normalizeTc(q.get('t'));
   if (tc) out.tc = tc;
@@ -149,8 +138,8 @@ export function parseUrl(search: URLSearchParams | string): UrlParams {
   const m = q.get('m');
   if (m !== null && MOVES_RE.test(m)) out.moves = m;
 
-  const end = parseEnd(q.get('r'));
-  if (end) out.end = end;
+  const result = parseEnd(q.get('r'));
+  if (result) out.result = result;
 
   const x = q.get('x');
   if (x) out.offer = x;
@@ -177,7 +166,7 @@ export function serializeUrl(p: UrlParams): URLSearchParams {
   if (p.handicap) q.set('h', String(p.handicap));
   // Room games never carry their moves (DESIGN 13.2).
   if (p.moves !== undefined && p.mode !== 'room') q.set('m', p.moves);
-  if (p.end && p.mode !== 'room') q.set('r', formatEnd(p.end));
+  if (p.result && p.mode !== 'room') q.set('r', formatEnd(p.result));
   if (p.offer) q.set('x', p.offer);
   if (p.answer) q.set('y', p.answer);
   return q;
@@ -215,14 +204,13 @@ export interface ShareableGame {
   level?: number;
   color: Color;
   tc: TcString | null;
-  /** Go settings (DESIGN 12.1); written as `n`, `g`, `h` when present. */
+  /** Go settings (DESIGN 12.1); written as `n`, `g`, `h` (area and handicap 0 are left out). */
   size?: Size;
   rules?: Rules;
   handicap?: number;
   /** Compact move list. */
   moves: string;
   result?: Result;
-  by?: Termination;
 }
 
 /** Room invite: `?s=<CODE>&o=r` and nothing else, never moves or the key (DESIGN 13.2). */
@@ -231,9 +219,10 @@ export function roomShareUrl(code: string, base?: string): string {
 }
 
 /**
- * A solo game, running or finished: the full state (code, level, side, clock, moves, and the
- * ending of a finished game) so the receiver gets it as a new game on their device. A finished
- * game opens in review. Clock times are not carried (the per-ply ms stay home).
+ * A solo game, running or finished: the full state (code, level, side, clock, size, rules,
+ * handicap, moves, and the result of a finished game) so the receiver gets it as a new game on
+ * their device. A finished game opens in review. Clock times and dead-stone marks are not carried
+ * (the per-ply ms and the scoring state stay home).
  */
 export function soloShareUrl(g: ShareableGame, base?: string): string {
   return buildUrl(gameParams(g), base);
@@ -249,7 +238,6 @@ export function shareUrl(g: ShareableGame, base?: string): string {
 
 /** The address-bar parameters of an open game. Room games get no `m` and no `r`. */
 export function gameParams(g: ShareableGame): UrlParams {
-  const end: GameEnd | undefined = g.result && g.by ? { result: g.result, by: g.by } : undefined;
   return {
     code: g.code,
     level: g.mode === 'computer' ? g.level : undefined,
@@ -261,7 +249,7 @@ export function gameParams(g: ShareableGame): UrlParams {
     rules: g.rules,
     handicap: g.handicap,
     moves: g.mode === 'room' ? undefined : g.moves,
-    end: g.mode === 'room' ? undefined : end,
+    result: g.mode === 'room' ? undefined : g.result,
   };
 }
 

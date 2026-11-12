@@ -3,7 +3,7 @@ import { createElement, type ReactNode } from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createStore, memoryStorage } from '@/lib/storage';
-import type { SavedGame, Store } from '@/lib/chessTypes';
+import type { SavedGame, Store } from '@/lib/types';
 import { useGameState } from './useGameState';
 import { useSavedGames } from './useSavedGames';
 
@@ -16,7 +16,10 @@ function game(id: string, lastPlayedAt: number, extra: Partial<SavedGame> = {}):
     id,
     code: id,
     mode: 'local',
-    color: 'w',
+    color: 'B',
+    size: 9,
+    rules: 'area',
+    handicap: 0,
     tc: null,
     moves: '',
     ms: [],
@@ -79,7 +82,7 @@ describe('useSavedGames', () => {
     expect(result.current.list.games).toHaveLength(0);
     act(() => void result.current.gs.start());
     expect(result.current.list.games.map((g) => g.id)).toEqual(['LIVE01']);
-    act(() => void result.current.gs.move('e2e4', 5));
+    act(() => void result.current.gs.play('ee', 5));
     expect(result.current.list.games[0].ms).toEqual([5]);
 
     // Deleting from the list updates the Start pill of the game state.
@@ -100,7 +103,7 @@ describe('useSavedGames', () => {
   it('deleting a room game removes the room record too; undo puts both back (DESIGN 9.5)', () => {
     const room = { code: 'RM0001', key: 'k'.repeat(22), seat: 1 as const, createdAt: NOW, lastSeenAt: NOW, score: [2, 0] as [number, number], games: ['RM0001.1', 'RM0001.2'] };
     store.saveRoom(room);
-    store.saveGame(game('RM0001.1', NOW - 2, { code: 'RM0001', mode: 'room', result: '1-0', by: 'resign', room: { n: 1, epoch: 0 } }));
+    store.saveGame(game('RM0001.1', NOW - 2, { code: 'RM0001', mode: 'room', result: { winner: 'B', by: 'resign' }, room: { n: 1, epoch: 0 } }));
     store.saveGame(game('RM0001.2', NOW - 1, { code: 'RM0001', mode: 'room', room: { n: 2, epoch: 0 } }));
     const { result } = renderHook(() => useSavedGames({ store }));
     expect(result.current.rooms).toEqual([room]);
@@ -124,7 +127,7 @@ describe('useSavedGames', () => {
   it('undoing any game deleted from a room brings its record back, not only the first one deleted', () => {
     const room = { code: 'RM0003', key: 'c'.repeat(22), seat: 0 as const, createdAt: NOW, lastSeenAt: NOW, score: [2, 0] as [number, number], games: ['RM0003.1', 'RM0003.2'] };
     store.saveRoom(room);
-    store.saveGame(game('RM0003.1', NOW - 2, { code: 'RM0003', mode: 'room', result: '1-0', by: 'resign', room: { n: 1, epoch: 0 } }));
+    store.saveGame(game('RM0003.1', NOW - 2, { code: 'RM0003', mode: 'room', result: { winner: 'B', by: 'resign' }, room: { n: 1, epoch: 0 } }));
     store.saveGame(game('RM0003.2', NOW - 1, { code: 'RM0003', mode: 'room', room: { n: 2, epoch: 0 } }));
     const { result } = renderHook(() => useSavedGames({ store }));
     let first: SavedGame | undefined;
