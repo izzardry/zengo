@@ -455,10 +455,10 @@ describe('ChessBoard: premove and highlights', () => {
     expect(cell('g1').querySelector('.animate-hint-pulse')).toBeInTheDocument();
     expect(document.activeElement).toBe(cell('g1'));
     expect(cell('e3').dataset.state).toContain('threat');
-    expect(cell('e2').querySelector('svg')).toHaveClass('zhess-blunder');
+    expect(cell('e2').querySelector('svg')).toHaveClass('zigo-blunder');
     unmount();
     setup({ highlights, helpers: false });
-    expect(cell('e2').querySelector('svg')).not.toHaveClass('zhess-blunder');
+    expect(cell('e2').querySelector('svg')).not.toHaveClass('zigo-blunder');
     expect(cell('g1').querySelector('.animate-hint-pulse')).toBeInTheDocument();
   });
 });

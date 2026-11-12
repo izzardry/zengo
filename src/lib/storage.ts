@@ -1,13 +1,13 @@
 /**
  * Local persistence (DESIGN 13.1, 12.1, Ztyle chapter 11).
  *
- * Keys are `zhess:<key>`. Values are JSON. Every read and write is wrapped in try/catch: private
+ * Keys are `zigo:<key>`. Values are JSON. Every read and write is wrapped in try/catch: private
  * mode, a full quota or corrupt data never break the app; reads fall back to defaults.
  */
 import type { Room, SavedGame, Store } from './types';
 
 /** The key prefix of every stored value. */
-export const PREFIX = 'zhess:';
+export const PREFIX = 'zigo:';
 
 /** Most games kept (DESIGN 12.1). */
 export const MAX_GAMES = 100;

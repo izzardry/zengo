@@ -20,7 +20,7 @@ import {
 } from './url';
 import zhess from './zhess';
 
-const BASE = 'https://izzardry.github.io/zhess/';
+const BASE = 'https://izzardry.github.io/zigo/';
 
 describe('parseUrl', () => {
   it('reads every parameter of DESIGN 13.2', () => {
@@ -119,7 +119,7 @@ describe('share links', () => {
   it('builds hash URLs on a base', () => {
     expect(buildUrl({ code: 'A' }, BASE)).toBe(`${BASE}#/?s=A`);
     expect(buildUrl({}, BASE)).toBe(`${BASE}#/`);
-    expect(appBaseUrl({ origin: 'https://x.y', pathname: '/zhess/' })).toBe('https://x.y/zhess/');
+    expect(appBaseUrl({ origin: 'https://x.y', pathname: '/zigo/' })).toBe('https://x.y/zigo/');
   });
 
   it('room invites carry the code only', () => {

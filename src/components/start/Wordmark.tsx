@@ -19,7 +19,7 @@ export interface WordmarkProps {
   className?: string;
 }
 
-/** `ZHESS` in light weight with 0.3em tracking; typed in caps, never translated. */
+/** `ZIGO` in light weight with 0.3em tracking; typed in caps, never translated. */
 export function Wordmark({ size = 'hero', landscape = false, as: Tag = 'h1', className }: WordmarkProps) {
   return (
     <Tag

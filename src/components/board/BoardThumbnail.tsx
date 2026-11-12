@@ -38,7 +38,7 @@ export const BoardThumbnail = memo(function BoardThumbnail({
       const sq = cellToSquare(col, row, orientation) as Square;
       const tints: string[] = [];
       // Square tones and the half-step last-move tint as on the board (Square.tsx).
-      tints.push(`var(--zhess-sq-${isLightSquare(sq) ? 'light' : 'dark'})`);
+      tints.push(`var(--checker-${isLightSquare(sq) ? 'light' : 'dark'})`);
       if (lastMove && (lastMove.from === sq || lastMove.to === sq)) tints.push(`hsl(var(--foreground) / ${HIGHLIGHT_ALPHA})`);
       tints.forEach((fill, i) =>
         cells.push(<rect key={`${sq}-${i}`} x={col * 100} y={row * 100} width={100} height={100} fill={fill} />),

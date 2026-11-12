@@ -597,8 +597,8 @@ describe('VersionStamp', () => {
 describe('StartHeader', () => {
   it('shows the untranslated wordmark and tagline', () => {
     wrap(<StartHeader visible />, 'de');
-    expect(screen.getByRole('heading', { level: 1, name: 'ZHESS' })).toBeInTheDocument();
-    expect(screen.getByText('Zero Distractions. Just Chess.')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: 'ZIGO' })).toBeInTheDocument();
+    expect(screen.getByText('Zero Distractions. Just Go.')).toBeInTheDocument();
   });
 
   it('is inert while hidden', () => {

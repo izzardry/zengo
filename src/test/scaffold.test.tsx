@@ -15,8 +15,8 @@ describe("scaffold", () => {
         </MemoryRouter>
       </I18nProvider>,
     );
-    expect(screen.getByRole("heading", { name: "ZHESS" })).toBeInTheDocument();
-    expect(screen.getByText("Zero Distractions. Just Chess.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "ZIGO" })).toBeInTheDocument();
+    expect(screen.getByText("Zero Distractions. Just Go.")).toBeInTheDocument();
   });
 
   it("renders the not-found page with a way back", () => {

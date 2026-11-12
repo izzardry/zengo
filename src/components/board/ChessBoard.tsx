@@ -1,5 +1,5 @@
 /**
- * The Zhess board (DESIGN 5, 6, 14.1). Controlled: it draws `game` and reports moves through
+ * The Zigo board (DESIGN 5, 6, 14.1). Controlled: it draws `game` and reports moves through
  * `onMove(uci)`; it never changes the game itself.
  *
  * - 8×8 `grid` of `gridcell`s labelled `white knight, g1`, roving tabindex, arrow keys.
@@ -203,7 +203,7 @@ export function ChessBoard({
           aria-label={t('board.label')}
           aria-describedby={instructionsId}
           aria-readonly={!interactive || undefined}
-          className={cn('zhess-grid flex flex-col rounded-md', interactive && 'touch-none')}
+          className={cn('zigo-grid flex flex-col rounded-md', interactive && 'touch-none')}
           style={interactive ? { touchAction: 'none', WebkitTouchCallout: 'none' } as CSSProperties : undefined}
           {...input.gridHandlers}
           onContextMenu={interactive ? (e) => e.preventDefault() : undefined}
@@ -278,7 +278,7 @@ export function ChessBoard({
             key={typedError ?? 'typing'}
             className={cn(
               'rounded-full border border-border bg-card px-3 py-0.5 font-mono text-sm shadow-lg',
-              typedError && !typed && 'zhess-typed-error text-destructive line-through',
+              typedError && !typed && 'zigo-typed-error text-destructive line-through',
             )}
           >
             {typed || typedError}

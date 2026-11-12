@@ -9,7 +9,7 @@
  * `<screen>-<theme>-<width>x<height>.png` into `outDir`.
  *
  * Screens, each in a fresh browser context with its own seeded localStorage (the app's own
- * `zhess:` storage format, see src/lib/storage.ts and src/lib/types.ts `SavedGame` / `Room`):
+ * `zigo:` storage format, see src/lib/storage.ts and src/lib/types.ts `SavedGame` / `Room`):
  *
  *   start        idle start screen, with history below the fold
  *   dial         start screen with the custom clock dial held open on the clock pill
@@ -183,18 +183,18 @@ async function newContext(browser, size, theme, seed) {
       sessionStorage.setItem('shots:seeded', '1');
       const now = Date.now();
       const min = 60_000;
-      for (const [k, v] of Object.entries(data.prefs)) localStorage.setItem(`zhess:${k}`, JSON.stringify(v));
+      for (const [k, v] of Object.entries(data.prefs)) localStorage.setItem(`zigo:${k}`, JSON.stringify(v));
       if (data.games.length) {
         const games = data.games.map(({ ago, ...g }) => ({
           ...g,
           createdAt: now - (ago + 30) * min,
           lastPlayedAt: now - ago * min,
         }));
-        localStorage.setItem('zhess:games', JSON.stringify(games));
+        localStorage.setItem('zigo:games', JSON.stringify(games));
       }
       if (data.rooms.length) {
         const rooms = data.rooms.map((r) => ({ ...r, createdAt: now + r.createdAt * min, lastSeenAt: now + r.lastSeenAt * min }));
-        localStorage.setItem('zhess:rooms', JSON.stringify(rooms));
+        localStorage.setItem('zigo:rooms', JSON.stringify(rooms));
       }
     } catch {
       /* storage blocked */

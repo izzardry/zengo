@@ -1,5 +1,5 @@
 /**
- * Zhess rules wrapper over chess.js (DESIGN 8.1, 13.2, 11).
+ * Zigo rules wrapper over chess.js (DESIGN 8.1, 13.2, 11).
  *
  * Pure: no React, no DOM. `Game` values are frozen plain objects; every operation returns a new
  * one. A chess.js instance positioned at a game's cursor is cached per value in a WeakMap and

@@ -67,11 +67,11 @@ export function PromotionDial({
       role="menu"
       aria-label={labels.title}
       aria-description={labels.keys}
-      aria-activedescendant={aim ? `zhess-dial-${aim}` : undefined}
+      aria-activedescendant={aim ? `zigo-dial-${aim}` : undefined}
       tabIndex={-1}
       onKeyDown={onKeyDown}
       data-testid="promotion-dial"
-      data-zhess-dial=""
+      data-zigo-dial=""
       className="fixed z-overlay select-none outline-none animate-scale-in"
       style={{ left: x, top: y, width: 0, height: 0 }}
     >
@@ -107,7 +107,7 @@ export function PromotionDial({
         return (
           <button
             key={piece}
-            id={`zhess-dial-${piece}`}
+            id={`zigo-dial-${piece}`}
             type="button"
             role="menuitem"
             aria-label={labels[piece]}

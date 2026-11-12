@@ -5,7 +5,7 @@
  * self-contained worker script. It finds its `.wasm` next to itself (`location` of the worker with
  * `.js` → `.wasm`), so the only thing that has to be right is the worker URL. That URL is resolved
  * against `document.baseURI`, which works for any deployment path under Vite `base: "./"`
- * (`https://host/zhess/` → `https://host/zhess/engine/stockfish-19-lite-single.js`) and in dev
+ * (`https://host/zigo/` → `https://host/zigo/engine/stockfish-19-lite-single.js`) and in dev
  * (`/engine/…` served from `public/`). Vite does not touch the files in `public/engine/`, so no
  * worker bundling question arises, and the service worker serves both files from `engine-cache`
  * (CacheFirst; see vite.config.ts), which the app fills on its first launch (./offline.ts).

@@ -26,7 +26,7 @@ const ENGINE_WASM = 'engine/stockfish-19-lite-single.wasm';
 async function skipTutorial(context: BrowserContext) {
   await context.addInitScript(() => {
     try {
-      localStorage.setItem('zhess:tutorial-seen', 'true');
+      localStorage.setItem('zigo:tutorial-seen', 'true');
     } catch {
       /* storage blocked */
     }
@@ -68,7 +68,7 @@ async function playMove(page: Page, uci: string) {
   const before = pliesOf(page).length;
   const from = uci.slice(0, 2);
   const to = uci.slice(2, 4);
-  const refused = page.locator(`[data-square="${from}"] .zhess-blunder`);
+  const refused = page.locator(`[data-square="${from}"] .zigo-blunder`);
   const played = () => pliesOf(page).length > before;
   await cell(page, from).click();
   await cell(page, to).click();
@@ -284,7 +284,7 @@ test.describe('milestone 2 · computer', () => {
     await cell(page, 'h5').click();
     await cell(page, 'h6').click();
     // Refused: the queen stays and pulses red once; nothing was played.
-    await expect(page.locator('[data-square="h5"] .zhess-blunder')).toHaveCount(1);
+    await expect(page.locator('[data-square="h5"] .zigo-blunder')).toHaveCount(1);
     await page.waitForTimeout(500);
     await expectPiece(page, 'h5', 'white queen');
     expect(pliesOf(page)).toHaveLength(4);

@@ -66,7 +66,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   localStorage.clear();
-  localStorage.setItem('zhess:tutorial-seen', 'true');
+  localStorage.setItem('zigo:tutorial-seen', 'true');
 });
 
 afterEach(() => {
@@ -77,7 +77,7 @@ describe('Index stage', () => {
   it('shows the start screen with a blurred preview and the Start pill', () => {
     renderStage();
     expect(stage()).toHaveAttribute('data-phase', 'start');
-    expect(screen.getByRole('heading', { name: 'ZHESS' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'ZIGO' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Start' })).toBeInTheDocument();
     expect(screen.getByTestId('board-preview').firstElementChild).toHaveAttribute('data-blurred', 'true');
     // Default opponent: COMPUTER 5 MEDIUM (DESIGN 4.1).

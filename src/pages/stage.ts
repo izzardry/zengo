@@ -92,11 +92,11 @@ export function pgnMeta(s: GameSession, site: string): PgnMeta {
   const d = new Date(s.createdAt);
   const pad = (n: number) => String(n).padStart(2, '0');
   const you = 'Player';
-  const cpu = `Zhess Level ${s.level ?? ''}`.trim();
+  const cpu = `Zigo Level ${s.level ?? ''}`.trim();
   const [white, black] =
     s.mode === 'computer' ? (s.color === 'w' ? [you, cpu] : [cpu, you]) : s.mode === 'local' ? ['White', 'Black'] : [you, 'Opponent'];
   return {
-    event: `Zhess ${s.code}`,
+    event: `Zigo ${s.code}`,
     site,
     date: `${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())}`,
     white,

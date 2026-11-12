@@ -31,11 +31,11 @@ class FakePort {
 
 describe('engineUrl', () => {
   it('resolves next to the app under any base path (vite base "./")', () => {
-    expect(engineUrl('https://izzardry.github.io/zhess/')).toBe(
-      'https://izzardry.github.io/zhess/engine/stockfish-19-lite-single.js',
+    expect(engineUrl('https://izzardry.github.io/zigo/')).toBe(
+      'https://izzardry.github.io/zigo/engine/stockfish-19-lite-single.js',
     );
-    expect(engineUrl('https://izzardry.github.io/zhess/index.html')).toBe(
-      'https://izzardry.github.io/zhess/engine/stockfish-19-lite-single.js',
+    expect(engineUrl('https://izzardry.github.io/zigo/index.html')).toBe(
+      'https://izzardry.github.io/zigo/engine/stockfish-19-lite-single.js',
     );
     expect(engineUrl('http://localhost:4173/')).toBe('http://localhost:4173/engine/stockfish-19-lite-single.js');
     expect(ENGINE_PATH).toBe('engine/stockfish-19-lite-single.js');

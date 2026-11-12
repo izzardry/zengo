@@ -48,7 +48,7 @@ const RED = (a: number) => `hsl(var(--destructive) / ${a})`;
  * the lighter ones in both. Grey state fills use half that step: a highlighted square lands
  * between the two square tones and never matches the other color, so the checkerboard holds.
  */
-const SQUARE_TONE = (light: boolean) => `var(--zhess-sq-${light ? 'light' : 'dark'})`;
+const SQUARE_TONE = (light: boolean) => `var(--checker-${light ? 'light' : 'dark'})`;
 
 export const BoardSquare = memo(function BoardSquare({
   square,
@@ -105,7 +105,7 @@ export const BoardSquare = memo(function BoardSquare({
           .join(' ') || undefined
       }
       onFocus={onFocus ? () => onFocus(square) : undefined}
-      className="zhess-square relative flex shrink-0 items-center justify-center bg-card"
+      className="zigo-square relative flex shrink-0 items-center justify-center bg-card"
       style={style}
     >
       {rankLabel && (
@@ -135,7 +135,7 @@ export const BoardSquare = memo(function BoardSquare({
             'pointer-events-none relative h-full w-full',
             rotated && 'rotate-180',
             lifted && 'opacity-30',
-            blunderKey > 0 && 'zhess-blunder',
+            blunderKey > 0 && 'zigo-blunder',
           )}
         />
       )}
@@ -166,7 +166,7 @@ export const BoardSquare = memo(function BoardSquare({
           style={{ outlineOffset: '-3px' }}
         />
       )}
-      {hintKey > 0 && <span key={hintKey} aria-hidden data-marker="hint" className="zhess-hint pointer-events-none absolute inset-0 z-[1] rounded-[inherit] animate-hint-pulse" />}
+      {hintKey > 0 && <span key={hintKey} aria-hidden data-marker="hint" className="zigo-hint pointer-events-none absolute inset-0 z-[1] rounded-[inherit] animate-hint-pulse" />}
     </div>
   );
 });

@@ -11,24 +11,24 @@ describe('useHelpers', () => {
   });
 
   it("reads 'true' / 'false' and treats junk as missing", () => {
-    expect(readHelpers(createStore(memoryStorage({ 'zhess:helpers': 'false' })))).toBe(false);
-    expect(readHelpers(createStore(memoryStorage({ 'zhess:helpers': 'true' })))).toBe(true);
-    expect(readHelpers(createStore(memoryStorage({ 'zhess:helpers': '"nope"' })))).toBe(true);
-    expect(readHelpers(createStore(memoryStorage({ 'zhess:helpers': '{bad' })))).toBe(true);
+    expect(readHelpers(createStore(memoryStorage({ 'zigo:helpers': 'false' })))).toBe(false);
+    expect(readHelpers(createStore(memoryStorage({ 'zigo:helpers': 'true' })))).toBe(true);
+    expect(readHelpers(createStore(memoryStorage({ 'zigo:helpers': '"nope"' })))).toBe(true);
+    expect(readHelpers(createStore(memoryStorage({ 'zigo:helpers': '{bad' })))).toBe(true);
   });
 
-  it('toggles and persists under zhess:helpers', () => {
+  it('toggles and persists under zigo:helpers', () => {
     const mem = memoryStorage();
     const { result } = renderHook(() => useHelpers(createStore(mem)));
     act(() => result.current.toggleHelpers());
     expect(result.current.helpers).toBe(false);
-    expect(mem.dump()['zhess:helpers']).toBe('false');
+    expect(mem.dump()['zigo:helpers']).toBe('false');
     act(() => result.current.toggleHelpers());
     expect(result.current.helpers).toBe(true);
-    expect(mem.dump()['zhess:helpers']).toBe('true');
+    expect(mem.dump()['zigo:helpers']).toBe('true');
     act(() => result.current.setHelpers(false));
     expect(result.current.helpers).toBe(false);
-    expect(mem.dump()['zhess:helpers']).toBe('false');
+    expect(mem.dump()['zigo:helpers']).toBe('false');
   });
 
   it('survives a storage that throws', () => {

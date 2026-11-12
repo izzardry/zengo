@@ -57,7 +57,7 @@ describe('PWAInstallPrompt', () => {
     const onInstall = vi.fn();
     const onDismiss = vi.fn();
     renderWithI18n(<PWAInstallPrompt onInstall={onInstall} onDismiss={onDismiss} />);
-    expect(screen.getByRole('dialog', { name: 'Install Zhess' })).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Install Zigo' })).toBeInTheDocument();
     const install = screen.getByRole('button', { name: 'Install' });
     const notNow = screen.getByRole('button', { name: 'Not now' });
     expect(install.className).toContain('btn-primary');

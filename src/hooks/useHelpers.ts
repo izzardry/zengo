@@ -1,5 +1,5 @@
 /**
- * The helpers shield (DESIGN 7.1): one toggle, on by default, stored in `zhess:helpers`.
+ * The helpers shield (DESIGN 7.1): one toggle, on by default, stored in `zigo:helpers`.
  * It bundles legal-move dots, last move, check glow, coordinates and the blunder guard.
  */
 import { useCallback, useState } from 'react';
@@ -13,7 +13,7 @@ export interface HelpersState {
   toggleHelpers: () => void;
 }
 
-/** Reads `zhess:helpers` (default true; anything but a boolean counts as missing). */
+/** Reads `zigo:helpers` (default true; anything but a boolean counts as missing). */
 export function readHelpers(s: Store = defaultStore): boolean {
   return s.pref<boolean>('helpers', true) !== false;
 }

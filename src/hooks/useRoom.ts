@@ -4,7 +4,7 @@
  *
  * The work is done by `createRoomSession`, which has no React in it and is tested on its own:
  *
- * - **Tab guard (DESIGN 9.12).** The room is guarded by the Web Lock `zhess:room:<CODE>`. The tab
+ * - **Tab guard (DESIGN 9.12).** The room is guarded by the Web Lock `zigo:room:<CODE>`. The tab
  *   that holds it owns the room: it runs the controller and connects. A second tab gets a read-only
  *   controller (`tab: 'other'`, board locked with reason `other-tab`), follows the other tab's
  *   writes through `storage` events, takes over by itself when the owner closes, and can take over
@@ -215,11 +215,11 @@ export interface RoomSession {
 
 /** Web Lock name of a room (DESIGN 9.12). */
 export function roomLockName(code: string): string {
-  return `zhess:room:${code}`;
+  return `zigo:room:${code}`;
 }
 
 /** localStorage key of the banked running turns, one entry per room code. */
-export const ROOM_TURN_KEY = 'zhess:room-turn';
+export const ROOM_TURN_KEY = 'zigo:room-turn';
 /** A bank older than this is ignored. */
 export const ROOM_TURN_MAX_AGE_MS = 12 * 60 * 60 * 1000;
 /** DESIGN 9.9: signalling failing this long offers the manual exchange. */
@@ -453,7 +453,7 @@ class Session implements RoomSession {
     });
     this.listen(this.win, 'storage', (e) => {
       const key = (e as StorageEvent).key;
-      if (this.tab !== 'owner' && this.tab !== 'pending' && (key === null || key === 'zhess:games' || key === 'zhess:rooms')) {
+      if (this.tab !== 'owner' && this.tab !== 'pending' && (key === null || key === 'zigo:games' || key === 'zigo:rooms')) {
         this.useController(true);
         this.refresh();
       }

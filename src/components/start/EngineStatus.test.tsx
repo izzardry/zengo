@@ -27,7 +27,7 @@ function gatedFetch() {
   return { fetch, release: () => release() };
 }
 
-const base = 'https://example.test/zhess/';
+const base = 'https://example.test/zigo/';
 
 describe('useEngineOffline', () => {
   it('is ready at once when the engine is cached, without downloading', async () => {

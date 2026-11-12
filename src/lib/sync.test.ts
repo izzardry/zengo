@@ -157,10 +157,10 @@ const ORDERS = ['alternate', 'a-first', 'b-first', 1, 2, 3, 4, 5] as const;
 describe('hashing', () => {
   it('is stable and 16 hex digits', () => {
     expect(hashString('')).toMatch(/^[0-9a-f]{16}$/);
-    expect(hashString('zhess')).toBe(hashString('zhess'));
-    expect(hashString('zhess')).not.toBe(hashString('zhesS'));
+    expect(hashString('zigo')).toBe(hashString('zigo'));
+    expect(hashString('zigo')).not.toBe(hashString('zigO'));
     // Pinned so that a change of the hash (a protocol change) is noticed.
-    expect(hashString('zhess')).toMatchInlineSnapshot(`"9052b9bc02ad0ba6"`);
+    expect(hashString('zigo')).toMatchInlineSnapshot(`"4bacb2cdfe451073"`);
   });
 
   it('covers n, epoch, white, tc, moves and times, but not the end in pliesHash', () => {
@@ -874,7 +874,7 @@ describe('base64url', () => {
     const bytes = new Uint8Array([0xfb, 0xff, 0xbf, 0x00, 0x10]);
     expect(toBase64Url(bytes)).toBe('-_-_ABA');
     expect([...fromBase64Url('-_-_ABA=')]).toEqual([...bytes]);
-    expect(toBase64Url(new TextEncoder().encode('Zhess'))).toBe('Wmhlc3M');
+    expect(toBase64Url(new TextEncoder().encode('Zigo'))).toBe('Wmlnbw');
   });
 
   it('rejects bad input', () => {

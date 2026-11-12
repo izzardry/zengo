@@ -255,12 +255,12 @@ export function ClockDial({ x, y, dragging = false, value = null, onPick, onCanc
         role="menu"
         aria-label={title}
         aria-description={t('clock.dialKeys')}
-        aria-activedescendant={aim.index !== null ? `zhess-clock-dial-${step}-${aim.index}` : undefined}
+        aria-activedescendant={aim.index !== null ? `zigo-clock-dial-${step}-${aim.index}` : undefined}
         tabIndex={-1}
         onKeyDown={onKeyDown}
         data-testid="clock-dial"
         data-step={step}
-        data-zhess-dial=""
+        data-zigo-dial=""
         className="fixed z-overlay touch-none select-none outline-none animate-scale-in"
         style={{ left: center.x, top: center.y, width: 0, height: 0 }}
       >
@@ -313,7 +313,7 @@ export function ClockDial({ x, y, dragging = false, value = null, onPick, onCanc
             <button
               // A new key per step: the pointerdown that picked the minutes must not click an increment.
               key={`${step}-${v}`}
-              id={`zhess-clock-dial-${step}-${i}`}
+              id={`zigo-clock-dial-${step}-${i}`}
               type="button"
               role="menuitemradio"
               aria-checked={isNoted}

@@ -74,9 +74,9 @@ beforeAll(() => {
 beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
-  localStorage.setItem('zhess:tutorial-seen', 'true');
-  localStorage.setItem('zhess:opponent', JSON.stringify({ mode: 'room' }));
-  localStorage.setItem('zhess:color', JSON.stringify('w'));
+  localStorage.setItem('zigo:tutorial-seen', 'true');
+  localStorage.setItem('zigo:opponent', JSON.stringify({ mode: 'room' }));
+  localStorage.setItem('zigo:color', JSON.stringify('w'));
   broker.net = createMemoryNetwork();
   broker.fail = false;
   others = [];
@@ -98,7 +98,7 @@ describe('Index stage in a room', () => {
     const invite = await screen.findByTestId('invite-sheet');
     expect(within(invite).getByText('RMS001')).toBeInTheDocument();
     expect((within(invite).getByRole('textbox', { name: 'Invite link' }) as HTMLInputElement).value).toMatch(/#\/\?s=RMS001&o=r$/);
-    expect(localStorage.getItem('zhess:rooms')).toContain('RMS001');
+    expect(localStorage.getItem('zigo:rooms')).toContain('RMS001');
 
     // The opponent joins: presence turns connected, the sheet closes, a toast says so.
     const other = opponent('RMS001');
@@ -265,7 +265,7 @@ describe('Index stage in a room', () => {
     expect(cellName('e5')).not.toMatch(/^black pawn/);
     expect(within(screen.getByRole('group', { name: 'Game info' })).queryByText('RMS009')).toBeNull();
     // The room itself is untouched.
-    expect(localStorage.getItem('zhess:rooms')).toContain('RMS009');
+    expect(localStorage.getItem('zigo:rooms')).toContain('RMS009');
     setSharedEngine(null);
   }, 30_000);
 
@@ -343,14 +343,14 @@ describe('Index stage in a room', () => {
     // Delete game 2: the room record goes too; Undo brings both back.
     const card = (await screen.findAllByTestId('history-card'))[0];
     fireEvent.click(within(card.parentElement!).getByRole('button', { name: /Delete/ }));
-    await waitFor(() => expect(localStorage.getItem('zhess:rooms')).toBe('[]'));
+    await waitFor(() => expect(localStorage.getItem('zigo:rooms')).toBe('[]'));
     fireEvent.click(await screen.findByRole('button', { name: 'Undo' }));
-    await waitFor(() => expect(localStorage.getItem('zhess:rooms')).toContain('RMS004'));
+    await waitFor(() => expect(localStorage.getItem('zigo:rooms')).toContain('RMS004'));
     expect(await screen.findAllByTestId('history-card')).toHaveLength(2);
   });
 
   it('a timed room: the controller clock runs the strips, premoves fire, and a disconnect pauses (DESIGN 9.6, 9.8)', async () => {
-    localStorage.setItem('zhess:clock', JSON.stringify('5+0'));
+    localStorage.setItem('zigo:clock', JSON.stringify('5+0'));
     renderStage('/?s=RMS005');
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
     const other = opponent('RMS005');

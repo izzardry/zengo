@@ -22,7 +22,7 @@ export function toasterPlacement(landscape: boolean): Pick<ToasterProps, "offset
       offset,
       mobileOffset: offset,
       style: { "--width": TOAST_WIDTH_LANDSCAPE } as CSSProperties,
-      className: "zhess-toaster-rail",
+      className: "zigo-toaster-rail",
     };
   }
   return {

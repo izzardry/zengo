@@ -1,11 +1,11 @@
 /**
- * Remembered start-screen choices (DESIGN 4.1, 13.1): `zhess:opponent`, `zhess:color`,
- * `zhess:clock`. Reads are validated and fall back to the first-run defaults.
+ * Remembered start-screen choices (DESIGN 4.1, 13.1): `zigo:opponent`, `zigo:color`,
+ * `zigo:clock`. Reads are validated and fall back to the first-run defaults.
  *
  * Stored shapes:
- * - `zhess:opponent` → the `Opponent` object, e.g. `{"mode":"computer","level":5}`
- * - `zhess:color`    → `"random"` / `"w"` / `"b"`
- * - `zhess:clock`    → `"off"` or a time control string such as `"5+0"`
+ * - `zigo:opponent` → the `Opponent` object, e.g. `{"mode":"computer","level":5}`
+ * - `zigo:color`    → `"random"` / `"w"` / `"b"`
+ * - `zigo:clock`    → `"off"` or a time control string such as `"5+0"`
  */
 import { useCallback, useState } from 'react';
 import { store as defaultStore } from '@/lib/storage';
@@ -46,7 +46,7 @@ export interface StartPrefs {
 
 /**
  * The three remembered selector values with setters that persist immediately.
- * Pass a store in tests; the app uses the default `zhess:` localStorage store.
+ * Pass a store in tests; the app uses the default `zigo:` localStorage store.
  */
 export function useStartPrefs(s: Store = defaultStore): StartPrefs {
   const [opponent, setOpponentState] = useState<Opponent>(() => readOpponent(s));

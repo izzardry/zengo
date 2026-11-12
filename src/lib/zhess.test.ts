@@ -492,8 +492,8 @@ describe('reading the position', () => {
 describe('pgn', () => {
   it('exports moves, headers and the result', () => {
     const g = playAll(newGame(), SCHOLAR);
-    const text = pgn(g, { event: 'Zhess K7QW2M', site: 'zhess', date: '2026.11.11', white: 'You', black: 'Level 5' });
-    expect(text).toContain('[Event "Zhess K7QW2M"]');
+    const text = pgn(g, { event: 'Zigo K7QW2M', site: 'zigo', date: '2026.11.11', white: 'You', black: 'Level 5' });
+    expect(text).toContain('[Event "Zigo K7QW2M"]');
     expect(text).toContain('[Date "2026.11.11"]');
     expect(text).toContain('[White "You"]');
     expect(text).toContain('[Black "Level 5"]');
@@ -511,10 +511,10 @@ describe('pgn', () => {
     expect(pgn(flagged, {})).toContain('[Termination "time forfeit"]');
     expect(pgn(flagged, {})).toContain('[Result "1-0"]');
     const fen = '4k3/P7/8/8/8/8/7P/4K3 w - - 0 1';
-    const p = pgn(play(newGame(fen), 'a7a8n', 1), { tags: { Annotator: 'Zhess' } });
+    const p = pgn(play(newGame(fen), 'a7a8n', 1), { tags: { Annotator: 'Zigo' } });
     expect(p).toContain(`[FEN "${fen}"]`);
     expect(p).toContain('[SetUp "1"]');
-    expect(p).toContain('[Annotator "Zhess"]');
+    expect(p).toContain('[Annotator "Zigo"]');
     expect(p).toContain('1. a8=N *');
   });
 

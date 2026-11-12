@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Rasterizes the Zhess brand images into public/ (DESIGN 2, Ztyle 01 and 12):
+ * Rasterizes the Zigo brand images into public/ (DESIGN 2, Ztyle 01 and 12):
  *
  *   public/pwa-192x192.png            icon, 192 × 192
  *   public/pwa-512x512.png            icon, 512 × 512
@@ -143,8 +143,8 @@ function ogHtml() {
   const body = `
     <div class="board">${blurredBoard(64)}</div>
     <div class="text">
-      <div class="mark">ZHESS</div>
-      <div class="tag">Zero Distractions. Just Chess.</div>
+      <div class="mark">ZIGO</div>
+      <div class="tag">Zero Distractions. Just Go.</div>
       <div class="feat">12 computer levels  |  rooms for two  |  zero ads</div>
     </div>`;
   return page(body, 1200, 630, css);

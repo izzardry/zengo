@@ -7,7 +7,7 @@
  * With no games (and no pending undo) nothing renders (Ztyle 09 "Empty states").
  *
  * Ported from Zudoku `GameHistory.tsx` with the audit fixes (#15 translated labels) and the
- * Zhess card. The thumbnail comes from the caller (`renderThumbnail`), since the board
+ * Zigo card. The thumbnail comes from the caller (`renderThumbnail`), since the board
  * thumbnail belongs to the board package.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -132,7 +132,7 @@ export function GameHistory({
     <>
       {games.length > 0 && (
         <section
-          aria-labelledby="zhess-history-title"
+          aria-labelledby="zigo-history-title"
           className={cn(
             'w-full max-w-md mx-auto px-4 py-6 transition-opacity duration-300',
             isVisible ? 'opacity-100' : 'opacity-0 pointer-events-none',
@@ -140,7 +140,7 @@ export function GameHistory({
           )}
         >
           <h2
-            id="zhess-history-title"
+            id="zigo-history-title"
             className="flex items-center justify-center gap-2 mb-6 text-sm font-normal uppercase tracking-wider text-muted-foreground"
           >
             <ChevronDown className="w-4 h-4" aria-hidden="true" />
@@ -218,7 +218,7 @@ function FullGameList({ games, now, onClose, children }: FullGameListProps) {
     <div
       role="dialog"
       aria-modal="true"
-      aria-labelledby="zhess-all-games-title"
+      aria-labelledby="zigo-all-games-title"
       className="fixed inset-0 z-50 bg-background overflow-y-auto overscroll-contain animate-fade-in"
     >
       <div className="sticky top-0 z-10 bg-background/95 backdrop-blur-sm border-b border-border pt-[env(safe-area-inset-top)]">
@@ -226,7 +226,7 @@ function FullGameList({ games, now, onClose, children }: FullGameListProps) {
           <button ref={back} type="button" onClick={onClose} className="icon-button" aria-label={t('back')}>
             <ArrowLeft aria-hidden="true" />
           </button>
-          <h2 id="zhess-all-games-title" className="font-mono text-lg font-normal uppercase tracking-wider">
+          <h2 id="zigo-all-games-title" className="font-mono text-lg font-normal uppercase tracking-wider">
             {t('platform.history.allGames')}
           </h2>
         </div>

@@ -1,7 +1,7 @@
 /**
  * Stored games for the history list (DESIGN 12.2, Ztyle chapter 11, Zudoku GameHistory).
  *
- * Reads `zhess:games` through the store, stays current when `useGameState` saves (in-app
+ * Reads `zigo:games` through the store, stays current when `useGameState` saves (in-app
  * notification) or another tab writes (`storage` event), and deletes with a restore path for the
  * undo toast. Grouping by time follows Zudoku: the full list groups the games after the five
  * most recent cards.
@@ -32,7 +32,7 @@ export interface UseSavedGamesOptions {
 export interface UseSavedGames {
   /** All stored games, newest `lastPlayedAt` first (at most 100). */
   games: SavedGame[];
-  /** Room records (`zhess:rooms`), for the room score on room game cards. */
+  /** Room records (`zigo:rooms`), for the room score on room game cards. */
   rooms: Room[];
   /** The five most recent: the cards below the fold. */
   recent: SavedGame[];
@@ -74,7 +74,7 @@ export function useSavedGames(options: UseSavedGamesOptions = {}): UseSavedGames
     refresh();
     const off = onSavedGamesChange(refresh);
     const onStorage = (e: StorageEvent) => {
-      if (e.key === null || e.key === 'zhess:games' || e.key === 'zhess:rooms') refresh();
+      if (e.key === null || e.key === 'zigo:games' || e.key === 'zigo:rooms') refresh();
     };
     window.addEventListener('storage', onStorage);
     return () => {

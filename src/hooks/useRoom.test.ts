@@ -231,7 +231,7 @@ function fakeManual(time: Harness['time']) {
       return {
         transport: pair.a as never,
         offer: `OFFER${n}`,
-        link: `https://zhess.test/#/?s=${code}&o=r&x=OFFER${n}`,
+        link: `https://zigo.test/#/?s=${code}&o=r&x=OFFER${n}`,
         acceptAnswer: async (text: string) => {
           if (!text.includes(`ANSWER${n}`)) throw new ManualError(text.includes('x=') ? 'wrong-kind' : 'invalid');
           answered.push(text);
@@ -242,13 +242,13 @@ function fakeManual(time: Harness['time']) {
       const pair = createMemoryPair({ timers: time, open: false });
       pairs.push(pair);
       if (offer === 'BROKEN') throw new ManualError('invalid');
-      return { transport: pair.b as never, answer: `ANS-${offer}`, link: `https://zhess.test/#/?s=${code}&o=r&y=ANS-${offer}` };
+      return { transport: pair.b as never, answer: `ANS-${offer}`, link: `https://zigo.test/#/?s=${code}&o=r&y=ANS-${offer}` };
     },
     handOver: async (_code, answer) => {
       handOvers.push(answer);
       return handOverResult;
     },
-    answerLink: (code, answer) => `https://zhess.test/#/?s=${code}&o=r&y=${answer}`,
+    answerLink: (code, answer) => `https://zigo.test/#/?s=${code}&o=r&y=${answer}`,
   };
   return {
     api,
@@ -270,7 +270,7 @@ function fakeManual(time: Harness['time']) {
 
 describe('room helpers', () => {
   it('names the room lock', () => {
-    expect(roomLockName('K7QW2M')).toBe('zhess:room:K7QW2M');
+    expect(roomLockName('K7QW2M')).toBe('zigo:room:K7QW2M');
   });
 
   it('banks and takes back the running turn once, for the same code and while fresh', () => {
@@ -457,7 +457,7 @@ describe('room session · tab guard', () => {
     await r.settle();
     expect(one.view.tab).toBe('owner');
     expect(one.view.guarded).toBe(true);
-    expect(locks.held.has('zhess:room:K7QW2M')).toBe(true);
+    expect(locks.held.has('zigo:room:K7QW2M')).toBe(true);
     const transports = r.h.net.created.length;
     expect(transports).toBe(1);
 
@@ -469,7 +469,7 @@ describe('room session · tab guard', () => {
     expect(two.view.state?.seat).toBe(0); // loaded from the shared store
     expect(two.view.via).toBeNull();
     expect(r.h.net.created.length).toBe(transports); // the second tab never connects
-    expect(locks.waiting('zhess:room:K7QW2M')).toBe(1); // waits for the first tab
+    expect(locks.waiting('zigo:room:K7QW2M')).toBe(1); // waits for the first tab
 
     two.takeOver();
     await r.settle();
@@ -546,7 +546,7 @@ describe('room session · tab guard', () => {
     expect(r.sessions[0].controller?.move('d2d4')).toBe(true);
     await r.settle();
     expect(two.view.state?.game.plies.length).toBe(0); // no event yet
-    const ev = Object.assign(new Event('storage'), { key: 'zhess:games' });
+    const ev = Object.assign(new Event('storage'), { key: 'zigo:games' });
     win.dispatchEvent(ev);
     expect(two.view.state?.game.plies.map((p) => p.m)).toEqual(['d2d4']);
     expect(two.view.state?.locked).toBe('other-tab');
@@ -577,8 +577,8 @@ describe('room session · manual connection', () => {
     expect(await host.acceptAnswer('garbage')).toBe('invalid');
     expect(host.view.manual.step).toBe('offer');
     expect(host.view.manual.error).toBe('invalid');
-    expect(await host.acceptAnswer('https://zhess.test/#/?s=K7QW2M&o=r&x=OFFER1')).toBe('wrong-kind');
-    expect(await host.acceptAnswer('https://zhess.test/#/?s=K7QW2M&o=r&y=ANSWER1')).toBeNull();
+    expect(await host.acceptAnswer('https://zigo.test/#/?s=K7QW2M&o=r&x=OFFER1')).toBe('wrong-kind');
+    expect(await host.acceptAnswer('https://zigo.test/#/?s=K7QW2M&o=r&y=ANSWER1')).toBeNull();
     expect(host.view.manual.step).toBe('connecting');
     expect(host.view.manual.error).toBeNull();
     expect(await host.acceptAnswer('again')).toBe('used');
@@ -710,7 +710,7 @@ describe('room session · manual connection', () => {
 
   it('hand-over through a real BroadcastChannel to a waiting tab (same device)', async () => {
     const r = rig();
-    const waiting = new BroadcastChannel('zhess:manual:K7QW2M');
+    const waiting = new BroadcastChannel('zigo:manual:K7QW2M');
     const got: unknown[] = [];
     waiting.onmessage = (e: MessageEvent) => {
       got.push(e.data);

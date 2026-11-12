@@ -684,7 +684,7 @@ export default function Index() {
 
         {/* ---- the stage: board always centered ---- */}
         <main
-          aria-label="Zhess"
+          aria-label="Zigo"
           onClick={onStageClick}
           data-testid="stage"
           data-phase={phase}

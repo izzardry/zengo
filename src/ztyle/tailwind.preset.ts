@@ -1,4 +1,4 @@
-// Copied verbatim from Ztyle (~/Workspace/ztyle/tokens/tailwind.preset.ts, github.com/izzardry/ztyle, rev d29758b).
+// Copied verbatim from Ztyle (~/Workspace/ztyle/tokens/tailwind.preset.ts, github.com/izzardry/ztyle, rev 61047cb).
 // Do not edit here: change Ztyle and copy again.
 /**
  * Ztyle — Tailwind CSS 3 preset for izzardry games.
@@ -41,6 +41,8 @@ const preset = {
         accent: { DEFAULT: c("accent"), foreground: c("accent-foreground") },
         popover: { DEFAULT: c("popover"), foreground: c("popover-foreground") },
         card: { DEFAULT: c("card"), foreground: c("card-foreground") },
+        // Theme-stable inks: `fill-ink-light` stays the lighter neutral in both themes (white pieces).
+        ink: { light: c("ink-light"), dark: c("ink-dark") },
       },
       borderRadius: {
         lg: "var(--radius)",

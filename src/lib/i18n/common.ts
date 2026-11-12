@@ -6,10 +6,10 @@ import { defineTable } from './define';
 
 /** Brand strings are never translated (Ztyle chapter 14, DESIGN 2). */
 export const BRAND = {
-  name: 'Zhess',
-  wordmark: 'ZHESS',
-  tagline: 'Zero Distractions. Just Chess.',
-  shareTitle: 'Zhess',
+  name: 'Zigo',
+  wordmark: 'ZIGO',
+  tagline: 'Zero Distractions. Just Go.',
+  shareTitle: 'Zigo',
 } as const;
 
 export default defineTable({

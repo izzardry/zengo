@@ -1,5 +1,5 @@
 /**
- * Pass-and-play seating (DESIGN 5.2), stored in `zhess:seating`.
+ * Pass-and-play seating (DESIGN 5.2), stored in `zigo:seating`.
  *
  * - `face`: face to face, the far player's pieces, strip and clock drawn rotated 180°.
  *   Default on touch devices.

@@ -32,9 +32,9 @@ describe('useShare', () => {
     await act(() => result.current.shareLink('u2', 'solo'));
     await act(() => result.current.shareLink('u3', 'win', 7));
     expect(share.mock.calls.map((c) => [c[0].text, c[0].url, c[0].title])).toEqual([
-      ['Join my chess game!', 'u1', 'Zhess'],
-      ['Look at this chess game.', 'u2', 'Zhess'],
-      ['I beat Level 7! Can you?', 'u3', 'Zhess'],
+      ['Join my chess game!', 'u1', 'Zigo'],
+      ['Look at this chess game.', 'u2', 'Zigo'],
+      ['I beat Level 7! Can you?', 'u3', 'Zigo'],
     ]);
     expect(toastMock.success).not.toHaveBeenCalled();
   });
@@ -44,10 +44,10 @@ describe('useShare', () => {
     const { result } = renderHook(() => useShare({ clipboard: { writeText } }), { wrapper: wrapper() });
     let outcome: string | undefined;
     await act(async () => {
-      outcome = await result.current.shareLink('https://zhess/#/?s=ABC', 'solo');
+      outcome = await result.current.shareLink('https://zigo/#/?s=ABC', 'solo');
     });
     expect(outcome).toBe('copied');
-    expect(writeText).toHaveBeenCalledWith('https://zhess/#/?s=ABC');
+    expect(writeText).toHaveBeenCalledWith('https://zigo/#/?s=ABC');
     expect(toastMock.success).toHaveBeenCalledWith('Link copied to clipboard!');
   });
 

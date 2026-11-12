@@ -6,7 +6,7 @@
  * Everything is hidden once installed (`display-mode: standalone`, or iOS `navigator.standalone`).
  *
  * Ported from Zudoku `usePWAInstall.ts` with the storage key fix (Ztyle audit #13:
- * `zhess:install-dismissed`), and: a used prompt event is dropped whatever the outcome, so the
+ * `zigo:install-dismissed`), and: a used prompt event is dropped whatever the outcome, so the
  * pill never stays visible with nothing behind it.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';

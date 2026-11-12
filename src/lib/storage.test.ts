@@ -23,7 +23,7 @@ function room(code: string): Room {
 }
 
 describe('storage', () => {
-  it('uses the zhess: prefix and JSON values', () => {
+  it('uses the zigo: prefix and JSON values', () => {
     const mem = memoryStorage();
     const s = createStore(mem);
     s.saveGame(game('K7QW2M', 5));
@@ -31,9 +31,9 @@ describe('storage', () => {
     s.setPref('color', 'random');
     const dump = mem.dump();
     expect(Object.keys(dump).sort()).toEqual([`${PREFIX}color`, `${PREFIX}games`, `${PREFIX}helpers`]);
-    expect(dump['zhess:helpers']).toBe('false');
-    expect(dump['zhess:color']).toBe('"random"');
-    expect(JSON.parse(dump['zhess:games'])[0].id).toBe('K7QW2M');
+    expect(dump['zigo:helpers']).toBe('false');
+    expect(dump['zigo:color']).toBe('"random"');
+    expect(JSON.parse(dump['zigo:games'])[0].id).toBe('K7QW2M');
   });
 
   it('keeps games newest first, upserts by id, and caps at 100', () => {
@@ -88,11 +88,11 @@ describe('storage', () => {
 
   it('reads preferences with fallbacks', () => {
     const mem = memoryStorage({
-      'zhess:lang': 'de',
-      'zhess:clock': '"5+0"',
-      'zhess:helpers': 'true',
-      'zhess:seating': '42',
-      'zhess:opponent': '{"mode":"computer","level":7}',
+      'zigo:lang': 'de',
+      'zigo:clock': '"5+0"',
+      'zigo:helpers': 'true',
+      'zigo:seating': '42',
+      'zigo:opponent': '{"mode":"computer","level":7}',
     });
     const s = createStore(mem);
     expect(s.pref('lang', 'en')).toBe('de'); // bare string written by hand or older code
@@ -105,22 +105,22 @@ describe('storage', () => {
     s.setPref('tutorial-seen', true);
     expect(s.pref('tutorial-seen', false)).toBe(true);
     s.setPref('tutorial-seen', undefined);
-    expect(mem.getItem('zhess:tutorial-seen')).toBeNull();
+    expect(mem.getItem('zigo:tutorial-seen')).toBeNull();
   });
 
   it('survives corrupt data', () => {
     const s = createStore(
       memoryStorage({
-        'zhess:games': '{not json',
-        'zhess:rooms': '{"code":"X"}',
+        'zigo:games': '{not json',
+        'zigo:rooms': '{"code":"X"}',
       }),
     );
     expect(s.games()).toEqual([]);
     expect(s.rooms()).toEqual([]);
     const mixed = createStore(
       memoryStorage({
-        'zhess:games': JSON.stringify([game('OK', 1), { id: 'broken' }, null, 7]),
-        'zhess:rooms': JSON.stringify([room('R1'), { code: 'R2' }]),
+        'zigo:games': JSON.stringify([game('OK', 1), { id: 'broken' }, null, 7]),
+        'zigo:rooms': JSON.stringify([room('R1'), { code: 'R2' }]),
       }),
     );
     expect(mixed.games().map((g) => g.id)).toEqual(['OK']);
@@ -162,7 +162,7 @@ describe('storage', () => {
     Object.defineProperty(globalThis, 'localStorage', { value: mem, configurable: true, writable: true });
     try {
       defaultStore.setPref('color', 'b');
-      expect(mem.getItem('zhess:color')).toBe('"b"');
+      expect(mem.getItem('zigo:color')).toBe('"b"');
       expect(defaultStore.pref('color', 'random')).toBe('b');
     } finally {
       if (original) Object.defineProperty(globalThis, 'localStorage', original);

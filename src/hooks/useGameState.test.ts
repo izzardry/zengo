@@ -13,7 +13,7 @@ import { useGameState, type UseGameStateOptions } from './useGameState';
 const OFFLINE_ROOM: UseGameStateOptions['room'] = { broker: null, manualEnabled: false, locks: null, turnStorage: null, window: null, document: null };
 
 const SCHOLAR = ['e2e4', 'e7e5', 'f1c4', 'b8c6', 'd1h5', 'g8f6', 'h5f7'];
-const BASE = 'https://example.test/zhess/';
+const BASE = 'https://example.test/zigo/';
 
 let t = 0;
 const now = () => t;

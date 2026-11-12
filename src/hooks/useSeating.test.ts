@@ -35,22 +35,22 @@ describe('seating defaults', () => {
   });
 
   it('a stored value wins over the default; junk is ignored', () => {
-    expect(readSeating(createStore(memoryStorage({ 'zhess:seating': '"face"' })), mouse)).toBe('face');
-    expect(readSeating(createStore(memoryStorage({ 'zhess:seating': 'side' })), touch)).toBe('side');
-    expect(readSeating(createStore(memoryStorage({ 'zhess:seating': '"upside"' })), touch)).toBe('face');
-    expect(readSeating(createStore(memoryStorage({ 'zhess:seating': '42' })), mouse)).toBe('side');
+    expect(readSeating(createStore(memoryStorage({ 'zigo:seating': '"face"' })), mouse)).toBe('face');
+    expect(readSeating(createStore(memoryStorage({ 'zigo:seating': 'side' })), touch)).toBe('side');
+    expect(readSeating(createStore(memoryStorage({ 'zigo:seating': '"upside"' })), touch)).toBe('face');
+    expect(readSeating(createStore(memoryStorage({ 'zigo:seating': '42' })), mouse)).toBe('side');
   });
 });
 
 describe('useSeating', () => {
-  it('toggles and persists under zhess:seating', () => {
-    const mem = memoryStorage({ 'zhess:seating': '"side"' });
+  it('toggles and persists under zigo:seating', () => {
+    const mem = memoryStorage({ 'zigo:seating': '"side"' });
     const store = createStore(mem);
     const { result } = renderHook(() => useSeating(store));
     expect(result.current.seating).toBe('side');
     act(() => result.current.toggleSeating());
     expect(result.current.seating).toBe('face');
-    expect(mem.dump()['zhess:seating']).toBe('"face"');
+    expect(mem.dump()['zigo:seating']).toBe('"face"');
     act(() => result.current.setSeating('side'));
     expect(result.current.seating).toBe('side');
     expect(store.pref('seating', '')).toBe('side');

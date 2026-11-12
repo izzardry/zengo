@@ -31,7 +31,7 @@ function capacity(version: number, ecl: 'L' | 'M' = 'M'): number {
 
 describe('qrMatrix', () => {
   it('encodes a short link in a small version with finder patterns', () => {
-    const m = qrMatrix('https://example.org/zhess/#/?s=K7QW2M&o=r');
+    const m = qrMatrix('https://example.org/zigo/#/?s=K7QW2M&o=r');
     expect(m).not.toBeNull();
     expect(m!.size).toBe(qrSizeOf(m!.version));
     expect(m!.version).toBeLessThanOrEqual(4);
@@ -69,12 +69,12 @@ describe('qrMatrix', () => {
   });
 
   it('encodes non-ASCII text as UTF-8', () => {
-    const m = qrMatrix('Zhess ♞ é');
+    const m = qrMatrix('Zigo ♞ é');
     expect(m).not.toBeNull();
   });
 
   it('a real manual offer link gets a QR code well below the limit', async () => {
-    const link = offerLink('K7QW2M', await encodeSdp(CHROME_OFFER, 'offer'), 'https://izzardry.github.io/zhess/');
+    const link = offerLink('K7QW2M', await encodeSdp(CHROME_OFFER, 'offer'), 'https://izzardry.github.io/zigo/');
     const m = qrMatrix(link);
     expect(m).not.toBeNull();
     expect(m!.version).toBeLessThanOrEqual(15);
@@ -89,16 +89,16 @@ describe('qrPath / qrSvg', () => {
   });
 
   it('covers exactly the dark modules', () => {
-    const m = qrMatrix('zhess')!;
+    const m = qrMatrix('zigo')!;
     const dark = m.modules.flat().filter(Boolean).length;
     const covered = [...qrPath(m).matchAll(/h(\d+)v1/g)].reduce((s, x) => s + Number(x[1]), 0);
     expect(covered).toBe(dark);
   });
 
   it('reports the viewBox with the quiet zone', () => {
-    const s = qrSvg('zhess')!;
+    const s = qrSvg('zigo')!;
     expect(s.viewBox).toBe(qrSizeOf(s.version) + 8);
-    expect(qrSvg('zhess', { margin: 0 })!.viewBox).toBe(qrSizeOf(s.version));
+    expect(qrSvg('zigo', { margin: 0 })!.viewBox).toBe(qrSizeOf(s.version));
     expect(s.path.startsWith('M4 4h7')).toBe(true);
   });
 });

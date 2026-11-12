@@ -79,7 +79,7 @@ beforeAll(() => {
 beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
-  localStorage.setItem('zhess:tutorial-seen', 'true');
+  localStorage.setItem('zigo:tutorial-seen', 'true');
   engine = new FakeEngine({ loadMs: 30 });
   setSharedEngine(engine);
 });
@@ -181,7 +181,7 @@ describe('Index stage against the computer', () => {
     await waitFor(() => expect(stage()).toHaveAttribute('data-engine', 'ready'));
 
     move('h5', 'h6');
-    await waitFor(() => expect(cellOf('h5').querySelector('.zhess-blunder')).not.toBeNull());
+    await waitFor(() => expect(cellOf('h5').querySelector('.zigo-blunder')).not.toBeNull());
     expect(cellName('h5')).toMatch(/^white queen, h5/);
     expect(cellName('h6')).toMatch(/^h6/);
     expect(screen.getByTestId('assist-live')).toHaveTextContent('looks like a blunder');
@@ -191,7 +191,7 @@ describe('Index stage against the computer', () => {
   });
 
   it('blunder guard is off with helpers off', async () => {
-    localStorage.setItem('zhess:helpers', 'false');
+    localStorage.setItem('zigo:helpers', 'false');
     const plies = ['e2e4', 'e7e5', 'd1h5', 'b8c6'];
     renderStage(`/?s=BLUNDR&p=1&o=c&d=1&w=w&m=${urlOf(plies)}`);
     move('h5', 'h6');
@@ -232,7 +232,7 @@ describe('Index stage against the computer', () => {
     });
     expect(screen.queryByTestId('clock-dial')).toBeNull();
     expect(screen.getByTestId('clock-pill')).toHaveAttribute('data-value', '20+5');
-    expect(localStorage.getItem('zhess:clock')).toBe('"20+5"');
+    expect(localStorage.getItem('zigo:clock')).toBe('"20+5"');
   });
 
   it('a 1+0 game: the flag falls and the overlay says Out of time', async () => {
@@ -330,12 +330,12 @@ describe('Index stage against the computer', () => {
     move('d8', 'h4', 'b');
     expect(await screen.findByRole('dialog', { name: 'Checkmate!' }, { timeout: 3000 })).toBeInTheDocument();
     expect(await screen.findByText('Did you enjoy your first round?', {}, { timeout: 4000 })).toBeInTheDocument();
-    expect(localStorage.getItem('zhess:donation-shown')).toBe('true');
+    expect(localStorage.getItem('zigo:donation-shown')).toBe('true');
   });
 
   it('a loss against the computer shows Checkmate without the glyph', async () => {
     // Helpers off: the guard would (rightly) refuse 2. g4 the first time.
-    localStorage.setItem('zhess:helpers', 'false');
+    localStorage.setItem('zigo:helpers', 'false');
     // The player (white) is mated by the scripted computer: 1. f3 e5 2. g4 Qh4#.
     const afterG4 = zhess.replay(['f2f3', 'e7e5', 'g2g4'].map((m) => ({ m, ms: 0 }))).fen;
     setSharedEngine(new FakeEngine({ moves: { [afterG4]: 'd8h4' } }));
@@ -383,7 +383,7 @@ describe('Index stage against the computer', () => {
     // The computer's reply lands in the game; the review stays where the player is.
     await waitFor(
       () => {
-        const g = JSON.parse(localStorage.getItem('zhess:games') ?? '[]').find((x: { id: string }) => x.id === 'REVW02');
+        const g = JSON.parse(localStorage.getItem('zigo:games') ?? '[]').find((x: { id: string }) => x.id === 'REVW02');
         expect(g?.ms).toHaveLength(4);
       },
       { timeout: 3000 },

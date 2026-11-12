@@ -665,7 +665,7 @@ export function useBoardInput(options: BoardInputOptions): BoardInput {
       const root = opts.current.rootRef?.current;
       const t = e.target;
       if (t instanceof Node && root?.contains(t)) return;
-      if (t instanceof Element && t.closest('[data-zhess-dial]')) return;
+      if (t instanceof Element && t.closest('[data-zigo-dial]')) return;
       if (selRef.current) select(null);
       cancelPremove();
     };

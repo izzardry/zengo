@@ -164,7 +164,7 @@ export function urlQuery(p: UrlParams): string {
 /* ---------------------------------------------------------------------------------------------- */
 
 /**
- * The app's base address without hash or query, e.g. `https://izzardry.github.io/zhess/`.
+ * The app's base address without hash or query, e.g. `https://izzardry.github.io/zigo/`.
  * Pass a location for tests; defaults to `window.location`.
  */
 export function appBaseUrl(loc?: Pick<Location, 'origin' | 'pathname'>): string {
@@ -234,7 +234,7 @@ export function gameParams(g: ShareableGame): UrlParams {
 /* ---------------------------------------------------------------------------------------------- */
 
 /**
- * `useSearchParams` with Zhess's rules: `write(p)` serializes `p`, keeps the current `x` and `y`
+ * `useSearchParams` with Zigo's rules: `write(p)` serializes `p`, keeps the current `x` and `y`
  * unless `p` sets them, and navigates with `replace: true` only when the query actually changes.
  * `isOwnWrite(search)` tells a query this hook wrote itself from one that arrived from outside
  * (a pasted link, the back button).

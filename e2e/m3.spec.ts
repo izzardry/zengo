@@ -51,8 +51,8 @@ async function device(browser: Browser, opts: { broker: boolean }): Promise<Devi
   const context = await browser.newContext();
   await context.addInitScript(() => {
     try {
-      localStorage.setItem('zhess:tutorial-seen', 'true');
-      localStorage.setItem('zhess:donation-shown', 'true');
+      localStorage.setItem('zigo:tutorial-seen', 'true');
+      localStorage.setItem('zigo:donation-shown', 'true');
     } catch {
       /* storage blocked */
     }
@@ -321,7 +321,7 @@ test.describe('Gate 3 · rooms', () => {
     });
     await g.reload();
     await expect(stage(g)).toHaveAttribute('data-phase', 'start');
-    expect(await g.evaluate(() => localStorage.getItem('zhess:rooms'))).toBeNull();
+    expect(await g.evaluate(() => localStorage.getItem('zigo:rooms'))).toBeNull();
 
     // The guest starts the same code with ROOM (it has no record now).
     await startRoom(g, code);

@@ -1,5 +1,5 @@
 /**
- * The Zhess piece set (DESIGN 5.1): six shapes with thin, even strokes on a 100 × 100 box.
+ * The Zigo piece set (DESIGN 5.1): six shapes with thin, even strokes on a 100 × 100 box.
  *
  * Pure data so it can be reused anywhere an SVG is drawn: the board, captured pieces, the move
  * strip, thumbnails, the promotion dial, and the app-icon script. Each shape is a list of parts:
@@ -93,8 +93,8 @@ export interface PiecePaint {
 export const FOREGROUND = 'hsl(var(--foreground))';
 export const BACKGROUND = 'hsl(var(--background))';
 /** The lighter and the darker of foreground and background in the current theme (src/index.css). */
-export const INK_LIGHT = 'hsl(var(--zhess-ink-light))';
-export const INK_DARK = 'hsl(var(--zhess-ink-dark))';
+export const INK_LIGHT = 'hsl(var(--ink-light))';
+export const INK_DARK = 'hsl(var(--ink-dark))';
 
 /**
  * White pieces are light and black pieces dark in both themes; only the outline follows the

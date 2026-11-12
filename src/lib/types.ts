@@ -1,5 +1,5 @@
 /**
- * Zhess contracts.
+ * Zigo contracts.
  *
  * Every cross-package type and interface lives here (PLAN.md section 4). Packages code against
  * these shapes. A package that needs a change reports it to the orchestrator, which edits this
@@ -301,7 +301,7 @@ export interface Room {
   games: string[];
 }
 
-/** `lib/storage.ts` — every read guarded, keys of DESIGN 13.1 under the `zhess:` prefix. */
+/** `lib/storage.ts` — every read guarded, keys of DESIGN 13.1 under the `zigo:` prefix. */
 export interface Store {
   /** Saved games, newest `lastPlayedAt` first. */
   games(): SavedGame[];
@@ -321,7 +321,7 @@ export interface Store {
   setPref<T>(key: string, value: T): void;
 }
 
-/** Preference keys of DESIGN 13.1 (without the `zhess:` prefix). */
+/** Preference keys of DESIGN 13.1 (without the `zigo:` prefix). */
 export type PrefKey =
   | 'opponent'
   | 'color'
@@ -333,19 +333,19 @@ export type PrefKey =
   | 'donation-shown'
   | 'install-dismissed';
 
-/** Opponent selector value (DESIGN 4.1), stored under `zhess:opponent`. */
+/** Opponent selector value (DESIGN 4.1), stored under `zigo:opponent`. */
 export type Opponent =
   | { readonly mode: 'room' }
   | { readonly mode: 'local' }
   | { readonly mode: 'computer'; readonly level: number };
 
-/** Color pill value (DESIGN 4.1), stored under `zhess:color`. */
+/** Color pill value (DESIGN 4.1), stored under `zigo:color`. */
 export type ColorChoice = 'random' | Color;
 
-/** Pass-and-play seating (DESIGN 5.2), stored under `zhess:seating`. */
+/** Pass-and-play seating (DESIGN 5.2), stored under `zigo:seating`. */
 export type Seating = 'face' | 'side';
 
-/** UI language (DESIGN 14), stored under `zhess:lang`. */
+/** UI language (DESIGN 14), stored under `zigo:lang`. */
 export type Language = 'en' | 'de' | 'fr' | 'es';
 
 /* ------------------------------------------------------------------------------------------------

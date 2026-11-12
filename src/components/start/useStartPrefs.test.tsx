@@ -17,7 +17,7 @@ describe('useStartPrefs', () => {
     expect(result.current.clock).toBeNull();
   });
 
-  it('persists every change under zhess:opponent, zhess:color and zhess:clock', () => {
+  it('persists every change under zigo:opponent, zigo:color and zigo:clock', () => {
     const { store, mem } = setup();
     const { result } = renderHook(() => useStartPrefs(store));
     act(() => result.current.setOpponent({ mode: 'room' }));
@@ -27,19 +27,19 @@ describe('useStartPrefs', () => {
     expect(result.current.color).toBe('b');
     expect(result.current.clock).toEqual({ baseMs: 180000, incMs: 2000 });
     expect(mem.dump()).toMatchObject({
-      'zhess:opponent': '{"mode":"room"}',
-      'zhess:color': '"b"',
-      'zhess:clock': '"3+2"',
+      'zigo:opponent': '{"mode":"room"}',
+      'zigo:color': '"b"',
+      'zigo:clock': '"3+2"',
     });
     act(() => result.current.setClock(null));
-    expect(mem.dump()['zhess:clock']).toBe('"off"');
+    expect(mem.dump()['zigo:clock']).toBe('"off"');
   });
 
   it('restores remembered values', () => {
     const { store } = setup({
-      'zhess:opponent': '{"mode":"computer","level":11}',
-      'zhess:color': '"w"',
-      'zhess:clock': '"15+10"',
+      'zigo:opponent': '{"mode":"computer","level":11}',
+      'zigo:color': '"w"',
+      'zigo:clock': '"15+10"',
     });
     const { result } = renderHook(() => useStartPrefs(store));
     expect(result.current.opponent).toEqual({ mode: 'computer', level: 11 });
@@ -49,9 +49,9 @@ describe('useStartPrefs', () => {
 
   it('falls back to defaults on corrupt or foreign values', () => {
     const { store } = setup({
-      'zhess:opponent': '{"mode":"computer","level":99}',
-      'zhess:color': '"purple"',
-      'zhess:clock': '{bad json',
+      'zigo:opponent': '{"mode":"computer","level":99}',
+      'zigo:color': '"purple"',
+      'zigo:clock': '{bad json',
     });
     expect(readOpponent(store)).toEqual({ mode: 'computer', level: 5 });
     expect(readColor(store)).toBe('random');
@@ -64,6 +64,6 @@ describe('useStartPrefs', () => {
     // @ts-expect-error runtime guard
     act(() => result.current.setColor('green'));
     expect(result.current.color).toBe('random');
-    expect(mem.dump()['zhess:color']).toBeUndefined();
+    expect(mem.dump()['zigo:color']).toBeUndefined();
   });
 });

@@ -139,7 +139,7 @@ describe('ClockDial', () => {
     // First arrow aims at the current value, the next moves clockwise.
     fireEvent.keyDown(dial(), { key: 'ArrowRight' });
     expect(item(5)).toHaveClass('dial-item--aim');
-    expect(dial()).toHaveAttribute('aria-activedescendant', `zhess-clock-dial-minutes-${DIAL_MINUTES.indexOf(5)}`);
+    expect(dial()).toHaveAttribute('aria-activedescendant', `zigo-clock-dial-minutes-${DIAL_MINUTES.indexOf(5)}`);
     fireEvent.keyDown(dial(), { key: 'ArrowRight' });
     fireEvent.keyDown(dial(), { key: 'Enter' });
     expect(dial()).toHaveAttribute('data-step', 'increment');

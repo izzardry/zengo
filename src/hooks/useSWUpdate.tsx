@@ -20,7 +20,7 @@ import { useI18n } from '@/lib/i18n';
 
 export const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
 export const UPDATE_TOAST_MS = 15_000;
-export const UPDATE_TOAST_ID = 'zhess-sw-update';
+export const UPDATE_TOAST_ID = 'zigo-sw-update';
 
 export type UpdateCheckResult = 'available' | 'none' | 'unsupported';
 

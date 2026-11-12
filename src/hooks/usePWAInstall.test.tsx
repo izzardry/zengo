@@ -83,7 +83,7 @@ describe('usePWAInstall', () => {
     act(() => result.current.dismiss());
     expect(result.current.shouldShowPrompt).toBe(false);
     expect(result.current.canInstall).toBe(true);
-    expect(raw.dump()['zhess:install-dismissed']).toBe('true');
+    expect(raw.dump()['zigo:install-dismissed']).toBe('true');
 
     const again = renderHook(() => usePWAInstall({ store, enabled: true }));
     expect(again.result.current.wasDismissed).toBe(true);

@@ -1,6 +1,6 @@
 /**
  * QR codes for the invite and the manual signalling links (DESIGN 9.9), drawn by the app with
- * `qrcode-generator` (MIT). Scanning uses the phone's camera app; Zhess has no scanner.
+ * `qrcode-generator` (MIT). Scanning uses the phone's camera app; Zigo has no scanner.
  *
  * Rule (PLAN 7): if a payload needs more than QR version 25 (117 × 117 modules), there is no QR
  * and the UI shows the link only. Every function here returns null in that case.
@@ -12,7 +12,7 @@ import qrcode from 'qrcode-generator';
 
 export type QrEcl = 'L' | 'M' | 'Q' | 'H';
 
-/** Largest QR version Zhess shows (PLAN 7). */
+/** Largest QR version Zigo shows (PLAN 7). */
 export const QR_MAX_VERSION = 25;
 
 export interface QrOptions {

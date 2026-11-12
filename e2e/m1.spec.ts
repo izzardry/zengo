@@ -31,7 +31,7 @@ const SCHOLARS_MATE: [string, string][] = [
 async function skipTutorial(context: BrowserContext) {
   await context.addInitScript(() => {
     try {
-      localStorage.setItem('zhess:tutorial-seen', 'true');
+      localStorage.setItem('zigo:tutorial-seen', 'true');
     } catch {
       /* storage blocked: the tutorial is dismissed by a tap below */
     }

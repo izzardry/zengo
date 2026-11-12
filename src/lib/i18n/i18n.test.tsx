@@ -54,7 +54,7 @@ describe('string tables', () => {
   });
 
   it('keeps the brand untranslated', () => {
-    expect(BRAND.tagline).toBe('Zero Distractions. Just Chess.');
+    expect(BRAND.tagline).toBe('Zero Distractions. Just Go.');
     for (const lang of LANGS) expect(Object.values(dictionaries[lang])).not.toContain(BRAND.tagline);
   });
 });
@@ -80,8 +80,8 @@ describe('translate', () => {
 
 describe('language detection', () => {
   it('uses the stored choice, then the browser, then English', () => {
-    expect(getInitialLanguage(createStore(memoryStorage({ 'zhess:lang': '"fr"' })))).toBe('fr');
-    expect(getInitialLanguage(createStore(memoryStorage({ 'zhess:lang': '"xx"' })))).toBe(detectBrowserLanguage());
+    expect(getInitialLanguage(createStore(memoryStorage({ 'zigo:lang': '"fr"' })))).toBe('fr');
+    expect(getInitialLanguage(createStore(memoryStorage({ 'zigo:lang': '"xx"' })))).toBe(detectBrowserLanguage());
     expect(detectBrowserLanguage({ language: 'de-AT', languages: ['de-AT', 'en'] })).toBe('de');
     expect(detectBrowserLanguage({ language: 'pt-BR', languages: ['pt-BR', 'es-ES'] })).toBe('es');
     expect(detectBrowserLanguage({ language: 'ja', languages: ['ja'] })).toBe('en');
@@ -104,7 +104,7 @@ function Probe() {
 
 describe('I18nProvider', () => {
   it('provides t(), syncs <html lang> and persists the choice', () => {
-    const mem = memoryStorage({ 'zhess:lang': '"de"' });
+    const mem = memoryStorage({ 'zigo:lang': '"de"' });
     render(
       <I18nProvider store={createStore(mem)}>
         <Probe />
@@ -117,7 +117,7 @@ describe('I18nProvider', () => {
     act(() => screen.getByText('es').click());
     expect(screen.getByTestId('undo').textContent).toBe('Deshacer');
     expect(document.documentElement.lang).toBe('es');
-    expect(mem.getItem('zhess:lang')).toBe('"es"');
+    expect(mem.getItem('zigo:lang')).toBe('"es"');
   });
 
   it('accepts a fixed language for tests', () => {

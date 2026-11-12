@@ -96,10 +96,10 @@ describe('stage helpers', () => {
   it('writes English PGN headers', () => {
     const s = createSession({ code: 'K7QW2M', mode: 'local', color: 'w', tc: '5+0' }, Date.UTC(2026, 10, 11, 12));
     const meta = pgnMeta(s, 'https://example.test/');
-    expect(meta).toMatchObject({ event: 'Zhess K7QW2M', site: 'https://example.test/', white: 'White', black: 'Black' });
+    expect(meta).toMatchObject({ event: 'Zigo K7QW2M', site: 'https://example.test/', white: 'White', black: 'Black' });
     expect(meta.date).toMatch(/^2026\.11\.1[01]$/);
     expect(meta.timeControl).toEqual({ baseMs: 300_000, incMs: 0 });
     const c = createSession({ code: 'ABC', mode: 'computer', level: 7, color: 'b', tc: null }, 0);
-    expect(pgnMeta(c, '')).toMatchObject({ white: 'Zhess Level 7', black: 'Player', timeControl: null });
+    expect(pgnMeta(c, '')).toMatchObject({ white: 'Zigo Level 7', black: 'Player', timeControl: null });
   });
 });

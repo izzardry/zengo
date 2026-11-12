@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ENGINE_PATH } from './browser';
 import { ENGINE_CACHE, ENGINE_WASM_PATH, downloadEngine, isEngineCached } from './offline';
 
-const BASE = 'https://example.test/zhess/';
+const BASE = 'https://example.test/zigo/';
 const JS_URL = BASE + ENGINE_PATH;
 const WASM_URL = BASE + ENGINE_WASM_PATH;
 

@@ -1,7 +1,7 @@
 /**
  * i18n core without React: merged dictionaries, `translate`, language detection.
  * Ported from Zudoku's `src/lib/i18n.tsx` with the Ztyle audit fixes (#13 storage key
- * `zhess:lang`, #16 `<html lang>` — see index.tsx) and per-package tables (PLAN 3.2).
+ * `zigo:lang`, #16 `<html lang>` — see index.tsx) and per-package tables (PLAN 3.2).
  */
 import { store as defaultStore } from '../storage';
 import type { Language, Store } from '../types';
@@ -65,7 +65,7 @@ export function detectBrowserLanguage(nav: Pick<Navigator, 'language' | 'languag
   return 'en';
 }
 
-/** Stored choice (`zhess:lang`) → browser language → `en` (Ztyle chapter 14). */
+/** Stored choice (`zigo:lang`) → browser language → `en` (Ztyle chapter 14). */
 export function getInitialLanguage(s: Store = defaultStore): Language {
   const stored = s.pref<string | null>('lang', null);
   return isLanguage(stored) ? stored : detectBrowserLanguage();

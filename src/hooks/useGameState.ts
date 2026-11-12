@@ -232,7 +232,7 @@ function levelOf(s: State): number {
 /**
  * What the address bar should say for a state. A room says its code only (DESIGN 13.2). The start
  * screen with `ROOM` selected leaves `o` out: `?s=CODE&o=r` is the invite link, which opens the room
- * at once, and the selection is remembered in `zhess:opponent` anyway.
+ * at once, and the selection is remembered in `zigo:opponent` anyway.
  */
 function desiredUrl(s: State): UrlParams {
   if (s.room) return { code: s.room.code, playing: true, mode: 'room' };
@@ -328,11 +328,11 @@ export interface UseGameState {
   setCode(code: string): boolean;
   /** A new random code that no stored game uses. Returns it. */
   regenerateCode(): string;
-  /** Remembered in `zhess:opponent`. */
+  /** Remembered in `zigo:opponent`. */
   setOpponent(o: Opponent): void;
-  /** Remembered in `zhess:color`. */
+  /** Remembered in `zigo:color`. */
   setColorChoice(c: ColorChoice): void;
-  /** Remembered in `zhess:clock` (`off` for null). */
+  /** Remembered in `zigo:clock` (`off` for null). */
   setTc(tc: TcString | null): void;
   /** Label of the Start pill for the current code and opponent (DESIGN 4.1), and the stored game it refers to. */
   startPill: StartPill;
@@ -584,7 +584,7 @@ export function useGameState(options: UseGameStateOptions = {}): UseGameState {
     const bump = () => setSavedVersion((v) => v + 1);
     const off = onSavedGamesChange(bump);
     const onStorage = (e: StorageEvent) => {
-      if (e.key === null || e.key.startsWith('zhess:')) bump();
+      if (e.key === null || e.key.startsWith('zigo:')) bump();
     };
     window.addEventListener('storage', onStorage);
     // The autosave effect above runs before this subscription on mount (a game opened from a

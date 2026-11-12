@@ -40,7 +40,7 @@ export function clampLevel(v: unknown): number | undefined {
   return n >= 1 && n <= 12 ? n : undefined;
 }
 
-/** Validates a stored opponent value (`zhess:opponent`); anything unreadable is the default. */
+/** Validates a stored opponent value (`zigo:opponent`); anything unreadable is the default. */
 export function parseOpponent(v: unknown): Opponent {
   if (typeof v === 'object' && v !== null) {
     const o = v as { mode?: unknown; level?: unknown };
@@ -51,15 +51,15 @@ export function parseOpponent(v: unknown): Opponent {
   return DEFAULT_OPPONENT;
 }
 
-/** Validates a stored color choice (`zhess:color`). Default random. */
+/** Validates a stored color choice (`zigo:color`). Default random. */
 export function parseColorChoice(v: unknown): ColorChoice {
   return v === 'w' || v === 'b' ? v : 'random';
 }
 
-/** Value stored under `zhess:clock` for "clock off". */
+/** Value stored under `zigo:clock` for "clock off". */
 export const CLOCK_OFF = 'off';
 
-/** Validates a stored time control (`zhess:clock`): a normalized `m+s` string, or null for off. */
+/** Validates a stored time control (`zigo:clock`): a normalized `m+s` string, or null for off. */
 export function parseClockPref(v: unknown): TcString | null {
   return typeof v === 'string' ? (normalizeTc(v) ?? null) : null;
 }
