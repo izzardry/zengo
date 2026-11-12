@@ -1,46 +1,65 @@
 /*
  * Board-only motion that Tailwind and Ztyle do not define. Plain CSS, outside Tailwind's layers.
- * The global reduced-motion block in ztyle.css shortens these to 1 ms.
+ * Every one-shot mark has a still fallback under reduced motion (Ztyle 07): the global block in
+ * ztyle.css cuts animations to 1 ms, so the mark is shown still for twice the pulse, then cleared
+ * by a 1 ms animation delayed by that time (the global block shortens durations, not delays).
  */
 
-/* Blunder guard (DESIGN 7.2): the piece pulses destructive once. */
+.zigo-hint-pulse,
+.zigo-atari-pulse,
+.zigo-blunder {
+  transform-box: fill-box;
+  transform-origin: center;
+  pointer-events: none;
+}
+
+/* Hint (DESIGN 7.3): green, 800 ms, once. */
+@keyframes zigo-hint-pulse {
+  0% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(1.35); }
+  100% { opacity: 0; transform: scale(1.6); }
+}
+.zigo-hint-pulse {
+  animation: zigo-hint-pulse var(--dur-pulse, 800ms) ease-out 1 forwards;
+}
+
+/* Atari (DESIGN 5.3): the ring pulses once when the group enters atari. */
+@keyframes zigo-atari-pulse {
+  0% { opacity: 0.9; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.45); }
+}
+.zigo-atari-pulse {
+  opacity: 0;
+  animation: zigo-atari-pulse var(--dur-pulse, 800ms) ease-out 1;
+}
+
+/* Blunder guard (DESIGN 7.2): the bounced stone pulses destructive once, then disappears. */
 @keyframes zigo-blunder-pulse {
-  0% { filter: drop-shadow(0 0 0 hsl(var(--destructive) / 0)); transform: scale(1); }
-  35% { filter: drop-shadow(0 0 3px hsl(var(--destructive) / 0.9)) drop-shadow(0 0 6px hsl(var(--destructive) / 0.6)); transform: scale(1.08); }
-  100% { filter: drop-shadow(0 0 0 hsl(var(--destructive) / 0)); transform: scale(1); }
+  0% { opacity: 1; transform: scale(1); filter: drop-shadow(0 0 0 hsl(var(--destructive) / 0)); }
+  35% { opacity: 1; transform: scale(1.08); filter: drop-shadow(0 0 3px hsl(var(--destructive) / 0.9)) drop-shadow(0 0 6px hsl(var(--destructive) / 0.6)); }
+  100% { opacity: 0; transform: scale(1); filter: drop-shadow(0 0 0 hsl(var(--destructive) / 0)); }
 }
 .zigo-blunder {
+  opacity: 0;
   animation: zigo-blunder-pulse var(--dur-pulse, 800ms) ease-out 1;
 }
-.zigo-blunder.rotate-180 {
-  animation-name: zigo-blunder-pulse-rotated;
-}
-@keyframes zigo-blunder-pulse-rotated {
-  0% { filter: drop-shadow(0 0 0 hsl(var(--destructive) / 0)); transform: rotate(180deg) scale(1); }
-  35% { filter: drop-shadow(0 0 3px hsl(var(--destructive) / 0.9)) drop-shadow(0 0 6px hsl(var(--destructive) / 0.6)); transform: rotate(180deg) scale(1.08); }
-  100% { filter: drop-shadow(0 0 0 hsl(var(--destructive) / 0)); transform: rotate(180deg) scale(1); }
-}
 
-/*
- * Reduced motion (DESIGN 14.1 removes pulses; Ztyle 07 keeps the static fill): the global block in
- * ztyle.css cuts every animation to 1 ms, which would leave the hint and the blunder warning
- * invisible. Instead both show a static mark for twice the pulse's duration, then clear. The clear
- * is a 1 ms animation delayed by that time (the global block shortens durations, not delays).
- */
-@keyframes zigo-hint-clear { to { opacity: 0; } }
-@keyframes zigo-blunder-clear { to { filter: none; } }
+@keyframes zigo-mark-clear { to { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) {
-  .zigo-hint {
-    box-shadow: inset 0 0 0 999px hsl(var(--success) / .3);
-    animation: zigo-hint-clear 1ms linear calc(var(--dur-pulse, 800ms) * 2) 1 forwards !important;
+  .zigo-hint-pulse,
+  .zigo-blunder {
+    opacity: 1;
+    transform: none;
+    animation: zigo-mark-clear 1ms linear calc(var(--dur-pulse, 800ms) * 2) 1 forwards !important;
   }
   .zigo-blunder {
-    filter: drop-shadow(0 0 3px hsl(var(--destructive) / 0.9)) drop-shadow(0 0 6px hsl(var(--destructive) / 0.6));
-    animation: zigo-blunder-clear 1ms linear calc(var(--dur-pulse, 800ms) * 2) 1 forwards !important;
+    filter: drop-shadow(0 0 3px hsl(var(--destructive) / 0.9));
   }
+  /* The atari ring itself stays (it is static); only the pulse goes. */
+  .zigo-atari-pulse { display: none; }
 }
 
-/* Typed SAN that did not parse: a short shake. */
+/* Typed coordinate that did not parse: a short shake. */
 @keyframes zigo-typed-shake {
   0%, 100% { transform: translateX(0); }
   25% { transform: translateX(-4px); }
@@ -50,17 +69,8 @@
   animation: zigo-typed-shake 200ms ease-in-out 2;
 }
 
-/*
- * The grid does not clip its squares (the hint pulse's outer glow must reach past the board edge),
- * so the four corner squares carry the grid's rounding themselves; their overlays inherit it.
- */
-.zigo-grid > [role="row"]:first-child > .zigo-square:first-child { border-top-left-radius: calc(var(--radius) - 2px); }
-.zigo-grid > [role="row"]:first-child > .zigo-square:last-child { border-top-right-radius: calc(var(--radius) - 2px); }
-.zigo-grid > [role="row"]:last-child > .zigo-square:first-child { border-bottom-left-radius: calc(var(--radius) - 2px); }
-.zigo-grid > [role="row"]:last-child > .zigo-square:last-child { border-bottom-right-radius: calc(var(--radius) - 2px); }
-
-/* Brand focus ring on cells (Ztyle 16): inset, never the browser outline. */
-.zigo-square:focus-visible {
+/* Brand focus ring on intersections (Ztyle 16): a ring around the point, never the browser outline. */
+.zigo-point:focus-visible {
   outline: none;
-  box-shadow: inset 0 0 0 2px hsl(var(--ring) / 0.6);
+  box-shadow: 0 0 0 2px hsl(var(--ring) / 0.7);
 }

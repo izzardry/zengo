@@ -1,54 +1,40 @@
 /**
  * Board package (1A). Import from `@/components/board`.
  */
-export { ChessBoard } from './ChessBoard';
-export { BoardSquare, type BoardSquareProps } from './Square';
+export { GoBoard } from './GoBoard';
 export { BoardThumbnail, type BoardThumbnailProps } from './BoardThumbnail';
-export { PieceIcon, type PieceIconProps } from './PieceIcon';
-export { PromotionDial, type PromotionDialProps } from './PromotionDial';
+export { StoneGlyph, StoneDefs, StoneShape, StoneGradients, type StoneGlyphProps } from './stones';
+export { STONE_FILL, STONE_CONTRAST, STONE_OUTLINE } from './paint';
+export { goBoardGameProps, useGoBoardGame, type GoBoardGameProps } from './gameProps';
 export {
-  dialPick,
-  clampDialCenter,
-  DIAL_PIECES,
-  DIAL_HOLD_MS,
-  DIAL_RADIUS,
-  DIAL_POP_RADIUS,
-  DIAL_REACH,
-  type DialPick,
-  type DialZone,
-} from './dial';
-export {
-  PIECE_SHAPES,
-  PIECE_STROKE,
-  pieceSvgMarkup,
-  piecePaint,
-  partStyle,
-  strokeForSize,
-  type PiecePart,
-  type PiecePaint,
-} from './pieceShapes';
-export {
+  countCaptures,
+  describeAtari,
   describeMove,
-  describeSquare,
-  pieceLabel,
-  pieceName,
+  describePoint,
   sideName,
-  type CellStates,
+  type PointInfo,
   type Translate,
 } from './describe';
 export {
-  DEFAULT_CELL_SIZE,
-  cellToSquare,
-  drawOrder,
-  isLightSquare,
-  isPromotionRank,
-  parseFenBoard,
-  premoveTargets,
-  premoveUci,
-  squareAt,
-  squareCenter,
-  squareToCell,
-  stepSquare,
+  BOARD_SIZE_LANDSCAPE,
+  BOARD_SIZE_PORTRAIT,
+  GTP_COLUMNS,
+  LIFT_PX,
+  MARGIN,
+  STONE_R,
+  centerPoint,
+  cellToPoint,
+  columnLabel,
+  extent,
+  inGhostHitArea,
+  pointAt,
+  pointCenter,
+  pointName,
+  pointToCell,
+  rowLabel,
+  starSet,
+  stepPoint,
+  viewBox,
   type Box,
 } from './geometry';
-export type { BoardHighlights, ChessBoardProps, Movable, Premove } from './types';
+export type { BoardHint, BoardScoring, GoBoardProps, TerritoryPreview } from './types';

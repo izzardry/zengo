@@ -1,116 +1,108 @@
 /**
- * Board input (DESIGN 6): tap-tap, drag with pointer events, keyboard focus ring, typed SAN, the
- * 300 ms hold that opens the promotion dial, and premoves. Used by `ChessBoard`; the board is
- * controlled, so this hook never changes the game, it only calls `onMove` / `onPremove`.
+ * Board input (DESIGN 6.1, 6.2, 8.4): one pointer state machine per size class, the keyboard
+ * focus ring, typed coordinates and `pass`. Used by `GoBoard`; the board is controlled, so this
+ * hook never changes a game, it only calls back (`onPlay`, `onPass`, `onToggleGroup`, …).
  *
- * Interaction state that changes on every pointer move (the press, the drag, the dial) lives in
- * refs and a render tick, so handlers never read a stale value between renders.
+ * Size classes (by the pointer that is used, not by the device):
+ * - `fine` (mouse, pen), any size: a hover ghost follows the pointer; a click places.
+ * - `tap` (touch on 9×9): a tap places at once; a drag shows the ghost under the finger and the
+ *   release places.
+ * - `confirm` (touch on 13×13 and 19×19): the first tap or drag only shows the ghost (a drag floats
+ *   it one finger-width above the touch point, snapping to intersections); a second tap on the
+ *   ghost (its cell plus half a pitch) commits; a tap elsewhere on the board moves it; a tap off the
+ *   board cancels it. Neither the first tap nor a drag ever commits.
+ *
+ * An illegal point never commits. With helpers on, `onIllegal` tells the parent why; with helpers
+ * off the attempt is ignored without comment. While scoring, a tap or Enter on a stone calls
+ * `onToggleGroup` instead.
+ *
+ * Interaction state that changes on every pointer move lives in refs; the ghost and hover points
+ * are state, so they survive any re-render of the board or its parent.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type RefObject } from 'react';
-import { board as boardOf, legalMoves, sanToUci } from '@/lib/zhess';
-import type { Color, Game, Piece, PromotionPiece, Square, Uci } from '@/lib/chessTypes';
-import { isPromotionRank, premoveTargets, squareAt, squareCenter, stepSquare, type Box } from '@/components/board/geometry';
-import { clampDialCenter, DIAL_HOLD_MS, dialPick, type DialZone } from '@/components/board/dial';
-import type { Movable, Premove } from '@/components/board/types';
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type RefObject } from 'react';
+import { fromGtp, pointToIndex } from '@/lib/zigo';
+import type { IllegalReason, Point, Size } from '@/lib/types';
+import {
+  DRAG_THRESHOLD,
+  LIFT_PX,
+  centerPoint,
+  inGhostHitArea,
+  pointAt,
+  pointToCell,
+  stepPoint,
+  type Box,
+} from '@/components/board/geometry';
 
-/** A square the selected piece can go to. */
-export interface TargetInfo {
-  /** UCI without promotion letter for a legal move; null for a premove target. */
-  readonly uci: Uci | null;
-  readonly capture: boolean;
-  readonly promotion: boolean;
-  /** Accepted as a drop but not drawn: the own rook for castling (DESIGN 6.1). */
-  readonly hidden: boolean;
+/** How a pointer places stones on this board (see the module comment). */
+export type InputClass = 'fine' | 'tap' | 'confirm';
+
+/** The size class of a pointer on a board of `size`. */
+export function inputClass(size: number, pointerType: string): InputClass {
+  if (pointerType !== 'touch') return 'fine';
+  return size === 9 ? 'tap' : 'confirm';
 }
-
-export interface DragState {
-  readonly from: Square;
-  readonly piece: Piece;
-  /** Pointer position (client px). */
-  readonly x: number;
-  readonly y: number;
-  readonly pointerType: string;
-  /** Square under the pointer. */
-  readonly over: Square | null;
-}
-
-export interface DialState {
-  readonly from: Square;
-  readonly to: Square;
-  readonly color: Color;
-  /** Dial center (clamped, client px). */
-  readonly x: number;
-  readonly y: number;
-  /** Pointer offset from the center, for the rubber band. */
-  readonly dx: number;
-  readonly dy: number;
-  readonly aim: PromotionPiece | null;
-  readonly zone: DialZone;
-  readonly mode: 'pointer' | 'keyboard';
-}
-
-/** How the last move or premove was entered; the board skips the slide animation after a drag. */
-export type InputKind = 'tap' | 'drag' | 'key' | 'san';
 
 export interface BoardInputOptions {
-  readonly game: Game;
-  readonly orientation: Color;
+  readonly size: Size;
+  readonly board: Uint8Array;
   readonly interactive: boolean;
-  readonly movable: Movable;
-  readonly premove: Premove | null;
-  readonly onMove: (uci: Uci) => void;
-  readonly onPremove?: (premove: Premove | null) => void;
-  /** The 8×8 grid's client rect, for hit tests. */
+  readonly helpers: boolean;
+  /** Scoring phase: taps and Enter on a stone toggle its group; nothing is placed. */
+  readonly scoring: boolean;
+  readonly illegalReason?: (p: Point) => IllegalReason | null;
+  readonly onPlay?: (p: Point) => void;
+  readonly onIllegal?: (p: Point, reason: IllegalReason) => void;
+  readonly onPass?: () => void;
+  readonly onUndo?: () => void;
+  readonly onRedo?: () => void;
+  readonly onToggleGroup?: (p: Point) => void;
+  readonly onGhostChange?: (p: Point | null) => void;
+  /** The board drawing's client rect, for hit tests. */
   readonly getBox: () => Box | null;
-  /** Listen for typed SAN on the window. */
+  /** The finger lifts the ghost downwards (the far player in face-to-face seating). */
+  readonly liftDown?: boolean;
+  /** Listen for typed coordinates on the window. */
   readonly captureKeys: boolean;
-  /** The board's outer element: a press outside it clears the selection. */
-  readonly rootRef?: RefObject<HTMLElement>;
+  /** The board element: a press outside it cancels the ghost (DESIGN 6.1). */
+  readonly rootRef?: RefObject<HTMLElement | null>;
 }
 
 export interface BoardInput {
-  readonly selected: Square | null;
-  readonly targets: ReadonlyMap<Square, TargetInfo>;
-  /** Keyboard focus square (roving tabindex). */
-  readonly cursor: Square;
-  readonly setCursor: (sq: Square) => void;
-  readonly drag: DragState | null;
-  readonly dial: DialState | null;
-  /** SAN typed so far. */
+  /** The ghost stone (with crosshairs), or null. */
+  readonly ghost: Point | null;
+  /** The hover stone of a fine pointer (no crosshairs), or null. */
+  readonly hover: Point | null;
+  /** Keyboard focus point (roving tabindex). */
+  readonly cursor: Point;
+  readonly setCursor: (p: Point) => void;
+  /** Coordinate typed so far (`D1`, `pas`). */
   readonly typed: string;
-  /** The last rejected typed move, shown briefly. */
+  /** The last rejected typed text, shown briefly. */
   readonly typedError: string | null;
-  /** How the last move was entered and its UCI. */
-  readonly lastInput: { readonly kind: InputKind; readonly uci: Uci } | null;
   readonly gridHandlers: {
     readonly onPointerDown: (e: PointerEvent<HTMLElement>) => void;
     readonly onPointerMove: (e: PointerEvent<HTMLElement>) => void;
     readonly onPointerUp: (e: PointerEvent<HTMLElement>) => void;
     readonly onPointerCancel: (e: PointerEvent<HTMLElement>) => void;
+    readonly onPointerLeave: (e: PointerEvent<HTMLElement>) => void;
     readonly onKeyDown: (e: KeyboardEvent<HTMLElement>) => void;
   };
-  readonly dialKeyDown: (e: KeyboardEvent<HTMLElement>) => void;
-  /** Choose a dial item (null = cancel). */
-  readonly chooseDial: (piece: PromotionPiece | null) => void;
-  /** Clear selection, typed text and dial. */
+  /** Clear the ghost, hover and typed text. */
   readonly clear: () => void;
 }
 
-/** Characters that can be part of typed SAN. `z` is never one (undo / redo belong to the page). */
-const SAN_CHAR = /^[a-h1-8xNBRQKnrqkOo0=+#-]$/;
-export function isSanChar(key: string): boolean {
-  return SAN_CHAR.test(key);
+/** Characters of a typed coordinate or `pass`: GTP letters (no I, case-insensitive) and digits. Never `z`. */
+const TYPE_CHAR = /^[a-hj-tA-HJ-T0-9]$/;
+export function isCoordChar(key: string): boolean {
+  return TYPE_CHAR.test(key);
 }
 
-/** Normalizes typed SAN before parsing: lower-case `o-o` castles. */
-export function normalizeTyped(text: string): string {
-  const t = text.trim();
-  if (/^[oO0]-[oO0](-[oO0])?[+#]?$/.test(t)) return t.replace(/[o0]/g, 'O');
-  return t;
+/** `p` and `pass` (any case) pass; everything else is read as a coordinate. */
+export function isPassText(text: string): boolean {
+  return /^p(ass)?$/i.test(text.trim());
 }
 
-const MAX_TYPED = 8;
-const DRAG_THRESHOLD: Record<string, number> = { mouse: 3, pen: 4, touch: 6 };
+const MAX_TYPED = 4;
 
 function isEditable(el: EventTarget | null): boolean {
   if (!(el instanceof HTMLElement)) return false;
@@ -118,380 +110,275 @@ function isEditable(el: EventTarget | null): boolean {
   return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT';
 }
 
-function squareFromTarget(target: EventTarget | null): Square | null {
-  if (!(target instanceof Element)) return null;
-  const el = target.closest('[data-square]');
-  return (el?.getAttribute('data-square') as Square | null) ?? null;
-}
-
-const sqIndex = (sq: Square) => 'abcdefgh'.indexOf(sq[0]) + 8 * (Number(sq[1]) - 1);
-
 interface Press {
-  kind: 'piece' | 'target' | 'void';
-  from: Square;
-  to: Square | null;
-  pointerId: number;
-  pointerType: string;
-  x: number;
-  y: number;
-  wasSelected: boolean;
+  readonly pointerId: number;
+  readonly pointerType: string;
+  readonly cls: InputClass;
+  readonly x: number;
+  readonly y: number;
+  /** The press started inside the ghost's hit area (`confirm` only). */
+  readonly onGhost: boolean;
   dragging: boolean;
 }
 
 export function useBoardInput(options: BoardInputOptions): BoardInput {
   const opts = useRef(options);
   opts.current = options;
-  const { game, orientation, interactive, movable, onPremove } = options;
+  const { size, interactive, scoring, captureKeys } = options;
 
-  const [selected, setSelected] = useState<Square | null>(null);
-  const selRef = useRef<Square | null>(null);
-  const [cursor, setCursorState] = useState<Square>(orientation === 'w' ? 'e2' : 'e7');
-  const [typed, setTyped] = useState('');
+  const [ghost, setGhostState] = useState<Point | null>(null);
+  const ghostRef = useRef<Point | null>(null);
+  const [hover, setHoverState] = useState<Point | null>(null);
+  const hoverRef = useRef<Point | null>(null);
+  const [cursor, setCursorState] = useState<Point>(() => centerPoint(size));
+  const cursorRef = useRef(cursor);
+  cursorRef.current = cursor;
+  const [typed, setTypedState] = useState('');
   const typedRef = useRef('');
   const [typedError, setTypedError] = useState<string | null>(null);
-  const [, setTick] = useState(0);
-  const tick = useCallback(() => setTick((n) => n + 1), []);
-
-  const press = useRef<Press | null>(null);
-  const dragRef = useRef<DragState | null>(null);
-  const dialRef = useRef<DialState | null>(null);
-  const dialOrigin = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
-  const holdTimer = useRef<number | null>(null);
-  const holdSquare = useRef<Square | null>(null);
-  const lastPos = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const errorTimer = useRef<number | null>(null);
-  const lastInputRef = useRef<{ kind: InputKind; uci: Uci } | null>(null);
+  const press = useRef<Press | null>(null);
+
+  const setGhost = useCallback((p: Point | null) => {
+    if (ghostRef.current === p) return;
+    ghostRef.current = p;
+    setGhostState(p);
+  }, []);
+
+  const setHover = useCallback((p: Point | null) => {
+    if (hoverRef.current === p) return;
+    hoverRef.current = p;
+    setHoverState(p);
+  }, []);
+
+  const setTyped = useCallback((s: string) => {
+    typedRef.current = s;
+    setTypedState(s);
+  }, []);
+
+  const setCursor = useCallback((p: Point) => setCursorState(p), []);
+
+  const clear = useCallback(() => {
+    press.current = null;
+    setGhost(null);
+    setHover(null);
+    setTyped('');
+  }, [setGhost, setHover, setTyped]);
+
+  /* ---- the parent hears about the ghost (the info pill previews `D4?`) ---- */
+
+  const reported = useRef<Point | null>(null);
+  useEffect(() => {
+    if (reported.current === ghost) return;
+    reported.current = ghost;
+    opts.current.onGhostChange?.(ghost);
+  }, [ghost]);
+
+  /* ---- resets ---- */
+
+  // A new size starts over: no ghost, the cursor on the center point.
+  const lastSize = useRef(size);
+  useEffect(() => {
+    if (lastSize.current === size) return;
+    lastSize.current = size;
+    clear();
+    setCursorState(centerPoint(size));
+  }, [size, clear]);
+
+  // No ghost while the board takes no stones (opponent's turn, review, scoring).
+  useEffect(() => {
+    if (!interactive || scoring) {
+      press.current = null;
+      setGhost(null);
+      setHover(null);
+    }
+  }, [interactive, scoring, setGhost, setHover]);
 
   /* ---- rules, always from the latest options ---- */
 
-  const pieces = useMemo(() => boardOf(game), [game]);
-  const piecesRef = useRef(pieces);
-  piecesRef.current = pieces;
-
-  const canMoveNow = useCallback((color: Color) => {
+  const stoneAt = useCallback((p: Point): number => {
     const o = opts.current;
-    return o.interactive && !o.game.end && o.game.turn === color && (o.movable === 'both' || o.movable === color);
+    const i = pointToIndex(p, o.size);
+    return i < 0 ? 0 : (o.board[i] ?? 0);
   }, []);
 
-  const canPremove = useCallback((color: Color) => {
-    const o = opts.current;
-    return o.interactive && !o.game.end && !!o.onPremove && o.movable === color && o.game.turn !== color;
-  }, []);
-
-  const pieceAt = useCallback((sq: Square) => piecesRef.current[sqIndex(sq)] ?? null, []);
-
-  const selectable = useCallback(
-    (sq: Square) => {
-      const p = pieceAt(sq);
-      return !!p && (canMoveNow(p.color) || canPremove(p.color));
+  const reasonAt = useCallback(
+    (p: Point): IllegalReason | null => {
+      if (stoneAt(p) !== 0) return 'occupied';
+      return opts.current.illegalReason?.(p) ?? null;
     },
-    [pieceAt, canMoveNow, canPremove],
+    [stoneAt],
   );
 
-  const targetsFor = useCallback(
-    (from: Square | null): Map<Square, TargetInfo> => {
-      const out = new Map<Square, TargetInfo>();
-      if (!from) return out;
-      const p = pieceAt(from);
-      if (!p) return out;
-      const g = opts.current.game;
-      if (canMoveNow(p.color)) {
-        for (const m of legalMoves(g, from)) {
-          if (!out.has(m.to)) {
-            out.set(m.to, { uci: `${m.from}${m.to}`, capture: !!m.captured, promotion: !!m.promotion, hidden: false });
-          }
-          if (m.castle) {
-            const rook = `${m.castle === 'k' ? 'h' : 'a'}${m.from[1]}` as Square;
-            const rp = pieceAt(rook);
-            if (rp?.type === 'r' && rp.color === p.color && !out.has(rook)) {
-              out.set(rook, { uci: m.uci, capture: false, promotion: false, hidden: true });
-            }
-          }
-        }
-      } else if (canPremove(p.color)) {
-        for (const to of premoveTargets(g.fen, from)) {
-          const q = pieceAt(to);
-          out.set(to, {
-            uci: null,
-            capture: !!q && q.color !== p.color,
-            promotion: p.type === 'p' && isPromotionRank(p.color, to),
-            hidden: false,
-          });
-        }
-      }
-      return out;
-    },
-    [pieceAt, canMoveNow, canPremove],
-  );
-
-  /* ---- small state helpers ---- */
-
-  const select = useCallback((sq: Square | null) => {
-    selRef.current = sq;
-    setSelected(sq);
-  }, []);
-
-  const setTypedText = useCallback((text: string) => {
-    typedRef.current = text;
-    setTyped(text);
-  }, []);
-
-  const cancelHold = useCallback(() => {
-    if (holdTimer.current !== null) window.clearTimeout(holdTimer.current);
-    holdTimer.current = null;
-    holdSquare.current = null;
-  }, []);
-
-  const closeDial = useCallback(() => {
-    dialRef.current = null;
-    tick();
-  }, [tick]);
-
-  const clear = useCallback(() => {
-    cancelHold();
-    press.current = null;
-    dragRef.current = null;
-    dialRef.current = null;
-    select(null);
-    setTypedText('');
-    tick();
-  }, [cancelHold, select, setTypedText, tick]);
-
-  const setCursor = useCallback((sq: Square) => setCursorState(sq), []);
-
-  /** Plays or queues the move from → to. Returns true when something was sent. */
-  const commit = useCallback(
-    (from: Square, to: Square, promo: PromotionPiece | undefined, kind: InputKind): boolean => {
-      const info = targetsFor(from).get(to);
-      const p = pieceAt(from);
-      if (!info || !p) return false;
+  /** Plays `p` if legal. Returns true when it was played. */
+  const tryPlay = useCallback(
+    (p: Point): boolean => {
       const o = opts.current;
-      if (info.uci) {
-        const uci = info.hidden ? info.uci : `${from}${to}${info.promotion ? (promo ?? 'q') : ''}`;
-        lastInputRef.current = { kind, uci };
-        select(null);
-        o.onMove(uci);
-        return true;
+      if (!o.interactive || o.scoring) return false;
+      const reason = reasonAt(p);
+      if (reason) {
+        if (o.helpers) o.onIllegal?.(p, reason);
+        return false;
       }
-      if (o.onPremove) {
-        select(null);
-        o.onPremove(info.promotion ? { from, to, promotion: promo ?? 'q' } : { from, to });
-        return true;
-      }
-      return false;
-    },
-    [targetsFor, pieceAt, select],
-  );
-
-  const openDial = useCallback(
-    (from: Square, to: Square, x: number, y: number, mode: DialState['mode']) => {
-      const p = pieceAt(from);
-      if (!p) return;
-      const vw = typeof window !== 'undefined' ? window.innerWidth : 1024;
-      const vh = typeof window !== 'undefined' ? window.innerHeight : 768;
-      const c = clampDialCenter(x, y, vw, vh);
-      dialOrigin.current = { x, y };
-      dialRef.current = {
-        from,
-        to,
-        color: p.color,
-        x: c.x,
-        y: c.y,
-        dx: 0,
-        dy: 0,
-        aim: mode === 'keyboard' ? 'q' : null,
-        zone: mode === 'keyboard' ? 'aim' : 'center',
-        mode,
-      };
-      tick();
-    },
-    [pieceAt, tick],
-  );
-
-  const chooseDial = useCallback(
-    (piece: PromotionPiece | null) => {
-      const d = dialRef.current;
-      cancelHold();
       press.current = null;
-      dragRef.current = null;
-      dialRef.current = null;
-      if (d && piece) commit(d.from, d.to, piece, d.mode === 'keyboard' ? 'key' : 'drag');
-      tick();
+      setGhost(null);
+      setHover(null);
+      o.onPlay?.(p);
+      return true;
     },
-    [cancelHold, commit, tick],
+    [reasonAt, setGhost, setHover],
   );
 
-  const cancelPremove = useCallback((): boolean => {
-    const o = opts.current;
-    if (o.premove && o.onPremove) {
-      o.onPremove(null);
-      return true;
-    }
-    return false;
-  }, []);
+  const toggleAt = useCallback(
+    (p: Point) => {
+      const o = opts.current;
+      if (o.interactive && o.scoring && stoneAt(p) !== 0) o.onToggleGroup?.(p);
+    },
+    [stoneAt],
+  );
 
   /* ---- pointer ---- */
 
-  const capture = (e: PointerEvent<HTMLElement>) => {
-    try {
-      e.currentTarget.setPointerCapture?.(e.pointerId);
-    } catch {
-      /* not supported (jsdom) or pointer already gone */
-    }
-  };
-  const release = (e: PointerEvent<HTMLElement>) => {
-    try {
-      if (e.currentTarget.hasPointerCapture?.(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
-    } catch {
-      /* ignore */
-    }
-  };
-
-  const onPointerDown = (e: PointerEvent<HTMLElement>) => {
-    const o = opts.current;
-    if (!o.interactive) return;
-    if (e.pointerType === 'mouse' && e.button !== 0) return;
-    if (press.current) return; // a second finger
-    const sq = squareFromTarget(e.target) ?? squareAt(e.clientX, e.clientY, o.getBox(), o.orientation);
-    lastPos.current = { x: e.clientX, y: e.clientY };
-    if (dialRef.current) {
-      closeDial();
-      return;
-    }
-    // "Tapping anywhere cancels it" (DESIGN 6.3).
-    if (cancelPremove()) {
-      select(null);
-      return;
-    }
-    if (!sq) {
-      select(null);
-      return;
-    }
-    setCursorState(sq);
-    const sel = selRef.current;
-    const base = { pointerId: e.pointerId, pointerType: e.pointerType || 'mouse', x: e.clientX, y: e.clientY, dragging: false };
-    const info = sel ? targetsFor(sel).get(sq) : undefined;
-    if (sel && info && !info.hidden) {
-      press.current = { ...base, kind: 'target', from: sel, to: sq, wasSelected: false };
-      capture(e);
-      if (info.promotion) {
-        cancelHold();
-        holdSquare.current = sq;
-        holdTimer.current = window.setTimeout(() => {
-          holdTimer.current = null;
-          if (press.current?.kind === 'target') openDial(sel, sq, lastPos.current.x, lastPos.current.y, 'pointer');
-        }, DIAL_HOLD_MS);
+  const onPointerDown = useCallback(
+    (e: PointerEvent<HTMLElement>) => {
+      const o = opts.current;
+      if (!o.interactive) return;
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      if (press.current && press.current.pointerId !== e.pointerId) return; // a second finger
+      const cls = inputClass(o.size, e.pointerType);
+      const box = o.getBox();
+      const g = ghostRef.current;
+      press.current = {
+        pointerId: e.pointerId,
+        pointerType: e.pointerType,
+        cls,
+        x: e.clientX,
+        y: e.clientY,
+        onGhost: !o.scoring && cls === 'confirm' && !!g && inGhostHitArea(g, e.clientX, e.clientY, box, o.size),
+        dragging: false,
+      };
+      try {
+        e.currentTarget.setPointerCapture?.(e.pointerId);
+      } catch {
+        /* jsdom, or a pointer that is already gone */
       }
-      return;
-    }
-    if (selectable(sq)) {
-      press.current = { ...base, kind: 'piece', from: sq, to: null, wasSelected: sel === sq };
-      select(sq);
-      capture(e);
-      return;
-    }
-    select(null);
-  };
-
-  const onPointerMove = (e: PointerEvent<HTMLElement>) => {
-    const p = press.current;
-    if (!p || e.pointerId !== p.pointerId) return;
-    const o = opts.current;
-    lastPos.current = { x: e.clientX, y: e.clientY };
-    const d = dialRef.current;
-    if (d) {
-      if (d.mode !== 'pointer') return;
-      const pick = dialPick(e.clientX - dialOrigin.current.x, e.clientY - dialOrigin.current.y);
-      dialRef.current = { ...d, dx: e.clientX - d.x, dy: e.clientY - d.y, aim: pick.piece, zone: pick.zone };
-      tick();
-      return;
-    }
-    if (p.kind === 'target') {
-      // Leaving the target square turns the press into nothing.
-      const over = squareAt(e.clientX, e.clientY, o.getBox(), o.orientation);
-      const moved = Math.hypot(e.clientX - p.x, e.clientY - p.y) > (DRAG_THRESHOLD[p.pointerType] ?? 4);
-      if (moved && over !== null && over !== p.to) {
-        cancelHold();
-        p.kind = 'void';
+      if (cls === 'fine' && !o.scoring) {
+        const p = pointAt(e.clientX, e.clientY, box, o.size);
+        setHover(p && stoneAt(p) === 0 ? p : null);
       }
-      return;
-    }
-    if (p.kind !== 'piece') return;
-    if (!p.dragging) {
-      if (Math.hypot(e.clientX - p.x, e.clientY - p.y) < (DRAG_THRESHOLD[p.pointerType] ?? 4)) return;
-      p.dragging = true;
-    }
-    const piece = pieceAt(p.from);
-    if (!piece) return;
-    const over = squareAt(e.clientX, e.clientY, o.getBox(), o.orientation);
-    dragRef.current = { from: p.from, piece, x: e.clientX, y: e.clientY, pointerType: p.pointerType, over };
-    const info = over && over !== p.from ? targetsFor(p.from).get(over) : undefined;
-    if (info?.promotion && over) {
-      if (holdSquare.current !== over) {
-        cancelHold();
-        holdSquare.current = over;
-        const from = p.from;
-        holdTimer.current = window.setTimeout(() => {
-          holdTimer.current = null;
-          if (press.current?.dragging && press.current.from === from) {
-            openDial(from, over, lastPos.current.x, lastPos.current.y, 'pointer');
+    },
+    [setHover, stoneAt],
+  );
+
+  const onPointerMove = useCallback(
+    (e: PointerEvent<HTMLElement>) => {
+      const o = opts.current;
+      if (!o.interactive) return;
+      const pr = press.current;
+      const box = o.getBox();
+      if (!pr) {
+        if (e.pointerType !== 'touch' && !o.scoring) {
+          const p = pointAt(e.clientX, e.clientY, box, o.size);
+          setHover(p && stoneAt(p) === 0 ? p : null);
+        }
+        return;
+      }
+      if (pr.pointerId !== e.pointerId) return;
+      if (!pr.dragging) {
+        const limit = DRAG_THRESHOLD[pr.pointerType] ?? DRAG_THRESHOLD.touch;
+        if (Math.hypot(e.clientX - pr.x, e.clientY - pr.y) < limit) return;
+        pr.dragging = true;
+      }
+      if (o.scoring) return; // a drag while scoring toggles nothing
+      if (pr.cls === 'confirm') {
+        const lift = o.liftDown ? -LIFT_PX : LIFT_PX;
+        setGhost(pointAt(e.clientX, e.clientY - lift, box, o.size, true));
+      } else if (pr.cls === 'tap') {
+        setGhost(pointAt(e.clientX, e.clientY, box, o.size));
+      } else {
+        const p = pointAt(e.clientX, e.clientY, box, o.size);
+        setHover(p && stoneAt(p) === 0 ? p : null);
+      }
+    },
+    [setGhost, setHover, stoneAt],
+  );
+
+  const onPointerUp = useCallback(
+    (e: PointerEvent<HTMLElement>) => {
+      const pr = press.current;
+      if (!pr || pr.pointerId !== e.pointerId) return;
+      press.current = null;
+      try {
+        e.currentTarget.releasePointerCapture?.(e.pointerId);
+      } catch {
+        /* not captured */
+      }
+      const o = opts.current;
+      if (!o.interactive) return;
+      const box = o.getBox();
+      const here = pointAt(e.clientX, e.clientY, box, o.size);
+      if (o.scoring) {
+        if (!pr.dragging && here) toggleAt(here);
+        return;
+      }
+      switch (pr.cls) {
+        case 'fine':
+          if (here) tryPlay(here);
+          return;
+        case 'tap':
+          setGhost(null);
+          if (here) tryPlay(here);
+          return;
+        case 'confirm': {
+          if (pr.dragging) return; // a drag never commits
+          const g = ghostRef.current;
+          if (pr.onGhost && g) {
+            tryPlay(g);
+            return;
           }
-        }, DIAL_HOLD_MS);
+          setGhost(here);
+          if (here && o.helpers) {
+            const reason = reasonAt(here);
+            if (reason) o.onIllegal?.(here, reason);
+          }
+          return;
+        }
       }
-    } else {
-      cancelHold();
-    }
-    tick();
-  };
+    },
+    [reasonAt, setGhost, toggleAt, tryPlay],
+  );
 
-  const onPointerUp = (e: PointerEvent<HTMLElement>) => {
-    const p = press.current;
-    if (!p || e.pointerId !== p.pointerId) return;
-    const o = opts.current;
-    cancelHold();
-    press.current = null;
-    release(e);
-    const d = dialRef.current;
-    if (d && d.mode === 'pointer') {
-      dialRef.current = null;
-      dragRef.current = null;
-      const pick = dialPick(e.clientX - dialOrigin.current.x, e.clientY - dialOrigin.current.y);
-      if (pick.piece && (pick.zone === 'aim' || pick.zone === 'commit')) {
-        commit(d.from, d.to, pick.piece, p.kind === 'piece' ? 'drag' : 'tap');
-      }
-      tick();
-      return;
-    }
-    if (p.kind === 'piece' && p.dragging) {
-      dragRef.current = null;
-      const over = squareAt(e.clientX, e.clientY, o.getBox(), o.orientation);
-      if (over && over !== p.from && targetsFor(p.from).has(over)) {
-        commit(p.from, over, undefined, 'drag');
-      } else if (over !== p.from) {
-        // Illegal drop: snap back without comment (DESIGN 6.1).
-        select(null);
-      }
-      tick();
-      return;
-    }
-    if (p.kind === 'piece') {
-      if (p.wasSelected) select(null);
-      return;
-    }
-    if (p.kind === 'target' && p.to) commit(p.from, p.to, undefined, 'tap');
-  };
+  const onPointerCancel = useCallback(
+    (e: PointerEvent<HTMLElement>) => {
+      const pr = press.current;
+      if (!pr || pr.pointerId !== e.pointerId) return;
+      press.current = null;
+      if (pr.cls === 'tap') setGhost(null);
+    },
+    [setGhost],
+  );
 
-  const onPointerCancel = (e: PointerEvent<HTMLElement>) => {
-    const p = press.current;
-    if (!p || e.pointerId !== p.pointerId) return;
-    cancelHold();
-    press.current = null;
-    dragRef.current = null;
-    if (dialRef.current?.mode === 'pointer') dialRef.current = null;
-    tick();
-  };
+  const onPointerLeave = useCallback(
+    (e: PointerEvent<HTMLElement>) => {
+      if (e.pointerType !== 'touch' && !press.current) setHover(null);
+    },
+    [setHover],
+  );
 
-  /* ---- keyboard ---- */
+  // A press anywhere outside the board cancels the ghost (DESIGN 6.1: "a tap off the board cancels it").
+  useEffect(() => {
+    if (!ghost && !hover) return;
+    const onDown = (e: Event) => {
+      const root = opts.current.rootRef?.current;
+      if (root && e.target instanceof Node && root.contains(e.target)) return;
+      setGhost(null);
+      setHover(null);
+    };
+    document.addEventListener('pointerdown', onDown, true);
+    return () => document.removeEventListener('pointerdown', onDown, true);
+  }, [ghost, hover, setGhost, setHover]);
+
+  /* ---- typed coordinates ---- */
 
   const flashError = useCallback((text: string) => {
     setTypedError(text);
@@ -502,232 +389,125 @@ export function useBoardInput(options: BoardInputOptions): BoardInput {
     }, 700);
   }, []);
 
-  const submitTyped = useCallback(() => {
-    const o = opts.current;
-    const text = normalizeTyped(typedRef.current);
-    setTypedText('');
-    if (!text) return;
-    const uci = canMoveNow(o.game.turn) ? sanToUci(o.game, text) : null;
-    if (uci) {
-      lastInputRef.current = { kind: 'san', uci };
-      select(null);
-      o.onMove(uci);
-      return;
-    }
-    flashError(text);
-  }, [canMoveNow, flashError, select, setTypedText]);
-
-  /** Returns true when the key was a SAN key and was taken. */
-  const typeKey = useCallback(
-    (key: string): boolean => {
-      if (key === 'Enter' && typedRef.current) {
-        submitTyped();
-        return true;
-      }
-      if (key === 'Backspace' && typedRef.current) {
-        setTypedText(typedRef.current.slice(0, -1));
-        return true;
-      }
-      if (isSanChar(key)) {
-        if (typedRef.current.length < MAX_TYPED) setTypedText(typedRef.current + key);
-        return true;
-      }
-      return false;
-    },
-    [setTypedText, submitTyped],
-  );
-
-  const activate = useCallback(
-    (sq: Square, shift: boolean) => {
-      if (!opts.current.interactive) return;
-      if (cancelPremove()) {
-        select(null);
-        return;
-      }
-      const sel = selRef.current;
-      const info = sel ? targetsFor(sel).get(sq) : undefined;
-      if (sel && info && !info.hidden) {
-        if (info.promotion && shift) {
-          const box = opts.current.getBox();
-          const c = box ? squareCenter(sq, box, opts.current.orientation) : { x: 0, y: 0 };
-          openDial(sel, sq, c.x, c.y, 'keyboard');
-        } else {
-          commit(sel, sq, undefined, 'key');
-        }
-        return;
-      }
-      if (selectable(sq)) {
-        select(sel === sq ? null : sq);
-        return;
-      }
-      select(null);
-    },
-    [cancelPremove, commit, openDial, select, selectable, targetsFor],
-  );
-
-  const onKeyDown = (e: KeyboardEvent<HTMLElement>) => {
-    if (e.ctrlKey || e.metaKey || e.altKey) return;
-    const o = opts.current;
-    const arrows: Record<string, [number, number]> = {
-      ArrowUp: [0, -1],
-      ArrowDown: [0, 1],
-      ArrowLeft: [-1, 0],
-      ArrowRight: [1, 0],
-    };
-    // The focused cell is the cursor (state may lag behind a focus change by one render).
-    const here = squareFromTarget(e.target) ?? cursor;
-    const step = arrows[e.key];
-    if (step) {
-      e.preventDefault();
-      e.stopPropagation();
-      setCursorState(stepSquare(here, step[0], step[1], o.orientation));
-      return;
-    }
-    if (e.key === 'Home' || e.key === 'End') {
-      e.preventDefault();
-      e.stopPropagation();
-      setCursorState(stepSquare(here, e.key === 'Home' ? -7 : 7, 0, o.orientation));
-      return;
-    }
-    if (!o.interactive) return;
-    if (e.key === 'Escape') {
-      cancelPremove();
-      clear();
-      e.stopPropagation();
-      return;
-    }
-    if (e.key === 'Enter' && typedRef.current) {
-      e.preventDefault();
-      e.stopPropagation();
-      submitTyped();
-      return;
-    }
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      e.stopPropagation();
-      activate(here, e.shiftKey);
-      return;
-    }
-    if (typeKey(e.key)) {
-      e.preventDefault();
-      e.stopPropagation();
-    }
-  };
-
-  const dialKeyDown = useCallback(
-    (e: KeyboardEvent<HTMLElement>) => {
-      const d = dialRef.current;
-      if (!d) return;
-      const aims: Record<string, PromotionPiece> = { ArrowUp: 'q', ArrowRight: 'r', ArrowDown: 'b', ArrowLeft: 'n' };
-      const letter = e.key.toLowerCase();
-      e.stopPropagation();
-      if (aims[e.key]) {
-        e.preventDefault();
-        dialRef.current = { ...d, aim: aims[e.key], zone: 'aim' };
-        tick();
-      } else if (letter === 'q' || letter === 'r' || letter === 'b' || letter === 'n') {
-        e.preventDefault();
-        chooseDial(letter);
-      } else if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        chooseDial(d.aim);
-      } else if (e.key === 'Escape' || e.key === 'Tab') {
-        e.preventDefault();
-        chooseDial(null);
-      }
-    },
-    [chooseDial, tick],
-  );
-
-  /* ---- effects ---- */
-
-  // Typed SAN anywhere on the page.
-  useEffect(() => {
-    if (!options.captureKeys || !interactive) return;
-    const onKey = (e: globalThis.KeyboardEvent) => {
-      if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
-      if (isEditable(e.target)) return;
-      if (dialRef.current) return;
-      if (e.key === 'Escape') {
-        if (typedRef.current || selRef.current) clear();
-        return;
-      }
-      if (typeKey(e.key)) e.preventDefault();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [options.captureKeys, interactive, typeKey, clear]);
-
-  // A press outside the board clears the selection; a premove is cancelled by any tap.
-  useEffect(() => {
-    if (!selected && !options.premove) return;
-    const onDown = (e: globalThis.PointerEvent) => {
-      const root = opts.current.rootRef?.current;
-      const t = e.target;
-      if (t instanceof Node && root?.contains(t)) return;
-      if (t instanceof Element && t.closest('[data-zigo-dial]')) return;
-      if (selRef.current) select(null);
-      cancelPremove();
-    };
-    document.addEventListener('pointerdown', onDown, true);
-    return () => document.removeEventListener('pointerdown', onDown, true);
-  }, [selected, options.premove, select, cancelPremove]);
-
-  // Keep the selection only while it is still a piece this person may move.
-  useEffect(() => {
-    const sel = selRef.current;
-    if (sel && !selectable(sel)) {
-      select(null);
-      if (!press.current?.dragging) {
-        dragRef.current = null;
-        dialRef.current = null;
-        cancelHold();
-        tick();
-      }
-    }
-  }, [game, interactive, movable, onPremove, selectable, select, cancelHold, tick]);
-
-  // Turning input off ends every gesture.
-  useEffect(() => {
-    if (!interactive) {
-      cancelHold();
-      press.current = null;
-      dragRef.current = null;
-      dialRef.current = null;
-      select(null);
-      setTypedText('');
-      tick();
-    }
-  }, [interactive, cancelHold, select, setTypedText, tick]);
-
   useEffect(
     () => () => {
-      if (holdTimer.current !== null) window.clearTimeout(holdTimer.current);
       if (errorTimer.current !== null) window.clearTimeout(errorTimer.current);
     },
     [],
   );
 
-  const targets = useMemo(
-    () => targetsFor(selected),
-    // Targets depend on the game and on who may move, which the callbacks read from opts.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [selected, game, interactive, movable, onPremove, targetsFor],
+  const submitTyped = useCallback(() => {
+    const o = opts.current;
+    const text = typedRef.current.trim();
+    setTyped('');
+    if (!text) return;
+    if (isPassText(text)) {
+      if (o.onPass && o.interactive && !o.scoring) o.onPass();
+      else flashError(text);
+      return;
+    }
+    const p = fromGtp(text, o.size);
+    if (p && p !== 'tt') {
+      setCursorState(p);
+      if (tryPlay(p)) return;
+    }
+    flashError(text);
+  }, [flashError, setTyped, tryPlay]);
+
+  /**
+   * Keys shared by the grid and the window listener: typing, Enter / Backspace while typing,
+   * Escape, Z / Shift+Z. Returns true when the key was taken.
+   */
+  const commonKey = useCallback(
+    (key: string, shift: boolean): boolean => {
+      const o = opts.current;
+      if ((key === 'z' || key === 'Z') && (o.onUndo || o.onRedo)) {
+        if (shift) o.onRedo?.();
+        else o.onUndo?.();
+        return true;
+      }
+      if (key === 'Escape') {
+        const had = !!typedRef.current || !!ghostRef.current;
+        setTyped('');
+        setGhost(null);
+        return had;
+      }
+      if (o.scoring) return false;
+      if (key === 'Enter' && typedRef.current) {
+        submitTyped();
+        return true;
+      }
+      if (key === 'Backspace' && typedRef.current) {
+        setTyped(typedRef.current.slice(0, -1));
+        return true;
+      }
+      if (isCoordChar(key)) {
+        if (typedRef.current.length < MAX_TYPED) setTyped(typedRef.current + key.toUpperCase());
+        return true;
+      }
+      return false;
+    },
+    [setGhost, setTyped, submitTyped],
   );
 
+  const onKeyDown = useCallback(
+    (e: KeyboardEvent<HTMLElement>) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const o = opts.current;
+      const arrows: Record<string, [number, number]> = {
+        ArrowLeft: [-1, 0],
+        ArrowRight: [1, 0],
+        ArrowUp: [0, -1],
+        ArrowDown: [0, 1],
+      };
+      const step = arrows[e.key];
+      if (step) {
+        e.preventDefault();
+        setCursorState((c) => stepPoint(c, step[0], step[1], o.size));
+        return;
+      }
+      if (e.key === 'Home' || e.key === 'End') {
+        e.preventDefault();
+        const c = pointToCell(cursorRef.current, o.size);
+        if (c) setCursorState(stepPoint(cursorRef.current, e.key === 'Home' ? -c.col : o.size - 1 - c.col, 0, o.size));
+        return;
+      }
+      if (!o.interactive) return;
+      if ((e.key === 'Enter' || e.key === ' ') && !typedRef.current) {
+        e.preventDefault();
+        if (e.repeat) return;
+        if (o.scoring) toggleAt(cursorRef.current);
+        else tryPlay(cursorRef.current);
+        return;
+      }
+      if (commonKey(e.key, e.shiftKey)) e.preventDefault();
+    },
+    [commonKey, toggleAt, tryPlay],
+  );
+
+  // Typed coordinates anywhere on the page (not in fields, not with modifiers).
+  useEffect(() => {
+    if (!captureKeys || !interactive) return;
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (isEditable(e.target)) return;
+      // A focused control's own Enter / Space stays its own; only typing continues.
+      if ((e.key === 'Enter' || e.key === 'Backspace') && !typedRef.current) return;
+      if (e.key === 'Escape' && !typedRef.current) return;
+      if (commonKey(e.key, e.shiftKey)) e.preventDefault();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [captureKeys, interactive, commonKey]);
+
   return {
-    selected,
-    targets,
+    ghost,
+    hover,
     cursor,
     setCursor,
-    drag: dragRef.current,
-    dial: dialRef.current,
     typed,
     typedError,
-    lastInput: lastInputRef.current,
-    gridHandlers: { onPointerDown, onPointerMove, onPointerUp, onPointerCancel, onKeyDown },
-    dialKeyDown,
-    chooseDial,
+    gridHandlers: { onPointerDown, onPointerMove, onPointerUp, onPointerCancel, onPointerLeave, onKeyDown },
     clear,
   };
 }

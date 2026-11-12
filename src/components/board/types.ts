@@ -2,74 +2,93 @@
  * Types of the board package (1A). Cross-package shapes live in `src/lib/types.ts`; these are
  * local to the board and re-exported from `components/board/index.ts`.
  */
-import type { Color, Game, PromotionPiece, Seating, Square, Uci } from '@/lib/chessTypes';
+import type { Color, IllegalReason, Point, Seating, Size } from '@/lib/types';
 
-/** A queued move for the opponent's turn (DESIGN 6.3). */
-export interface Premove {
-  readonly from: Square;
-  readonly to: Square;
-  /** Set when a pawn premoves to the last rank; absent means queen. */
-  readonly promotion?: PromotionPiece;
+/** The scoring layer (DESIGN 8.4, 5.3): dead stones and the territory of the current marking. */
+export interface BoardScoring {
+  /** Dead stones (any order). Drawn at 40 % with a small ×. */
+  readonly dead: readonly Point[];
+  /**
+   * Owner of each empty or dead point (`ScoringApi.territory`); `null` = seki or dame, unmarked.
+   * Territory is drawn as small filled squares in the owner's ink on empty points.
+   */
+  readonly territory: Readonly<Record<Point, Color | null>>;
 }
 
-/** Transient highlights the parent drives (hint bulb, threat peek, blunder guard). */
-export interface BoardHighlights {
-  /**
-   * Squares that play the green hint pulse once (DESIGN 7.3). Pass a new array to replay the
-   * pulse; the first square also takes the keyboard focus ("hints move focus to the square").
-   */
-  readonly hint?: readonly Square[];
-  /** Squares shaded `destructive/10` while the threat peek is held. */
-  readonly threats?: readonly Square[];
-  /**
-   * Square whose piece pulses red once (blunder guard, DESIGN 7.2). Shown only with helpers on.
-   * Pass the square again after a change (or set `blunderKey`) to replay the pulse.
-   */
-  readonly blunder?: Square | null;
-  /** Bump to replay the blunder pulse on the same square. */
-  readonly blunderKey?: number;
+/** The territory preview while the hint bulb is held (DESIGN 7.3). */
+export interface TerritoryPreview {
+  /** size², row-major from the top, +1 = Black owns, −1 = White owns. */
+  readonly ownership: Float32Array | readonly number[];
 }
 
-/** Which side(s) the person at this board may move. */
-export type Movable = Color | 'both' | 'none';
+/** The hint of the bulb (DESIGN 7.3): the best point pulses, or the top three get numbers. */
+export type BoardHint = { readonly best: Point } | { readonly top: readonly Point[] } | null;
 
-export interface ChessBoardProps {
-  /** The game to show (controlled). The board draws `game.fen` and never changes the game itself. */
-  readonly game: Game;
-  /** Color drawn at the bottom. */
-  readonly orientation: Color;
-  /** Helpers bundle (DESIGN 7.1): legal-move dots, last move, check glow, coordinates, blunder pulse. */
-  readonly helpers: boolean;
-  /** Accept input at all. False for previews, review, game over, locked rooms. Default true. */
+export interface GoBoardProps {
+  /** Board size; the board draws `size × size` intersections. */
+  readonly size: Size;
+  /** size², 0 empty, 1 black, 2 white, row-major from the top (`Game.board`). Never mutated. */
+  readonly board: Uint8Array;
+  /** Side to move: the color of the ghost and of a placed stone. */
+  readonly turn: Color;
+  /** Accept input at all. False for previews, review, game over, the opponent's turn. Default true. */
   readonly interactive?: boolean;
+  /** Helpers bundle (DESIGN 7.1): last-move ring, atari, ko marker, coordinates, blunder pulse, the illegal ghost. */
+  readonly helpers: boolean;
+  /** The last ply's point (`zigo.lastMove`); `tt` or null draws no ring. */
+  readonly lastMove?: Point | null;
+  /** The simple-ko point the side to move may not retake (`Game.ko`). */
+  readonly ko?: Point | null;
+  /** The mover's own groups with one liberty (`zigo.atari(game, game.turn)`). */
+  readonly atari?: readonly (readonly Point[])[];
   /**
-   * Which pieces the person may move. `both` (pass-and-play, default): whichever side is to move.
-   * A color: only that side, on its turn; on the other side's turn it may queue a premove when
-   * `onPremove` is given. `none`: nothing.
+   * Why the side to move may not play `p` (`zigo.illegalReason`), or null when legal. Without it
+   * every empty point is legal and an occupied one is `occupied`.
    */
-  readonly movable?: Movable;
-  /** Pass-and-play seating (DESIGN 5.2). `face` draws the far side's pieces rotated 180°. Default `side`. */
+  readonly illegalReason?: (p: Point) => IllegalReason | null;
+  /** A legal stone was placed (tap, click, confirmed ghost, keyboard or typed coordinate). */
+  readonly onPlay?: (p: Point) => void;
+  /**
+   * A placement on an illegal point was refused (helpers on only; with helpers off the attempt is
+   * ignored without comment, DESIGN 6.1). The parent toasts `ko` / `superko` once per game.
+   */
+  readonly onIllegal?: (p: Point, reason: IllegalReason) => void;
+  /** `P` + Enter or `pass` + Enter typed (DESIGN 6.1). */
+  readonly onPass?: () => void;
+  /** `Z` pressed. When given, the board takes the key (and calls `preventDefault`). */
+  readonly onUndo?: () => void;
+  /** `Shift+Z` pressed. When given, the board takes the key (and calls `preventDefault`). */
+  readonly onRedo?: () => void;
+  /** The ghost stone moved, appeared (point) or went away (null): the info pill previews `D4?`. */
+  readonly onGhostChange?: (p: Point | null) => void;
+  /** The scoring layer (memoize it); while set, a tap or Enter on a stone calls `onToggleGroup` instead of playing. */
+  readonly scoring?: BoardScoring | null;
+  /** Toggle the group at `p` between alive and dead (scoring). */
+  readonly onToggleGroup?: (p: Point) => void;
+  /** Ownership map while the hint bulb is held, else null. */
+  readonly territoryPreview?: TerritoryPreview | null;
+  /**
+   * The hint to show. A new object replays the pulse and moves keyboard focus to its first point,
+   * so keep the object stable (memoized) between hints.
+   */
+  readonly hint?: BoardHint;
+  /** Point where a bounced stone (blunder guard) pulses red once; shown only with helpers on. */
+  readonly blunder?: Point | null;
+  /** Bump to replay the blunder pulse on the same point. */
+  readonly blunderKey?: number;
+  /** Pass-and-play seating (DESIGN 5.2). `face` also draws coordinates on the far edges, upside down. */
   readonly seating?: Seating;
-  /** The queued premove to draw with dashed rings, or null. */
-  readonly premove?: Premove | null;
-  readonly highlights?: BoardHighlights;
   /**
-   * A move was made on the board (tap-tap, drag, keyboard or typed SAN). Always a legal move of
-   * the side to move, as canonical UCI with the promotion letter (`e7e8q` when auto-queened).
+   * The player at the far edge in face-to-face seating: on that player's turn a dragging finger
+   * lifts the ghost downwards (their "above"). Ignored for `side` seating.
    */
-  readonly onMove: (uci: Uci) => void;
-  /** A premove was queued (`Premove`) or cancelled (`null`). Without it, premoves are off. */
-  readonly onPremove?: (premove: Premove | null) => void;
-  /**
-   * Listen for typed SAN on the whole window, not only while the board has focus. Default: true
-   * when interactive. Keys typed into inputs or with Ctrl/Meta/Alt are ignored; `z` is never
-   * taken (undo / redo belong to the page).
-   */
+  readonly farColor?: Color | null;
+  /** Listen for typed coordinates on the whole window, not only while the board has focus. Default: `interactive`. */
   readonly captureKeys?: boolean;
   /** Announce each new move in a polite live region (DESIGN 14.1). Default true. */
   readonly announce?: boolean;
-  /** CSS length for `--cell-size`. Default `clamp(34px, min(11.5vw, 10vh), 96px)` (DESIGN 5.1). */
-  readonly cellSize?: string;
+  /** CSS length for `--board-size`. Default `BOARD_SIZE_PORTRAIT`; use `BOARD_SIZE_LANDSCAPE` on the rails. */
+  readonly boardSize?: string;
   /** Extra classes on the outer wrapper (e.g. the blur of the start-screen preview). */
   readonly className?: string;
 }

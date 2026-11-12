@@ -1,216 +1,234 @@
-import { render, screen } from '@testing-library/react';
+import { render } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { translate } from '@/lib/i18n';
-import { history, newGame, play, START_FEN } from '@/lib/zhess';
-import type { Game, Language } from '@/lib/chessTypes';
+import boardTable from '@/lib/i18n/board';
+import { boardFromDiagram, fromGtp, starPoints } from '@/lib/zigo';
+import type { Language, Size } from '@/lib/types';
 import { BoardThumbnail } from './BoardThumbnail';
-import { describeMove, describeSquare, type Translate } from './describe';
-import { clampDialCenter, dialPick } from './dial';
+import { countCaptures, describeAtari, describeMove, describePoint, type Translate } from './describe';
+import { goBoardGameProps } from './gameProps';
+import { fromDiagram, play } from '@/lib/zigo';
 import {
-  cellToSquare,
-  drawOrder,
-  isLightSquare,
-  parseFenBoard,
-  premoveTargets,
-  premoveUci,
-  squareAt,
-  squareCenter,
-  squareToCell,
-  stepSquare,
+  BOARD_SIZE_LANDSCAPE,
+  BOARD_SIZE_PORTRAIT,
+  MARGIN,
+  cellToPoint,
+  centerPoint,
+  columnLabel,
+  extent,
+  inGhostHitArea,
+  pointAt,
+  pointCenter,
+  pointToCell,
+  rowLabel,
+  starSet,
+  stepPoint,
+  viewBox,
 } from './geometry';
-import { PieceIcon } from './PieceIcon';
-import { PIECE_SHAPES, pieceSvgMarkup, strokeForSize } from './pieceShapes';
-import { BoardSquare } from './Square';
-import { readFileSync } from 'node:fs';
+import { previewSquares, rowCodes, territorySquares } from './marks';
+import { StoneGlyph } from './stones';
 
 const tr = (lang: Language): Translate => (key, vars) => translate(lang, key, vars);
 const t = tr('en');
-
-const lastMove = (moves: string[], start?: string) => {
-  const g: Game = moves.reduce((acc, m) => play(acc, m, 0), newGame(start));
-  const h = history(g);
-  return h[h.length - 1];
-};
+const P = (s: string, size: Size = 19) => fromGtp(s, size) as string;
 
 describe('geometry', () => {
-  it('maps squares to cells both ways for both orientations', () => {
-    expect(squareToCell('a8', 'w')).toEqual({ col: 0, row: 0 });
-    expect(squareToCell('h1', 'w')).toEqual({ col: 7, row: 7 });
-    expect(squareToCell('h1', 'b')).toEqual({ col: 0, row: 0 });
-    for (const o of ['w', 'b'] as const) {
-      for (const sq of ['a1', 'e4', 'h8', 'c6'] as const) {
-        const { col, row } = squareToCell(sq, o);
-        expect(cellToSquare(col, row, o)).toBe(sq);
+  it('spans size + 0.6 pitches with the intersections from 0 to size - 1', () => {
+    expect(extent(9)).toBeCloseTo(9.6);
+    expect(MARGIN).toBeCloseTo(0.8);
+    expect(viewBox(19)).toBe('-0.8 -0.8 19.6 19.6');
+  });
+
+  it('round-trips every point through its screen center for every size', () => {
+    for (const size of [9, 13, 19] as const) {
+      const box = { left: 7, top: 11, width: 30 * extent(size), height: 30 * extent(size) };
+      for (let i = 0; i < size * size; i += 7) {
+        const p = cellToPoint(i % size, Math.floor(i / size), size)!;
+        const c = pointCenter(p, box, size);
+        expect(pointAt(c.x, c.y, box, size)).toBe(p);
+        // Anywhere inside the point's own cell still hits it.
+        expect(pointAt(c.x + 14, c.y - 14, box, size)).toBe(p);
       }
     }
-    expect(cellToSquare(8, 0, 'w')).toBeNull();
-    expect(drawOrder('w')[7][0]).toBe('a1');
-    expect(drawOrder('b')[0][0]).toBe('h1');
   });
 
-  it('colors squares (a1 dark, h1 light)', () => {
-    expect(isLightSquare('a1')).toBe(false);
-    expect(isLightSquare('h1')).toBe(true);
-    expect(isLightSquare('d4')).toBe(false);
+  it('hit-tests strictly in the margin and clamps for drags', () => {
+    const box = { left: 0, top: 0, width: 40 * extent(9), height: 40 * extent(9) };
+    expect(pointAt(2, 2, box, 9)).toBeNull(); // outer margin
+    expect(pointAt(-50, -50, box, 9)).toBeNull();
+    expect(pointAt(2, 2, box, 9, true)).toBe('aa');
+    expect(pointAt(9999, 9999, box, 9, true)).toBe('ii');
+    expect(pointAt(10, 10, null, 9)).toBeNull();
   });
 
-  it('hit-tests points against the board box', () => {
-    const box = { left: 10, top: 20, width: 400, height: 400 };
-    expect(squareAt(15, 25, box, 'w')).toBe('a8');
-    expect(squareAt(409, 419, box, 'w')).toBe('h1');
-    expect(squareAt(15, 25, box, 'b')).toBe('h1');
-    expect(squareAt(5, 25, box, 'w')).toBeNull();
-    expect(squareAt(15, 25, null, 'w')).toBeNull();
-    expect(squareAt(15, 25, { left: 0, top: 0, width: 0, height: 0 }, 'w')).toBeNull();
-    expect(squareCenter('a8', box, 'w')).toEqual({ x: 35, y: 45 });
+  it('gives the ghost a hit area of its cell plus half a pitch', () => {
+    const box = { left: 0, top: 0, width: 40 * extent(13), height: 40 * extent(13) };
+    const g = P('G7', 13);
+    const c = pointCenter(g, box, 13);
+    expect(inGhostHitArea(g, c.x, c.y, box, 13)).toBe(true);
+    expect(inGhostHitArea(g, c.x + 39, c.y - 39, box, 13)).toBe(true);
+    expect(inGhostHitArea(g, c.x + 41, c.y, box, 13)).toBe(false);
   });
 
-  it('steps squares in screen directions and clamps at the edge', () => {
-    expect(stepSquare('e2', 0, -1, 'w')).toBe('e3');
-    expect(stepSquare('e2', 0, -1, 'b')).toBe('e1');
-    expect(stepSquare('a1', -1, 0, 'w')).toBe('a1');
+  it('steps with arrow keys, clamped to the board', () => {
+    expect(stepPoint('aa', -1, -1, 9)).toBe('aa');
+    expect(stepPoint('aa', 1, 0, 9)).toBe('ba');
+    expect(stepPoint('ii', 1, 1, 9)).toBe('ii');
+    expect(centerPoint(19)).toBe('jj');
+    expect(pointToCell('tt', 19)).toBeNull();
   });
 
-  it('parses the placement field of a FEN, leniently', () => {
-    const b = parseFenBoard(START_FEN);
-    expect(b[0]).toEqual({ color: 'w', type: 'r' });
-    expect(b[4]).toEqual({ color: 'w', type: 'k' });
-    expect(b[60]).toEqual({ color: 'b', type: 'k' });
-    expect(b.filter(Boolean)).toHaveLength(32);
-    expect(parseFenBoard('garbage').filter(Boolean)).toHaveLength(0);
-    expect(parseFenBoard('').filter(Boolean)).toHaveLength(0);
+  it('labels GTP columns without I and rows from the bottom', () => {
+    expect(Array.from({ length: 19 }, (_, i) => columnLabel(i)).join('')).toBe('ABCDEFGHJKLMNOPQRST');
+    expect(rowLabel(0, 19)).toBe('19');
+    expect(rowLabel(18, 19)).toBe('1');
   });
 
-  it('lists premove targets Lichess style', () => {
-    const fen = play(newGame(), 'e2e4', 0).fen;
-    expect(premoveTargets(fen, 'd2').sort()).toEqual(['c3', 'd3', 'd4', 'e3']);
-    expect(premoveTargets(fen, 'g1').sort()).toEqual(['e2', 'f3', 'h3']);
-    expect(premoveTargets(fen, 'd1')).toContain('d8');
-    expect(premoveTargets(fen, 'e1').sort()).toEqual(['c1', 'd1', 'd2', 'e2', 'f1', 'f2', 'g1']);
-    expect(premoveTargets(fen, 'e5')).toEqual([]);
-    expect(premoveUci({ from: 'e7', to: 'e8', promotion: 'n' })).toBe('e7e8n');
-    expect(premoveUci({ from: 'e2', to: 'e4' })).toBe('e2e4');
-  });
-});
-
-describe('dial', () => {
-  it('maps offsets to zones and pieces (Q top, R right, B bottom, N left)', () => {
-    expect(dialPick(0, 0)).toEqual({ zone: 'center', piece: null });
-    expect(dialPick(30, 0)).toEqual({ zone: 'none', piece: null });
-    expect(dialPick(0, -45)).toEqual({ zone: 'aim', piece: 'q' });
-    expect(dialPick(70, 0)).toEqual({ zone: 'commit', piece: 'r' });
-    expect(dialPick(0, 70)).toEqual({ zone: 'commit', piece: 'b' });
-    expect(dialPick(-70, 0)).toEqual({ zone: 'commit', piece: 'n' });
-    expect(dialPick(40, -45).piece).toBe('q');
-    expect(dialPick(50, -45).piece).toBe('r');
+  it('knows the star points of every size', () => {
+    expect(starSet(9).size).toBe(5);
+    expect(starSet(13).size).toBe(5);
+    expect(starSet(19).size).toBe(9);
+    for (const g of ['C3', 'C7', 'G3', 'G7', 'E5']) expect(starSet(9).has(P(g, 9))).toBe(true);
+    for (const g of ['D4', 'D10', 'K10', 'Q16']) expect(starSet(19).has(P(g))).toBe(true);
+    expect([...starSet(13)].sort()).toEqual([...starPoints(13)].sort());
   });
 
-  it('keeps the dial 80 px inside the viewport', () => {
-    expect(clampDialCenter(10, 10, 390, 844)).toEqual({ x: 80, y: 80 });
-    expect(clampDialCenter(385, 840, 390, 844)).toEqual({ x: 310, y: 764 });
-    expect(clampDialCenter(200, 400, 390, 844)).toEqual({ x: 200, y: 400 });
+  it('sizes the board from one variable (DESIGN 5.1)', () => {
+    expect(BOARD_SIZE_PORTRAIT).toBe('clamp(280px, min(94vw, 100dvh - 14rem), 768px)');
+    expect(BOARD_SIZE_LANDSCAPE).toContain('100dvh');
   });
 });
 
 describe('describe', () => {
-  it('labels cells like "white knight, g1"', () => {
-    expect(describeSquare('g1', { color: 'w', type: 'n' }, t)).toBe('white knight, g1');
-    expect(describeSquare('e4', null, t, { target: true })).toBe('e4, possible move');
-    expect(describeSquare('e8', { color: 'b', type: 'k' }, t, { check: true })).toBe('black king, e8, in check');
-    expect(describeSquare('g1', { color: 'w', type: 'n' }, tr('de'))).toBe('weißer Springer, g1');
-    expect(describeSquare('d8', { color: 'b', type: 'q' }, tr('fr'))).toBe('dame noire, d8');
+  it('labels cells as DESIGN 14.1 shows them', () => {
+    expect(describePoint(P('D4'), 19, { stone: 1, star: true }, t)).toBe('black stone, D4');
+    expect(describePoint(P('D4'), 19, { stone: 0, star: true }, t)).toBe('empty, D4, star point');
+    expect(describePoint(P('D4', 9), 9, { stone: 0, ko: true }, t)).toBe('empty, D4, ko');
+    expect(describePoint(P('C3'), 19, { stone: 2, lastMove: true, atari: true }, t)).toBe('white stone, C3, last move, atari');
+    expect(describePoint(P('C3'), 19, { stone: 2, dead: true, territory: 'B' }, t)).toBe('white stone, C3, dead, Black territory');
+    expect(describePoint(P('E5'), 19, { stone: 0, hint: -1 }, t)).toBe('empty, E5, hint');
+    expect(describePoint(P('E5'), 19, { stone: 0, hint: 2 }, t)).toBe('empty, E5, hint 2');
   });
 
-  it('describes moves in words for the live region', () => {
-    expect(describeMove(lastMove(['e2e4', 'g8f6']), t)).toBe('Black: knight to f6');
-    expect(describeMove(lastMove(['e2e4', 'd7d5', 'e4d5']), t)).toBe('White: pawn takes pawn on d5');
-    expect(describeMove(lastMove(['f2f3', 'e7e5', 'g2g4', 'd8h4']), t)).toBe('Black: queen to h4, checkmate');
-    expect(describeMove(lastMove(['e2e4', 'f7f6', 'd1h5']), t)).toBe('White: queen to h5, check');
-    expect(describeMove(lastMove(['e1g1'], 'r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1'), t)).toBe('White: castles kingside');
-    expect(describeMove(lastMove(['e8c8'], 'r3k2r/8/8/8/8/8/8/R3K2R b KQkq - 0 1'), t)).toBe('Black: castles queenside');
-    expect(describeMove(lastMove(['e7e8n'], '7k/4P3/8/8/8/8/8/K7 w - - 0 1'), t)).toBe('White: pawn to e8, promotes to knight');
-    expect(describeMove(lastMove(['e5d6'], '4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1'), t)).toBe(
-      'White: pawn takes pawn on d6, en passant',
-    );
-    expect(describeMove(lastMove(['e2e4', 'g8f6']), tr('de'))).toBe('Schwarz: Springer nach f6');
-    expect(describeMove(lastMove(['e2e4', 'g8f6']), tr('es'))).toBe('Negras: caballo a f6');
-  });
-});
-
-describe('pieces', () => {
-  it('has six shapes, white filled light and black filled dark in both themes, outlined in foreground', () => {
-    expect(Object.keys(PIECE_SHAPES).sort()).toEqual(['b', 'k', 'n', 'p', 'q', 'r']);
-    const { container, rerender } = render(<PieceIcon type="n" color="w" />);
-    const body = container.querySelector('path')!;
-    expect(body.getAttribute('fill')).toBe('hsl(var(--ink-light))');
-    expect(body.getAttribute('stroke')).toBe('hsl(var(--foreground))');
-    expect(container.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
-    rerender(<PieceIcon type="n" color="b" title="black knight" />);
-    expect(container.querySelector('path')!.getAttribute('fill')).toBe('hsl(var(--ink-dark))');
-    expect(container.querySelector('path')!.getAttribute('stroke')).toBe('hsl(var(--foreground))');
-    expect(screen.getByRole('img', { name: 'black knight' })).toBeInTheDocument();
+  it('describes moves, captures, passes and atari for the live region', () => {
+    expect(describeMove('B', P('D4'), 0, 19, t)).toBe('Black: D4');
+    expect(describeMove('W', P('Q16'), 2, 19, t)).toBe('White: Q16, captures 2');
+    expect(describeMove('W', 'tt', 0, 19, t)).toBe('White passes');
+    expect(describeAtari([P('C3'), P('C4')], 19, t)).toBe('Your group at C3 is in atari');
+    expect(describeMove('B', P('D4'), 1, 19, tr('de'))).toBe('Schwarz: D4, fängt 1');
+    expect(describeMove('W', 'tt', 0, 19, tr('fr'))).toBe('Blanc passe');
+    expect(describeAtari([P('C3')], 19, tr('es'))).toBe('Tu grupo en C3 está en atari');
   });
 
-  it('thickens strokes for small sizes and exports standalone markup', () => {
-    expect(strokeForSize(undefined)).toBe(3.5);
-    expect(strokeForSize(76)).toBe(3.5);
-    expect(strokeForSize(9)).toBe(10);
-    expect(strokeForSize(18)).toBeCloseTo(5);
-    const svg = pieceSvgMarkup('k', 'b', { size: 64, fg: '#0d0d0d', bg: '#fafafa' });
-    expect(svg).toMatch(/^<svg xmlns="http:\/\/www.w3.org\/2000\/svg"/);
-    expect(svg).toContain('fill="#0d0d0d"');
-    expect(svg).toContain('width="64"');
+  it('counts captured stones between two boards', () => {
+    const before = boardFromDiagram(['.xo', 'xo.', '...']).board;
+    const after = boardFromDiagram(['.x.', 'x.x', '...']).board;
+    expect(countCaptures(before, after, 'W')).toBe(2);
+    expect(countCaptures(before, after, 'B')).toBe(0);
+    expect(countCaptures(before, new Uint8Array(4), 'W')).toBe(0);
   });
 });
 
-describe('square tones', () => {
-  const css = readFileSync('src/ztyle/ztyle.css', 'utf8');
-  const block = (selector: string) => css.slice(css.indexOf(`${selector} {`), css.indexOf('}', css.indexOf(`${selector} {`)));
-
-  it('light squares are the lighter ones in both themes: the foreground step moves to the light squares in dark', () => {
-    expect(block(':root, .light')).toMatch(/--checker-light: transparent;[\s\S]*--checker-dark: hsl\(var\(--foreground\) \/ 0?\.1\);/);
-    expect(block('.dark')).toMatch(/--checker-light: hsl\(var\(--foreground\) \/ 0?\.1\);[\s\S]*--checker-dark: transparent;/);
-    expect(block(':root, .light')).toMatch(/--ink-light: var\(--background\)/);
-    expect(block('.dark')).toMatch(/--ink-light: var\(--foreground\)/);
-  });
-
-  it('the last-move and selection fills are half the checker step, so a highlighted square never matches the other color', () => {
-    const tones = (light: boolean, state: { lastMove?: boolean; selected?: boolean }) => {
-      const { container, unmount } = render(<BoardSquare square="e2" piece={null} light={light} label="e2" focusable={false} {...state} />);
-      const bg = (container.firstElementChild as HTMLElement).style.backgroundImage;
-      unmount();
-      return bg;
-    };
-    for (const light of [true, false]) {
-      expect(tones(light, {})).toContain(`var(--checker-${light ? 'light' : 'dark'})`);
-      for (const state of [{ lastMove: true }, { selected: true }]) {
-        const bg = tones(light, state);
-        expect(bg).toContain('hsl(var(--foreground) / 0.05)');
-        expect(bg).not.toMatch(/--foreground\) \/ 0\.(1|15)\)/);
-      }
+describe('string table', () => {
+  it('keeps the Go terms of the glossary (DESIGN 14)', () => {
+    for (const lang of ['en', 'de', 'fr', 'es'] as const) {
+      expect(boardTable[lang]['board.state.ko'].toLowerCase()).toBe('ko');
+      expect(boardTable[lang]['board.state.atari'].toLowerCase()).toBe('atari');
+      expect(Object.keys(boardTable[lang]).sort()).toEqual(Object.keys(boardTable.en).sort());
     }
+    expect(boardTable.de['board.state.territory.B']).toContain('Gebiet');
+    expect(boardTable.fr['board.state.territory.B']).toContain('territoire');
+    expect(boardTable.es['board.state.territory.B']).toContain('territorio');
+    expect(boardTable.fr['board.label']).not.toMatch(/\bGo\b/); // "go" is lower case in French
+  });
+});
+
+describe('layers', () => {
+  it('encodes rows with dead and faded stones', () => {
+    const { board } = boardFromDiagram(['x.o', '.x.', 'o..']);
+    expect(rowCodes(board, 3, null, null)).toEqual(['B.W', '.B.', 'W..']);
+    expect(rowCodes(board, 3, new Set([0]), new Set([4, 6]))).toEqual(['b.W', '.x.', 'y..']);
+  });
+
+  it('draws territory on empty points only and preview squares by strength', () => {
+    const g = fromDiagram(['x........', ...Array(8).fill('.........')]);
+    const sq = territorySquares({ aa: 'W', ba: 'B', ca: null }, g.board, 9);
+    expect(sq).toEqual([{ col: 1, row: 0, owner: 'B', side: 0.3 }]);
+    const own = new Float32Array(81);
+    own[1] = -1;
+    own[2] = 0.05;
+    own[3] = 0.5;
+    const pv = previewSquares(own, g.board, 9);
+    expect(pv.map((s) => [s.col, s.owner, s.side])).toEqual([
+      [1, 'W', 0.4],
+      [3, 'B', 0.2],
+    ]);
+  });
+});
+
+describe('goBoardGameProps', () => {
+  it('derives the position props from a game', () => {
+    let g = fromDiagram(['.x.......', 'xo.......', '.x.......', ...Array(6).fill('.........')], 'W');
+    g = play(g, 'ca', 0); // white plays next to its stone
+    const props = goBoardGameProps(g);
+    expect(props.size).toBe(9);
+    expect(props.turn).toBe('B');
+    expect(props.lastMove).toBe('ca');
+    expect(props.board).toBe(g.board);
+    expect(props.illegalReason('ba')).toBe('occupied');
+    expect(props.illegalReason('ee')).toBeNull();
   });
 });
 
 describe('BoardThumbnail', () => {
-  it('draws the pieces of a FEN as one decorative SVG', () => {
-    render(<BoardThumbnail fen={START_FEN} />);
-    const svg = screen.getByTestId('board-thumbnail');
-    expect(svg).toHaveAttribute('aria-hidden', 'true');
-    expect(svg.querySelectorAll('[data-piece]')).toHaveLength(32);
-    expect(svg.querySelector('[data-thumb-square="e1"]')).toHaveAttribute('data-piece', 'wk');
+  it('draws stones and star points, nothing else', () => {
+    const { board } = boardFromDiagram(['x........', '.o.......', ...Array(7).fill('.........')]);
+    const { container } = render(<BoardThumbnail size={9} board={board} />);
+    const svg = container.querySelector('[data-testid="board-thumbnail"]')!;
+    expect(svg.getAttribute('data-size')).toBe('9');
+    expect(svg.getAttribute('aria-hidden')).toBe('true');
+    expect(svg.querySelectorAll('use[data-stone="B"]').length).toBe(1);
+    expect(svg.querySelectorAll('use[data-stone="W"]').length).toBe(1);
+    expect(svg.querySelectorAll('circle[r]').length).toBeGreaterThanOrEqual(5);
+    expect(svg.querySelectorAll('text').length).toBe(0);
+    expect(svg.getAttribute('width')).toBe('64');
   });
 
-  it('can be labelled, flipped and sized', () => {
-    render(<BoardThumbnail fen={START_FEN} size={48} orientation="b" label="Game K7QW2M" lastMove={{ from: 'e2', to: 'e4' }} />);
-    const svg = screen.getByRole('img', { name: 'Game K7QW2M' });
-    expect(svg).toHaveAttribute('width', '48');
-    // Oriented for black: the white king's group sits on the top row.
-    expect(svg.querySelector('[data-thumb-square="e1"]')?.getAttribute('transform')).toBe('translate(300 0)');
+  it('takes a label, a pixel size and a 19×19 board', () => {
+    const board = new Uint8Array(361).fill(1);
+    const { getByRole } = render(<BoardThumbnail size={19} board={board} px={48} label="Game K7QW2M" />);
+    const img = getByRole('img', { name: 'Game K7QW2M' });
+    expect(img.getAttribute('width')).toBe('48');
+    expect(img.querySelectorAll('use').length).toBe(361);
+  });
+});
+
+describe('StoneGlyph', () => {
+  it('is decorative without a title and an image with one', () => {
+    const { container, getByRole } = render(
+      <>
+        <StoneGlyph color="B" />
+        <StoneGlyph color="W" title="White" className="h-3 w-3" />
+      </>,
+    );
+    const [b, w] = container.querySelectorAll('svg');
+    expect(b.getAttribute('aria-hidden')).toBe('true');
+    expect(b.getAttribute('data-stone')).toBe('B');
+    expect(getByRole('img', { name: 'White' })).toBe(w);
+    expect(w.getAttribute('class')).toContain('h-3');
+    // Theme-stable inks (Ztyle 03): Black is --ink-dark, White is --ink-light.
+    expect((b.querySelector('circle') as SVGElement).style.fill).toContain('--ink-dark');
+    expect((w.querySelector('circle') as SVGElement).style.fill).toContain('--ink-light');
   });
 
-  it('survives a malformed FEN', () => {
-    render(<BoardThumbnail fen="!!! not a position" />);
-    expect(screen.getByTestId('board-thumbnail').querySelectorAll('[data-piece]')).toHaveLength(0);
+  it('gives each glyph its own gradient ids', () => {
+    const { container } = render(
+      <>
+        <StoneGlyph color="B" />
+        <StoneGlyph color="B" />
+      </>,
+    );
+    const ids = [...container.querySelectorAll('radialGradient')].map((g) => g.id);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 });
