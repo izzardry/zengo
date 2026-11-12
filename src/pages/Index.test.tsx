@@ -1,15 +1,20 @@
 /**
  * The integrated stage (Integrator 1): start ⇄ game, pass-and-play, undo/redo, hidden chrome,
  * passes with their undo toast, resign with undo, scoring with a marked group and Accept, game over,
- * history, review, continue from here, the ko toast and the live region. Computer and room Start
- * answer `Coming soon` until milestones 2 and 3.
- * The real browser paths (touch ghost, dials, reload, share) are covered by e2e/m1.spec.ts.
+ * history, review, continue from here, the ko toast and the live region. Room Start answers
+ * `Coming soon` until milestone 3.
+ * Milestone 2 (Integrator 2): the computer against a FakeEngine (Start waits for the engine, the
+ * reply, a game link that opens a computer game, the hint bulb and the territory preview, the blunder
+ * guard, passing into scoring with the engine's proposal, the calm failure toast).
+ * The real browser paths (touch ghost, dials, reload, share, the real engine) are covered by e2e.
  */
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Toaster } from '@/components/ui/sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
+import { setSharedEngine } from '@/hooks/useZigoEngine';
+import { FakeEngine, type FakeEngineOptions } from '@/lib/engine/fake';
 import { I18nProvider } from '@/lib/i18n';
 import zigo, { encodeMoves, fromGtp, makeSettings } from '@/lib/zigo';
 import type { Point } from '@/lib/types';
@@ -62,14 +67,34 @@ beforeAll(() => {
   window.scrollTo = vi.fn() as unknown as typeof window.scrollTo;
 });
 
+let engine: FakeEngine;
+function useEngine(opts: FakeEngineOptions = {}): FakeEngine {
+  engine = new FakeEngine(opts);
+  setSharedEngine(engine);
+  return engine;
+}
+
 beforeEach(() => {
   localStorage.clear();
   localStorage.setItem('zigo:tutorial-seen', 'true');
+  useEngine();
 });
 
 afterEach(() => {
   vi.useRealTimers();
+  setSharedEngine(null);
 });
+
+/** Starts a computer game as Black at the default level 5 on 9×9 and waits for the board. */
+async function startComputer() {
+  localStorage.setItem('zigo:color', JSON.stringify('B'));
+  renderStage();
+  fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+  await waitFor(() => expect(stage()).toHaveAttribute('data-phase', 'playing'));
+  await waitFor(() => expect(stage()).toHaveAttribute('data-engine', 'ready'));
+}
+
+const fill = (size: number, v: number) => new Float32Array(size * size).fill(v);
 
 describe('Index stage', () => {
   it('shows the start screen with a blurred 9×9 preview and the Start pill', () => {
@@ -83,13 +108,11 @@ describe('Index stage', () => {
     expect(screen.getByText('Medium')).toBeInTheDocument();
   });
 
-  it('answers Start with the computer or a room with Coming soon until milestones 2 and 3', async () => {
+  it('answers Start with a room with Coming soon until milestone 3', async () => {
     renderStage();
-    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
-    expect(await screen.findByText('Coming soon')).toBeInTheDocument();
-    expect(stage()).toHaveAttribute('data-phase', 'start');
     selectOpponent('Room');
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    expect(await screen.findByText('Coming soon')).toBeInTheDocument();
     expect(stage()).toHaveAttribute('data-phase', 'start');
   });
 
@@ -302,6 +325,8 @@ describe('Index stage', () => {
     expect(name('K10')).toMatch(/^white stone, K10/);
     expect(name('K4')).toMatch(/^empty, K4/);
     expect(within(screen.getByRole('group', { name: 'Game info' })).queryByText('GOREV1')).toBeNull();
+    // The new game is a solo game against the remembered opponent (the computer by default): it warms the engine up.
+    await waitFor(() => expect(stage()).toHaveAttribute('data-engine', 'ready'));
   });
 
   it('starts a handicap game with the stones on the star points and White to move', () => {
@@ -320,3 +345,97 @@ describe('Index stage', () => {
     expect(name('G7')).toMatch(/^white stone, G7/);
   });
 });
+
+describe('Index stage against the computer (milestone 2)', () => {
+  it('Start loads the engine first, then the computer answers a stone (DESIGN 10, 14)', async () => {
+    useEngine({ loadMs: 30 });
+    localStorage.setItem('zigo:color', JSON.stringify('B'));
+    renderStage();
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    // The Start pill shows the spinner while stage 1 loads.
+    expect(await screen.findByRole('progressbar', { name: /%/ })).toBeInTheDocument();
+    await waitFor(() => expect(stage()).toHaveAttribute('data-phase', 'playing'));
+    expect(engine.calls.some((c) => c.method === 'load' && c.args[0] === 1)).toBe(true);
+    expect(screen.getByRole('group', { name: 'Game info' })).toHaveTextContent(/Level\s*5/);
+    place('E5');
+    await waitFor(() => expect(cellName('E5')).toMatch(/^black stone, E5/));
+    // FakeEngine plays the first legal point from the top left: A9, after at least 400 ms.
+    await waitFor(() => expect(cellName('A9')).toMatch(/^white stone, A9/), { timeout: 3000 });
+    expect(screen.getByTestId('board-live')).toHaveTextContent('White: A9');
+    expect(engine.calls.some((c) => c.method === 'genmove' && c.args[1] === 5)).toBe(true);
+  });
+
+  it('a game link with o=c&p=1 plays the computer first when the player is White', async () => {
+    renderStage('/?s=GOLINK&d=1&p=1&o=c&w=W');
+    expect(stage()).toHaveAttribute('data-phase', 'playing');
+    await waitFor(() => expect(cellName('A9')).toMatch(/^black stone, A9/), { timeout: 3000 });
+    expect(engine.calls.find((c) => c.method === 'genmove')?.args[1]).toBe(1);
+    // Now it is the player's turn (the stone goes through the blunder guard first).
+    place('E5');
+    await waitFor(() => expect(cellName('E5')).toMatch(/^white stone, E5/));
+  });
+
+  it('one calm toast with Try again when the engine cannot load; Try again starts the game', async () => {
+    const e = useEngine({ loadResult: 'fail' });
+    renderStage();
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    expect(await screen.findByText('The computer could not be loaded.')).toBeInTheDocument();
+    expect(stage()).toHaveAttribute('data-phase', 'start');
+    e.setLoadResult('ready');
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    await waitFor(() => expect(stage()).toHaveAttribute('data-phase', 'playing'));
+  });
+
+  it('the hint bulb: tap shows the best point, a second tap the top three, a 1 s hold the territory preview (DESIGN 7.3)', async () => {
+    await startComputer();
+    const bulb = toolbarButton(/^Hint/);
+    await waitFor(() => expect(bulb).toBeEnabled());
+    fireEvent.click(bulb);
+    await waitFor(() => expect(cellName('A9')).toMatch(/hint/));
+    fireEvent.click(bulb);
+    await waitFor(() => expect(cellName('A9')).toMatch(/hint 1/));
+    expect(cellName('B9')).toMatch(/hint 2/);
+    expect(cellName('C9')).toMatch(/hint 3/);
+
+    // Hold: the info pill shows the engine's lead from Black's view while the preview is held.
+    fireEvent.pointerDown(bulb, { button: 0, pointerId: 7 });
+    await act(() => new Promise((r) => setTimeout(r, 1100)));
+    await waitFor(() => expect(screen.getByTestId('preview-note')).toHaveTextContent('B+0.5'));
+    expect(screen.getByTestId('assist-live')).toHaveTextContent('Territory preview: Black leads by 0.5');
+    fireEvent.pointerUp(bulb, { button: 0, pointerId: 7 });
+    await waitFor(() => expect(screen.queryByTestId('preview-note')).toBeNull());
+
+    // The game is assisted: its history card carries the dot.
+    place('E5');
+    fireEvent.click(screen.getByRole('button', { name: 'Back to start' }));
+    expect(within(screen.getByTestId('history-card')).getByLabelText('Assisted')).toBeInTheDocument();
+  });
+
+  it('the blunder guard bounces a losing stone once and plays it on the second try (DESIGN 7.2)', async () => {
+    // After Black E5 the engine (White to move) sees White far ahead: a drop of 20 points and 40 %.
+    useEngine({ evals: (pos) => (pos.moves.join('') === 'ee' ? { winrate: 0.9, scoreLead: 20 } : undefined) });
+    await startComputer();
+    place('E5');
+    await waitFor(() => expect(screen.getByTestId('assist-live')).toHaveTextContent('That move looks like a blunder'));
+    expect(cellName('E5')).toMatch(/^empty, E5/);
+    place('E5');
+    await waitFor(() => expect(cellName('E5')).toMatch(/^black stone, E5/));
+  });
+
+  it('the player passes, the computer passes, scoring opens with its proposal; Accept ends the game (DESIGN 8.4, 10.4)', async () => {
+    useEngine({
+      moves: (pos) => (pos.moves[pos.moves.length - 1] === 'tt' ? 'tt' : undefined),
+      // The proposal's search (about 100 visits) sees the whole board as Black's: White's A9 is dead.
+      evals: (pos, opts) => (opts.visits === 100 ? { winrate: 0.99, scoreLead: 70, ownership: fill(9, 1) } : undefined),
+    });
+    await startComputer();
+    place('E5');
+    await waitFor(() => expect(cellName('A9')).toMatch(/^white stone, A9/), { timeout: 3000 });
+    fireEvent.click(flag());
+    await waitFor(() => expect(stage()).toHaveAttribute('data-phase', 'scoring'), { timeout: 3000 });
+    await waitFor(() => expect(cellName('A9')).toMatch(/dead/));
+    fireEvent.click(within(screen.getByRole('group', { name: 'Scoring' })).getByRole('button', { name: /^Accept/ }));
+    expect(await screen.findByRole('dialog', { name: 'You won by 73.5!' }, { timeout: 3000 })).toBeInTheDocument();
+  });
+});
+

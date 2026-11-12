@@ -95,7 +95,7 @@ export default defineTable({
     'assist.previewNeedsEngine': 'El ordenador todavía se está descargando',
     'assist.blunderRefused': 'Esa jugada parece un error grave. Juégala otra vez para confirmar.',
     'assist.hintPass': 'El ordenador pasaría aquí',
-    'assist.previewLead.B': 'Vista del territorio: Negro gana por {points}',
-    'assist.previewLead.W': 'Vista del territorio: Blanco gana por {points}',
+    'assist.previewLead.B': 'Vista del territorio: Negro va ganando por {points}',
+    'assist.previewLead.W': 'Vista del territorio: Blanco va ganando por {points}',
   },
 });

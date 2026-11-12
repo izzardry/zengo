@@ -4,13 +4,16 @@ import type { Game, Point } from '@/lib/types';
 import { COMPUTER_ENABLED } from '@/lib/flags';
 import {
   PLAYABLE_MODES,
+  RANKS,
   ROOMS_ENABLED,
   allMoves,
+  engineStartBlocked,
   firstColor,
   nearColor,
   opponentPassed,
   other,
   passedBadges,
+  rankLabel,
   reviewClockView,
   totalTime,
 } from './stage';
@@ -120,5 +123,47 @@ describe('stage helpers', () => {
     expect(earlier.end).toBeDefined();
     expect(reviewClockView(earlier, '1+0').B).toMatchObject({ text: '1:00', flagged: false });
     expect(reviewClockView(earlier, '1+0').W.flagged).toBe(false);
+  });
+});
+
+describe('rankLabel (DESIGN 4.1, 10.2)', () => {
+  it('shows a calibrated 19×19 rank with ≈, nothing otherwise', () => {
+    const table = { size: 19, ranks: { '5': '12k', '10': '≈2d', '3': 'weak' } };
+    expect(rankLabel(5, table)).toBe('≈12k');
+    expect(rankLabel(10, table)).toBe('≈2d');
+    expect(rankLabel(3, table)).toBeNull();
+    expect(rankLabel(7, table)).toBeNull();
+    // Measured on 9×9: DESIGN 10.2 gives 19×19 strength, so it is not shown.
+    expect(rankLabel(5, { size: 9, ranks: { '5': '6k' } })).toBeNull();
+    expect(rankLabel(5, {})).toBeNull();
+  });
+
+  it('reads src/lib/ranks.json when calibration wrote it, else an empty table', () => {
+    expect(typeof RANKS).toBe('object');
+    for (let level = 1; level <= 12; level++) expect(rankLabel(level)).toBe(rankLabel(level, RANKS));
+  });
+});
+
+describe('engineStartBlocked (DESIGN 14)', () => {
+  const ready = { status: 'ready' } as const;
+  const missing = { status: 'missing', reason: 'offline' } as const;
+  const none = { small: false, large: false };
+  it('never blocks online', () => {
+    expect(engineStartBlocked(9, true, missing, missing, none)).toBe(false);
+  });
+  it('offline: levels 8–12 need stage 2, levels 1–7 stage 1', () => {
+    expect(engineStartBlocked(8, false, ready, missing, none)).toBe(true);
+    expect(engineStartBlocked(8, false, ready, { status: 'downloading', percent: 40 }, none)).toBe(true);
+    expect(engineStartBlocked(7, false, ready, missing, none)).toBe(false);
+    expect(engineStartBlocked(3, false, missing, missing, none)).toBe(true);
+    expect(engineStartBlocked(12, false, ready, ready, none)).toBe(false);
+  });
+  it('offline: networks already loaded in the engine are enough', () => {
+    expect(engineStartBlocked(8, false, ready, missing, { small: true, large: true })).toBe(false);
+    expect(engineStartBlocked(3, false, missing, missing, { small: true, large: false })).toBe(false);
+  });
+  it('offline: an unknown cache (checking, unsupported) lets loading decide', () => {
+    expect(engineStartBlocked(9, false, { status: 'unsupported' }, { status: 'unsupported' }, none)).toBe(false);
+    expect(engineStartBlocked(9, false, ready, { status: 'checking' }, none)).toBe(false);
   });
 });

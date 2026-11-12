@@ -14,11 +14,12 @@
  *
  * Game state lives in `useGameState` (package 1B); this file only wires packages together: the Go
  * board (1A), the game chrome (1C), the start screen (1D), history, tutorial and the live-region
- * texts (1E), and the clock (1F).
+ * texts (1E), the clock (1F, 2B), and the engine (2A) with the computer's turn, the hint bulb, the
+ * territory preview, the blunder guard and the dead-stone proposal (2C). All of them share the one
+ * engine of `useZigoEngine`.
  *
- * Milestone 1 plays pass-and-play end to end. `COMPUTER n` and `ROOM` answer Start with a
- * `Coming soon` toast (`PLAYABLE_MODES`); milestone 2 adds the engine (computer moves, hint bulb,
- * blunder guard, dead-stone proposal), milestone 3 the room chrome.
+ * Pass-and-play and the computer play end to end. `ROOM` answers Start with a `Coming soon` toast
+ * (`PLAYABLE_MODES`) until milestone 3 adds the room chrome.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent } from 'react';
 import { toast } from 'sonner';
@@ -55,39 +56,51 @@ import {
 } from '@/components/platform';
 import { BoardPreview, EngineStatus, StartChrome, StartPill, useScrolled } from '@/components/start';
 import { useIsMobileLandscape } from '@/hooks/use-orientation';
+import { useBlunderGuard } from '@/hooks/useBlunderGuard';
 import { useClock } from '@/hooks/useClock';
+import { useComputer, useEngineStart } from '@/hooks/useComputer';
 import { DONATION_DELAY_MS, useDonationPrompt } from '@/hooks/useDonationPrompt';
 import { useEngineOffline } from '@/hooks/useEngineOffline';
 import { useGameState } from '@/hooks/useGameState';
 import { useHelpers } from '@/hooks/useHelpers';
+import { useHint } from '@/hooks/useHint';
 import { usePWAInstall } from '@/hooks/usePWAInstall';
 import { useSavedGames } from '@/hooks/useSavedGames';
 import { useSeating } from '@/hooks/useSeating';
 import { useSWUpdate } from '@/hooks/useSWUpdate';
 import { useTutorial } from '@/hooks/useTutorial';
+import { useZigoEngine } from '@/hooks/useZigoEngine';
+import { withSpokenLabels } from '@/lib/clock';
 import { flags } from '@/lib/flags';
-import { opponentOf } from '@/lib/gameRecord';
+import { DEFAULT_LEVEL, opponentOf } from '@/lib/gameRecord';
 import { useI18n } from '@/lib/i18n';
+import { needsLargeNet } from '@/lib/levels';
+import { createDeadStoneProposer } from '@/lib/proposal';
 import scoringApi from '@/lib/scoring';
 import { bankTurn, bankedTurnMs } from '@/lib/turnBank';
 import type { Color, Game, IllegalReason, Point, SavedGame } from '@/lib/types';
 import { cn } from '@/lib/utils';
-import { formatTc, parseTc } from '@/lib/zigo';
+import { formatTc, isPass, parseTc } from '@/lib/zigo';
 import {
+  ENGINE_ON,
   PLAYABLE_MODES,
   SWIPE_MIN_PX,
   TRANSITION_MS,
   allMoves,
+  engineStartBlocked,
   firstColor,
   nearColor,
   opponentPassed,
   other,
   passedBadges,
+  rankLabel,
   reviewClockView,
   totalTime,
 } from './stage';
 
 const NO_SCORE: readonly [number, number] = Object.freeze([0, 0] as const);
+
+const isOnline = () => typeof navigator === 'undefined' || navigator.onLine !== false;
 
 function isTypingTarget(t: EventTarget | null): boolean {
   if (!(t instanceof HTMLElement)) return false;
@@ -96,7 +109,13 @@ function isTypingTarget(t: EventTarget | null): boolean {
 
 export default function Index() {
   const { t } = useI18n();
-  const gs = useGameState();
+  // The one engine (DESIGN 10.1): computer moves, hints, the guard and the scoring proposal.
+  const engine = useZigoEngine();
+  const engineRef = useRef(engine);
+  engineRef.current = engine;
+  // The dead-stone proposal when a game enters scoring (DESIGN 8.4), in every solo mode.
+  const proposeDead = useMemo(() => (ENGINE_ON ? createDeadStoneProposer(() => engineRef.current) : undefined), []);
+  const gs = useGameState({ proposeDead });
   const saved = useSavedGames();
   const { helpers, toggleHelpers } = useHelpers();
   const { seating, toggleSeating } = useSeating();
@@ -115,8 +134,15 @@ export default function Index() {
   const gsRef = useRef(gs);
   gsRef.current = gs;
   const { checkForUpdate } = useSWUpdate({ shouldAutoReload: () => phaseRef.current === 'start' });
-  // Offline copy of the engine (DESIGN 14). Off until milestone 2 (`COMPUTER_ENABLED`): nothing is fetched.
-  const engineOffline = useEngineOffline();
+  // Offline copy of the engine (DESIGN 14): stage 1 on the first launch, stage 2 once a level 8–12
+  // is selected (or played).
+  const shownOpponent = session ? null : gs.startPill.saved ? opponentOf(gs.startPill.saved) : gs.opponent;
+  const largeWanted = session
+    ? session.mode === 'computer' && needsLargeNet(session.level ?? DEFAULT_LEVEL)
+    : shownOpponent?.mode === 'computer' && needsLargeNet(shownOpponent.level);
+  const engineOffline = useEngineOffline({ large: largeWanted });
+  const engineOfflineRef = useRef(engineOffline);
+  engineOfflineRef.current = engineOffline;
 
   const scrolled = useScrolled(50, isStart);
   const [showUI, setShowUI] = useState(true);
@@ -191,6 +217,90 @@ export default function Index() {
   });
   const clockRef = useRef(clock);
   clockRef.current = clock;
+  const mode = session?.mode ?? 'local';
+
+  /* ---- engine trouble: one calm toast with Try again (DESIGN 10.1) ---- */
+  const engineFailed = useCallback(
+    (retry?: () => void) => {
+      toast(t(isOnline() ? 'engine.failed' : 'engine.failedOffline'), {
+        id: 'engine-failed',
+        action: retry ? { label: t('engine.retry'), onClick: retry } : undefined,
+      });
+    },
+    [t],
+  );
+
+  /* ---- the computer's turn (DESIGN 10) ---- */
+  const computerRetry = useRef<() => void>(() => {});
+  const computer = useComputer({
+    engine,
+    game: sessionGame,
+    // The computer plays on while the player looks back through the moves.
+    enabled: ENGINE_ON && mode === 'computer' && phase !== 'start',
+    computerColor: session ? other(session.color) : null,
+    level: session?.level ?? DEFAULT_LEVEL,
+    tc: session?.tc ?? null,
+    onMove: (p, ms) => void (isPass(p) ? gsRef.current.pass(ms) : gsRef.current.play(p, ms)),
+    onResign: (result) => void gsRef.current.finish(result),
+    onFail: () => engineFailed(() => computerRetry.current()),
+    elapsed: clock.elapsed,
+    sessionKey: sessionId,
+  });
+  computerRetry.current = computer.retry;
+
+  // A solo game warms the engine up, so hints, the guard and the proposal answer at once: against
+  // the computer always, in pass-and-play once stage 1 is on the device (no download for a hint
+  // nobody asked for).
+  const stage1Cached = engineOffline.stage1.status === 'ready';
+  const warm = ENGINE_ON && !!sessionGame && !sessionGame.end && (mode === 'computer' || (mode === 'local' && stage1Cached));
+  const engineIdle = engine.state === 'idle';
+  useEffect(() => {
+    if (warm && engineIdle) engineRef.current.load(1).catch(() => undefined);
+  }, [warm, engineIdle]);
+
+  /* ---- hint bulb and territory preview: computer and pass-and-play (DESIGN 7.3) ---- */
+  const hintEnabled = ENGINE_ON && flags.hint && (mode === 'computer' || mode === 'local') && phase === 'playing' && gs.isPlayerTurn;
+  const hint = useHint({
+    engine,
+    game: sessionGame,
+    enabled: hintEnabled,
+    available: engine.state === 'ready' || (engine.state !== 'failed' && stage1Cached),
+    onAssisted: gs.markAssisted,
+    onFail: () => engineFailed(),
+    onUnavailable: () => toast(t('assist.previewNeedsEngine'), { id: 'preview-engine' }),
+    sessionKey: sessionId,
+  });
+
+  /* ---- blunder guard: against the computer, helpers on (DESIGN 7.2) ---- */
+  const guard = useBlunderGuard({
+    engine,
+    game: sessionGame,
+    enabled: ENGINE_ON && flags.blunderGuard && mode === 'computer' && helpers && phase === 'playing',
+    playerColor: session?.color ?? null,
+    onAssisted: gs.markAssisted,
+    sessionKey: sessionId,
+  });
+  const guardRef = useRef(guard);
+  guardRef.current = guard;
+
+  /* ---- screen-reader notes of the assistance: a refused stone, a pass hint, the preview's lead ---- */
+  const [assistNote, setAssistNote] = useState('');
+  const livePlies = sessionGame?.plies;
+  const liveCursor = sessionGame?.cursor;
+  useEffect(() => setAssistNote(''), [sessionId, livePlies, liveCursor]);
+  const { passBest, step: hintStep } = hint;
+  useEffect(() => {
+    if (!passBest || hintStep === 0) return;
+    // A pass has no point to pulse: say it (DESIGN 7.3).
+    toast(t('assist.hintPass'), { id: 'hint-pass' });
+    setAssistNote(t('assist.hintPass'));
+  }, [passBest, hintStep, t]);
+  const previewNote = hint.preview?.note ?? null;
+  const previewOwnership = hint.preview?.ownership ?? null;
+  useEffect(() => {
+    if (!previewNote) return;
+    setAssistNote(t(previewNote.startsWith('B') ? 'assist.previewLead.B' : 'assist.previewLead.W', { points: previewNote.slice(2) }));
+  }, [previewNote, t]);
 
   /** Keeps the running turn's time for a reload or a later resume. */
   const bankNow = useCallback(() => {
@@ -209,8 +319,6 @@ export default function Index() {
       document.removeEventListener('visibilitychange', onHide);
     };
   }, [bankNow]);
-
-  const mode = session?.mode ?? 'local';
 
   /* ---- pass with a 5-second undo (DESIGN 6.2) ---- */
   const [passToast, setPassToast] = useState<{ who: 'you' | Color; cursor: number; key: number } | null>(null);
@@ -233,20 +341,37 @@ export default function Index() {
     [animate],
   );
 
-  const handleStart = useCallback(() => {
+  /* ---- Start: a computer game waits for the engine (spinner with progress, DESIGN 10.1, 14) ---- */
+  const handleStartRef = useRef<() => Promise<void>>(async () => undefined);
+  const engineStart = useEngineStart(engine, { onFail: () => engineFailed(() => void handleStartRef.current()) });
+  const { cancel: cancelEngineStart, prepare: prepareEngine } = engineStart;
+  useEffect(() => {
+    if (!isStart) cancelEngineStart();
+  }, [isStart, cancelEngineStart]);
+
+  const handleStart = useCallback(async () => {
     const pill = gs.startPill;
     const target = pill.saved ? opponentOf(pill.saved) : gs.opponent;
-    // The computer (milestone 2) and rooms (milestone 3): a stored game can still be reviewed.
+    // Rooms (milestone 3): a stored game can still be reviewed.
     if (pill.label !== 'review' && !PLAYABLE_MODES[target.mode]) {
       comingSoon();
       return;
+    }
+    if (pill.label !== 'review' && target.mode === 'computer') {
+      // Offline without the networks of this level: nothing happens; the status line says why.
+      const off = engineOfflineRef.current;
+      if (engineStartBlocked(target.level, isOnline(), off.stage1, off.stage2, engineRef.current.nets)) return;
+      if (!(await prepareEngine(target.level))) return;
+      // The player went elsewhere meanwhile (a history card, a link).
+      if (phaseRef.current !== 'start') return;
     }
     if (!begin(gsRef.current.start)) {
       comingSoon();
       return;
     }
     if (pill.label === 'start') startTutorial();
-  }, [gs.startPill, gs.opponent, begin, comingSoon, startTutorial]);
+  }, [gs.startPill, gs.opponent, prepareEngine, begin, comingSoon, startTutorial]);
+  handleStartRef.current = handleStart;
 
   const handleOpen = useCallback(
     (g: SavedGame) => {
@@ -289,10 +414,21 @@ export default function Index() {
     setResigned(null);
   }, [gs]);
 
-  /** A stone placed on the board (tap, confirmed ghost, keyboard, typed `D4`). */
-  const handlePlay = useCallback((p: Point) => {
-    gsRef.current.play(p, clockRef.current.elapsed());
-  }, []);
+  /** A stone placed on the board (tap, confirmed ghost, keyboard, typed `D4`): through the blunder guard against the computer. */
+  const handlePlay = useCallback(
+    (p: Point) => {
+      const g = guardRef.current;
+      if (!g.active) {
+        gsRef.current.play(p, clockRef.current.elapsed());
+        return;
+      }
+      void g.check(p).then((r) => {
+        if (r.action === 'commit') gsRef.current.play(p, clockRef.current.elapsed());
+        else if (r.action === 'refuse') setAssistNote(t('assist.blunderRefused'));
+      });
+    },
+    [t],
+  );
 
   /** The flag's tap, or `pass` typed: a pass with its 5-second undo toast. */
   const handlePass = useCallback(() => {
@@ -442,7 +578,8 @@ export default function Index() {
     () => (phase === 'review' && view && session ? reviewClockView(view, session.tc) : null),
     [phase, view, session],
   );
-  const faces = reviewFaces ?? clock;
+  // Review faces bypass useClock: give byo-yomi faces their spoken reading here (DESIGN 14.1).
+  const faces = reviewFaces ? withSpokenLabels(reviewFaces, t) : clock;
   const moves = useMemo(() => (session ? allMoves(session.game) : []), [session]);
   const passed = useMemo(() => (view ? passedBadges(view) : { B: false, W: false }), [view]);
 
@@ -498,6 +635,14 @@ export default function Index() {
         cursor={view.cursor}
         firstColor={firstColor(view)}
         ghost={ghost}
+        note={
+          previewNote ? (
+            // The engine's score lead while the territory preview is held (DESIGN 7.3); spoken by the assist region.
+            <span aria-hidden="true" data-testid="preview-note">
+              {previewNote}
+            </span>
+          ) : undefined
+        }
         onJump={gs.goto}
         visible={chromeVisible}
         landscape={landscape}
@@ -508,6 +653,24 @@ export default function Index() {
   const end = session?.game.end;
   const tint = end && endedHere && session ? tintFor(end.result, session.mode, session.color) : null;
   const flagLive = phase === 'playing' && live && gs.isPlayerTurn;
+
+  /* ---- hint bulb in the toolbar: tap best / top three, hold 1 s territory (DESIGN 4.2, 7.3) ---- */
+  const hintControls =
+    ENGINE_ON && flags.hint && session && (mode === 'computer' || mode === 'local') && phase === 'playing' && live
+      ? {
+          onHint: hint.tap,
+          onPeekStart: hint.previewStart,
+          onPeekEnd: hint.previewEnd,
+          busy: hint.pending || hint.previewPending,
+          disabled: !hintEnabled,
+        }
+      : undefined;
+  const boardHint = phase === 'playing' ? hint.hint : null;
+  const territoryPreview = useMemo(
+    () => (phase === 'playing' && previewOwnership ? { ownership: previewOwnership } : null),
+    [phase, previewOwnership],
+  );
+  const startRank = shownOpponent?.mode === 'computer' ? rankLabel(shownOpponent.level) : null;
 
   return (
     <>
@@ -522,6 +685,8 @@ export default function Index() {
           onClick={onStageClick}
           data-testid="stage"
           data-phase={phase}
+          data-engine={engine.state}
+          data-computer={computer.thinking ? 'thinking' : undefined}
           data-size={boardGame.settings.size}
           className={cn(
             'flex h-[100dvh] min-h-[320px] items-center justify-center',
@@ -533,7 +698,16 @@ export default function Index() {
           <BoardPreview
             blurred={isStart}
             animate={animating}
-            overlay={<StartPill label={gs.startPill.label} onClick={handleStart} disabled={!isStart || animating} />}
+            overlay={
+              <StartPill
+                label={gs.startPill.label}
+                onClick={() => void handleStart()}
+                loading={engineStart.loading}
+                onCancel={cancelEngineStart}
+                progress={engineStart.progress}
+                disabled={!isStart || animating}
+              />
+            }
             overlayVisible={isStart}
           >
             <div className="relative" onPointerDown={onSwipeDown} onPointerUp={onSwipeUp} onPointerCancel={() => (swipe.current = null)}>
@@ -548,6 +722,10 @@ export default function Index() {
                 onGhostChange={setGhost}
                 scoring={boardScoring}
                 onToggleGroup={sc.toggle}
+                hint={boardHint}
+                territoryPreview={territoryPreview}
+                blunder={guard.blunder}
+                blunderKey={guard.blunderKey}
                 seating={faceToFace ? 'face' : 'side'}
                 farColor={faceToFace ? far : null}
                 announce={false}
@@ -602,6 +780,7 @@ export default function Index() {
               onRedoHold={gs.toEnd}
               helpers={helpers}
               onToggleHelpers={toggleHelpers}
+              hint={hintControls}
               seating={mode === 'local' ? seating : undefined}
               onToggleSeating={mode === 'local' ? toggleSeating : undefined}
               onFlip={() => setFlipped((f) => !f)}
@@ -666,6 +845,7 @@ export default function Index() {
           onCodeChange={(code) => void gs.setCode(code)}
           opponent={gs.opponent}
           onOpponentChange={gs.setOpponent}
+          opponentRank={startRank}
           color={gs.colorChoice}
           onColorChange={gs.setColorChoice}
           size={gs.size}
@@ -728,6 +908,10 @@ export default function Index() {
         {/* Moves, passes, captures and atari for screen readers (DESIGN 14.1). */}
         <div aria-live="polite" aria-atomic className="sr-only" data-testid="board-live">
           {liveText}
+        </div>
+        {/* Screen-reader notes of the hint and the blunder guard (the guard shows no text, DESIGN 7.2). */}
+        <div aria-live="polite" aria-atomic className="sr-only" data-testid="assist-live">
+          {assistNote}
         </div>
 
         <DonationPrompt open={showDonation} onDismiss={dismissDonation} />
