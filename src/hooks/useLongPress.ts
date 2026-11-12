@@ -1,5 +1,5 @@
 /**
- * Tap / hold on one element (Ztyle chapter 08, DESIGN 6.4).
+ * Tap / hold on one element (Ztyle chapter 08, DESIGN 6.3).
  *
  * - A press shorter than `ms` is a tap: `onClick` runs on the element's normal click, so Enter,
  *   Space and assistive technology activate it like any button.
@@ -9,6 +9,8 @@
  * - Leaving the element or a cancelled pointer aborts a pending hold. `onLongPressEnd` runs when a
  *   hold that already fired ends (release, leave or cancel), for "while held" actions such as the
  *   threat peek.
+ * - Keyboard twins (DESIGN 6.3): holding Space for `ms`, or Shift+Enter at once. Shift+Enter
+ *   cancels the key's own click; `onLongPressEnd` runs when Enter is released.
  * - The context menu is suppressed so a long touch never opens the iOS callout.
  *
  * Spread the returned handlers on a button. Callbacks may change between renders; the latest are used.
@@ -16,9 +18,9 @@
 import { useCallback, useEffect, useRef } from 'react';
 import type React from 'react';
 
-/** Hold durations of the long-press ladder (DESIGN 6.4). */
+/** Hold durations of the long-press ladder (DESIGN 6.3). */
 export const HOLD_MS = {
-  promotion: 300,
+  pill: 500,
   clockPill: 500,
   flag: 500,
   step: 500,
@@ -123,11 +125,29 @@ export function useLongPress(options: LongPressOptions): LongPressHandlers {
     onPointerLeave: () => finish(false),
     onPointerCancel: () => finish(false),
     onKeyDown: (e) => {
-      // Space activates a button on key-up, so holding it can be a long press. Enter clicks on key-down.
+      // Shift+Enter: the long press at once. Enter clicks on key-down, so cancel that click.
+      if (e.key === 'Enter' && e.shiftKey) {
+        if (opts.current.disabled) return;
+        e.preventDefault();
+        if (e.repeat || holding.current) return;
+        clearTimer();
+        fired.current = false;
+        holding.current = true;
+        opts.current.onLongPress();
+        return;
+      }
+      // Space activates a button on key-up, so holding it can be a long press.
       if (e.key !== ' ' || e.repeat) return;
       start();
     },
     onKeyUp: (e) => {
+      if (e.key === 'Enter') {
+        if (holding.current) {
+          holding.current = false;
+          opts.current.onLongPressEnd?.();
+        }
+        return;
+      }
       if (e.key !== ' ') return;
       finish(true);
     },

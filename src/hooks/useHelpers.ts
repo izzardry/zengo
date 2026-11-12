@@ -1,10 +1,10 @@
 /**
  * The helpers shield (DESIGN 7.1): one toggle, on by default, stored in `zigo:helpers`.
- * It bundles legal-move dots, last move, check glow, coordinates and the blunder guard.
+ * It bundles the last-move ring, the atari glow, the ko marker, coordinates and the blunder guard.
  */
 import { useCallback, useState } from 'react';
 import { store as defaultStore } from '@/lib/storage';
-import type { Store } from '@/lib/chessTypes';
+import type { Store } from '@/lib/types';
 
 export interface HelpersState {
   /** True when helpers are on. */

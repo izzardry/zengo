@@ -1,86 +1,83 @@
 /**
- * What the game-over overlay says, from the device player's point of view (DESIGN 8.4). Pure.
+ * What the game-over overlay says, from the device player's point of view (DESIGN 8.5). Pure.
+ * Go has no draws (half-point komi), so every result has a winner.
  */
 import type { TranslationKey } from '@/lib/i18n';
-import type { Color, GameEnd, Mode } from '@/lib/chessTypes';
+import type { Color, Mode, Result } from '@/lib/types';
 
 /** Outcome for this device's player; pass-and-play has no single player and reports `local`. */
-export type Outcome = 'win' | 'loss' | 'draw' | 'local';
+export type Outcome = 'win' | 'loss' | 'local';
 
-/** Page tint behind the overlay: `success/12` for a win, `destructive/12` for a loss, none otherwise. */
+/** Page tint behind the overlay: `success/12` for a win, `destructive/12` for a loss, none in pass-and-play. */
 export type Tint = 'success' | 'destructive' | null;
 
-/** Winning color, or null for a draw. */
-export function winner(end: GameEnd): Color | null {
-  if (end.result === '1-0') return 'w';
-  if (end.result === '0-1') return 'b';
-  return null;
+/** Winning color. */
+export function winner(result: Result): Color {
+  return result.winner;
 }
 
-/** Outcome for the player of `myColor`. Pass-and-play reports `local` unless it is a draw. */
-export function outcomeFor(end: GameEnd, mode: Mode, myColor: Color): Outcome {
-  const w = winner(end);
-  if (w === null) return 'draw';
+/** Outcome for the player of `myColor`. Pass-and-play reports `local`. */
+export function outcomeFor(result: Result, mode: Mode, myColor: Color): Outcome {
   if (mode === 'local') return 'local';
-  return w === myColor ? 'win' : 'loss';
+  return result.winner === myColor ? 'win' : 'loss';
 }
 
-/** The page tint for an ending (none in pass-and-play and for draws). */
-export function tintFor(end: GameEnd, mode: Mode, myColor: Color): Tint {
-  const o = outcomeFor(end, mode, myColor);
+/** The page tint for an ending (none in pass-and-play). */
+export function tintFor(result: Result, mode: Mode, myColor: Color): Tint {
+  const o = outcomeFor(result, mode, myColor);
   return o === 'win' ? 'success' : o === 'loss' ? 'destructive' : null;
 }
 
 export interface EndTexts {
-  /** Show the 🎉 glyph. */
+  /** Show the 🎉 glyph (a win, or any pass-and-play ending). */
   glyph: boolean;
+  /** Title key; the overlay fills `{margin}` (localized half points) and `{level}`. */
   title: TranslationKey;
-  /** A second line naming the reason, when the title does not say it already. */
-  reason?: TranslationKey;
+  /** The title needs the margin (a game decided by the count). */
+  margin: boolean;
 }
 
-const DRAW_REASONS: Partial<Record<GameEnd['by'], TranslationKey>> = {
-  stalemate: 'game.reason.stalemate',
-  repetition: 'game.reason.repetition',
-  fifty: 'game.reason.fifty',
-  material: 'game.reason.material',
-  agreed: 'game.reason.agreed',
-  time: 'game.reason.timeNoMate',
-};
-
-/** Glyph, title and reason line of the overlay (DESIGN 8.4 table). */
-export function endTexts(end: GameEnd, mode: Mode, myColor: Color): EndTexts {
-  const w = winner(end);
-  if (w === null) return { glyph: false, title: 'game.title.draw', reason: DRAW_REASONS[end.by] };
+/**
+ * Glyph and title of the overlay (DESIGN 8.5 table):
+ * - win: `You won by 4.5!` / `You won by resignation!` / `You won on time!` / `Level 8 resigned. You won!`
+ * - loss: `Lost by 4.5` / `Resigned` / `Out of time`
+ * - pass-and-play: `Black wins by 4.5!` / `White wins by resignation!` / `Black wins on time!`
+ */
+export function endTexts(result: Result, mode: Mode, myColor: Color): EndTexts {
+  const { winner: w, by } = result;
+  const margin = by === 'score';
 
   if (mode === 'local') {
-    const title: TranslationKey = w === 'w' ? 'game.title.whiteWins' : 'game.title.blackWins';
-    const loserIsWhite = w === 'b';
-    const reason: TranslationKey | undefined =
-      end.by === 'mate'
-        ? 'game.reason.mate'
-        : end.by === 'resign'
-          ? loserIsWhite
-            ? 'game.reason.whiteResigned'
-            : 'game.reason.blackResigned'
-          : end.by === 'time'
-            ? loserIsWhite
-              ? 'game.reason.whiteTime'
-              : 'game.reason.blackTime'
-            : undefined;
-    return { glyph: true, title, reason };
+    const black = w === 'B';
+    const title: TranslationKey =
+      by === 'score'
+        ? black
+          ? 'game.title.blackWinsBy'
+          : 'game.title.whiteWinsBy'
+        : by === 'resign'
+          ? black
+            ? 'game.title.blackWinsResign'
+            : 'game.title.whiteWinsResign'
+          : black
+            ? 'game.title.blackWinsTime'
+            : 'game.title.whiteWinsTime';
+    return { glyph: true, title, margin };
   }
 
   if (w === myColor) {
-    if (end.by === 'mate') return { glyph: true, title: 'game.title.checkmateWin' };
-    if (end.by === 'resign') return { glyph: true, title: 'game.title.youWon', reason: 'game.reason.opponentResigned' };
-    if (end.by === 'time') return { glyph: true, title: 'game.title.youWon', reason: 'game.reason.opponentTime' };
-    return { glyph: true, title: 'game.title.youWon' };
+    const title: TranslationKey =
+      by === 'score'
+        ? 'game.title.wonBy'
+        : by === 'resign'
+          ? mode === 'computer'
+            ? 'game.title.levelResigned'
+            : 'game.title.wonResign'
+          : 'game.title.wonTime';
+    return { glyph: true, title, margin };
   }
 
-  if (end.by === 'mate') return { glyph: false, title: 'game.title.checkmateLoss' };
-  if (end.by === 'time') return { glyph: false, title: 'game.title.outOfTime' };
-  return { glyph: false, title: 'game.title.resigned' };
+  const title: TranslationKey = by === 'score' ? 'game.title.lostBy' : by === 'resign' ? 'game.title.resigned' : 'game.title.outOfTime';
+  return { glyph: false, title, margin };
 }
 
 /**

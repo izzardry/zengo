@@ -1,5 +1,5 @@
 /**
- * Share actions with the right texts and confirmation toasts (DESIGN 13.2, Ztyle 09 system toasts).
+ * Share actions with the right texts and confirmation toasts (DESIGN 13.2, 13.3, Ztyle 09 system toasts).
  */
 import { useCallback } from 'react';
 import { toast } from 'sonner';
@@ -12,8 +12,8 @@ export type ShareKind = 'room' | 'solo' | 'win';
 export interface ShareApi {
   /** Shares `url` with the text for `kind` (`level` for `win`); falls back to copying with a toast. */
   shareLink: (url: string, kind: ShareKind, level?: number) => Promise<ShareOutcome>;
-  /** Copies PGN to the clipboard and confirms with a toast. Resolves true on success. */
-  copyPgn: (pgn: string) => Promise<boolean>;
+  /** Copies SGF to the clipboard and confirms with a toast. Resolves true on success. */
+  copySgf: (sgf: string) => Promise<boolean>;
 }
 
 export function useShare(nav?: ShareNavigator): ShareApi {
@@ -35,15 +35,15 @@ export function useShare(nav?: ShareNavigator): ShareApi {
     [t, nav],
   );
 
-  const copyPgn = useCallback(
-    async (pgn: string) => {
-      const ok = await copyText(pgn, nav);
-      if (ok) toast.success(t('game.pgnCopied'));
+  const copySgf = useCallback(
+    async (sgf: string) => {
+      const ok = await copyText(sgf, nav);
+      if (ok) toast.success(t('game.sgfCopied'));
       else toast.error(t('game.copyFailed'));
       return ok;
     },
     [t, nav],
   );
 
-  return { shareLink, copyPgn };
+  return { shareLink, copySgf };
 }

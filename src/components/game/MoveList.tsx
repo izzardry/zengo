@@ -1,18 +1,20 @@
 import { useEffect, useRef } from 'react';
+import { StoneGlyph } from '@/components/board';
 import { useI18n } from '@/lib/i18n';
-import type { Color } from '@/lib/chessTypes';
+import type { Color, Point, Size } from '@/lib/types';
 import { cn } from '@/lib/utils';
-import { FigurineSan } from './PieceGlyph';
-import { movePairs, plyNumber } from './notation';
+import { moveLabel, plyInfo } from './format';
 
 export interface MoveListProps {
-  /** SAN of every recorded ply, including plies after the cursor (review, redo tail). */
-  moves: readonly string[];
+  /** Every recorded ply as an SGF point (`tt` = pass), including plies after the cursor (review, redo tail). */
+  moves: readonly Point[];
+  /** Board size, for GTP coordinates. */
+  size: Size;
   /** Plies applied; the ply at `cursor - 1` is marked current. */
   cursor: number;
-  /** Number of the first move (1 unless the game started from a position). */
+  /** Number of the first ply (1 unless the game started from a set-up position). */
   firstMoveNumber?: number;
-  /** Side that made the first ply ('b' when the game started from a position with black to move). */
+  /** Color of the first ply: Black, or White in a handicap game. */
   firstColor?: Color;
   /**
    * Tap on a move: jump to the position after it. Receives the new cursor (`ply index + 1`; 0 for
@@ -22,60 +24,61 @@ export interface MoveListProps {
   className?: string;
 }
 
-/** All moves, numbered, in figurine notation (DESIGN 4.2, 12.3). Shown in the info pill's popover. */
-export function MoveList({ moves, cursor, firstMoveNumber = 1, firstColor = 'w', onJump, className }: MoveListProps) {
+/**
+ * All moves, numbered per ply, with a stone of the mover's color and the GTP coordinate or `Pass`
+ * (DESIGN 4.2, 12.3). Two columns, so the colors line up. Shown in the info pill's popover.
+ */
+export function MoveList({ moves, size, cursor, firstMoveNumber = 1, firstColor = 'B', onJump, className }: MoveListProps) {
   const { t } = useI18n();
   const currentRef = useRef<HTMLElement | null>(null);
-  const pairs = movePairs(moves, firstMoveNumber, firstColor);
   const current = Math.min(cursor, moves.length) - 1;
+  const pass = t('game.passMove');
 
   useEffect(() => {
     currentRef.current?.scrollIntoView?.({ block: 'nearest' });
   }, [current]);
 
-  const cell = (entry: { san: string; ply: number } | undefined, color: Color) => {
-    if (!entry) {
-      return (
-        <span className="px-2 py-1 text-muted-foreground/50" aria-hidden="true">
-          {color === 'w' ? '…' : ''}
-        </span>
-      );
-    }
-    const isCurrent = entry.ply === current;
-    const future = entry.ply >= cursor;
-    const { number } = plyNumber(entry.ply, firstMoveNumber, firstColor);
+  const items = moves.map((m, ply) => {
+    const { number, color } = plyInfo(ply, firstMoveNumber, firstColor);
+    const label = moveLabel(m, size, pass);
+    const isCurrent = ply === current;
+    const future = ply >= cursor;
     const cls = cn(
-      'px-2 py-1 rounded-md text-left text-sm',
+      'flex items-center gap-1.5 px-2 py-1 rounded-md text-left text-sm whitespace-nowrap',
       isCurrent && 'bg-foreground/10 font-semibold',
       future && 'text-foreground/50',
     );
-    const content = <FigurineSan san={entry.san} color={color} />;
-    if (!onJump) {
-      return (
-        <span
-          ref={isCurrent ? (el) => void (currentRef.current = el) : undefined}
-          className={cls}
-          aria-current={isCurrent ? 'step' : undefined}
-          data-ply={entry.ply}
-        >
-          {content}
-        </span>
-      );
-    }
-    return (
-      <button
-        type="button"
-        ref={isCurrent ? (el) => void (currentRef.current = el) : undefined}
-        className={cn(cls, 'hover:bg-foreground/5 transition-colors duration-fast')}
-        aria-current={isCurrent ? 'step' : undefined}
-        aria-label={t('game.goToMove', { move: `${number}${color === 'w' ? '.' : '…'} ${entry.san}` })}
-        data-ply={entry.ply}
-        onClick={() => onJump(entry.ply + 1)}
-      >
-        {content}
-      </button>
+    const content = (
+      <>
+        <span className="w-7 text-right text-xs text-muted-foreground tabular-nums">{number}</span>
+        <StoneGlyph color={color} className="w-3 h-3 shrink-0" />
+        <span>{label}</span>
+      </>
     );
-  };
+    const ref = isCurrent ? (el: HTMLElement | null) => void (currentRef.current = el) : undefined;
+    return (
+      <li key={ply} className="contents">
+        {onJump ? (
+          <button
+            type="button"
+            ref={ref}
+            className={cn(cls, 'hover:bg-foreground/5 transition-colors duration-fast')}
+            aria-current={isCurrent ? 'step' : undefined}
+            aria-label={t('game.goToMove', { n: number, side: color === 'B' ? t('black') : t('white'), move: label })}
+            data-ply={ply}
+            data-color={color}
+            onClick={() => onJump(ply + 1)}
+          >
+            {content}
+          </button>
+        ) : (
+          <span ref={ref} className={cls} aria-current={isCurrent ? 'step' : undefined} data-ply={ply} data-color={color}>
+            {content}
+          </span>
+        )}
+      </li>
+    );
+  });
 
   return (
     <div className={cn('font-mono', className)}>
@@ -92,14 +95,8 @@ export function MoveList({ moves, cursor, firstMoveNumber = 1, firstColor = 'w',
           {t('game.startPosition')}
         </button>
       )}
-      <ol aria-label={t('game.moves')} className="grid grid-cols-[2.25rem_1fr_1fr] gap-x-1 gap-y-0.5 items-center">
-        {pairs.map((pair) => (
-          <li key={pair.number} className="contents">
-            <span className="text-xs text-muted-foreground text-right pr-1 tabular-nums">{pair.number}.</span>
-            {cell(pair.w, 'w')}
-            {cell(pair.b, 'b')}
-          </li>
-        ))}
+      <ol aria-label={t('game.moves')} className="grid grid-cols-2 gap-x-1 gap-y-0.5 items-center">
+        {items}
       </ol>
     </div>
   );

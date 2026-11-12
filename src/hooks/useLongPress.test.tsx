@@ -128,6 +128,37 @@ describe('useLongPress', () => {
     expect(onClick).not.toHaveBeenCalled();
   });
 
+  it('Shift+Enter is the long press at once, without the click; Enter alone still clicks (DESIGN 6.3)', () => {
+    const onClick = vi.fn();
+    const onLongPress = vi.fn();
+    const onLongPressEnd = vi.fn();
+    render(<Btn onClick={onClick} onLongPress={onLongPress} onLongPressEnd={onLongPressEnd} />);
+    const b = screen.getByRole('button');
+    const ev = new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true, cancelable: true });
+    b.dispatchEvent(ev);
+    expect(ev.defaultPrevented).toBe(true); // the browser's Enter click is cancelled
+    expect(onLongPress).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(b, { key: 'Enter', shiftKey: true, repeat: true });
+    expect(onLongPress).toHaveBeenCalledTimes(1);
+    expect(onLongPressEnd).not.toHaveBeenCalled();
+    fireEvent.keyUp(b, { key: 'Enter', shiftKey: true });
+    expect(onLongPressEnd).toHaveBeenCalledTimes(1);
+    // a plain Enter is an ordinary activation
+    const plain = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    b.dispatchEvent(plain);
+    expect(plain.defaultPrevented).toBe(false);
+    fireEvent.click(b);
+    expect(onClick).toHaveBeenCalledTimes(1);
+    expect(onLongPress).toHaveBeenCalledTimes(1);
+  });
+
+  it('Shift+Enter does nothing while disabled', () => {
+    const onLongPress = vi.fn();
+    render(<Btn disabled onLongPress={onLongPress} />);
+    fireEvent.keyDown(screen.getByRole('button'), { key: 'Enter', shiftKey: true });
+    expect(onLongPress).not.toHaveBeenCalled();
+  });
+
   it('disabled: no hold, clicks pass through', () => {
     const onClick = vi.fn();
     const onLongPress = vi.fn();

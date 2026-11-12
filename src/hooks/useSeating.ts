@@ -1,15 +1,15 @@
 /**
  * Pass-and-play seating (DESIGN 5.2), stored in `zigo:seating`.
  *
- * - `face`: face to face, the far player's pieces, strip and clock drawn rotated 180°.
- *   Default on touch devices.
+ * - `face`: face to face, the far player's strip, clock, prisoners, passed badge and coordinate
+ *   labels drawn rotated 180° (stones need no rotation). Default on touch devices.
  * - `side`: side by side, everything upright. Default with a mouse.
  *
  * Touch devices are detected as Ztyle chapter 05 says: by pointer and hover capability, not by width.
  */
 import { useCallback, useState } from 'react';
 import { store as defaultStore } from '@/lib/storage';
-import type { Seating, Store } from '@/lib/chessTypes';
+import type { Seating, Store } from '@/lib/types';
 
 /** Ztyle's touch-device query. */
 export const TOUCH_QUERY = '(pointer: coarse) and (not (pointer: fine)) and (not (hover: hover))';

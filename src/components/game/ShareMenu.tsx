@@ -7,16 +7,16 @@ export interface ShareMenuProps {
   /** The button that opens the menu (must forward its ref and props, like `ToolbarButton`). */
   trigger: ReactElement;
   onShareLink: () => void;
-  onCopyPgn: () => void;
+  onCopySgf: () => void;
   side?: 'top' | 'right' | 'bottom' | 'left';
   align?: 'start' | 'center' | 'end';
 }
 
 /**
- * Share for a finished game (DESIGN 12.3, 13.2): a small popover offering the link and `Copy PGN`.
+ * Share for a finished game (DESIGN 12.3, 13.2): a small popover offering the link and `Copy SGF`.
  * Rows follow Ztyle 10 (popover menus: `px-3 py-2 rounded-md text-sm hover:bg-accent`).
  */
-export function ShareMenu({ trigger, onShareLink, onCopyPgn, side = 'top', align = 'center' }: ShareMenuProps) {
+export function ShareMenu({ trigger, onShareLink, onCopySgf, side = 'top', align = 'center' }: ShareMenuProps) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
 
@@ -42,11 +42,11 @@ export function ShareMenu({ trigger, onShareLink, onCopyPgn, side = 'top', align
           <button
             type="button"
             role="menuitem"
-            onClick={pick(onCopyPgn)}
+            onClick={pick(onCopySgf)}
             className="flex items-center gap-2 px-3 py-2 rounded-md text-sm text-left hover:bg-accent focus-visible:bg-accent outline-none"
           >
             <Copy className="w-4 h-4" aria-hidden="true" />
-            {t('game.copyPgn')}
+            {t('game.copySgf')}
           </button>
         </div>
       </PopoverContent>

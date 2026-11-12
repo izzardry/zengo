@@ -1,17 +1,16 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useI18n } from '@/lib/i18n';
-import type { Color } from '@/lib/chessTypes';
+import type { Color, Point, Size } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { MoveList } from './MoveList';
-import { FigurineSan } from './PieceGlyph';
-import { formatPoints, stripPair } from './notation';
+import { formatPoints, moveLabel, plyInfo } from './format';
 
 /** The opponent cell: computer level, pass-and-play, or the room score from this device's view. */
 export type InfoOpponent =
   | { readonly kind: 'computer'; readonly level: number }
   | { readonly kind: 'local' }
-  /** `score` = [this device's points, opponent's points], in points (halves allowed: 1.5 → `1½`). */
+  /** `score` = [this device's points, opponent's points] (halves allowed: 1.5 → `1½`). */
   | { readonly kind: 'room'; readonly score: readonly [number, number] };
 
 export interface InfoPillProps {
@@ -20,12 +19,20 @@ export interface InfoPillProps {
   /** Slot next to the code, e.g. the room presence dot. */
   presence?: ReactNode;
   opponent: InfoOpponent;
-  /** SAN of every recorded ply (including plies after the cursor in review). */
-  moves: readonly string[];
-  /** Plies applied. The strip shows the move pair ending at `cursor - 1`. */
+  /** Every recorded ply as an SGF point (`tt` = pass), including plies after the cursor in review. */
+  moves: readonly Point[];
+  /** Board size, for GTP coordinates. */
+  size: Size;
+  /** Plies applied. The strip shows the ply at `cursor - 1` (`34. D4`, `35. Pass`). */
   cursor: number;
+  /** Number of the first ply (1 unless the game started from a set-up position). */
   firstMoveNumber?: number;
+  /** Color of the first ply: Black, or White in a handicap game. */
   firstColor?: Color;
+  /** A ghost stone is shown: the strip previews its coordinate (`D4?`) as the next move. */
+  ghost?: Point | null;
+  /** One faint line under the pill, e.g. the territory preview's `B+3.5` (DESIGN 7.3). */
+  note?: ReactNode;
   /** Tap on a move in the popover. Receives the new cursor (see `MoveList`). */
   onJump?: (cursor: number) => void;
   /** Chrome shown. */
@@ -48,17 +55,20 @@ const VALUE = 'flex h-5 items-center justify-center font-mono text-sm leading-5 
 // `max-[359px]:` classes are written out in full so Tailwind's scanner finds them.
 
 /**
- * Info pill (DESIGN 4.2, Ztyle 10 stats pill): game code (+ presence), opponent, move strip.
- * Each cell is eyebrow over value. Tapping the move strip opens the full move list.
+ * Info pill (DESIGN 4.2, Ztyle 10 stats pill): game code (+ presence), opponent, move strip in
+ * GTP coordinates. Each cell is eyebrow over value. Tapping the move strip opens the move list.
  */
 export function InfoPill({
   code,
   presence,
   opponent,
   moves,
+  size,
   cursor,
   firstMoveNumber = 1,
-  firstColor = 'w',
+  firstColor = 'B',
+  ghost = null,
+  note,
   onJump,
   visible = true,
   landscape = false,
@@ -74,7 +84,6 @@ export function InfoPill({
     if (wrapRef.current) wrapRef.current.inert = !visible;
     if (!visible) setOpen(false);
   }, [visible]);
-  const pair = stripPair(moves, cursor, firstMoveNumber, firstColor);
 
   const [eyebrow, value] =
     opponent.kind === 'computer'
@@ -94,20 +103,38 @@ export function InfoPill({
     />
   );
 
-  const strip = pair ? (
-    <span className="inline-flex items-baseline gap-1.5">
-      <span className="text-muted-foreground">
-        {pair.number}
-        {pair.w ? '.' : '…'}
+  const applied = Math.min(cursor, moves.length);
+  const pass = t('game.passMove');
+  let strip: ReactNode;
+  if (ghost) {
+    const { number } = plyInfo(applied, firstMoveNumber, firstColor);
+    strip = (
+      <span className="inline-flex items-baseline gap-1.5" data-ghost="true">
+        <span aria-hidden="true" className="text-muted-foreground">
+          {number}.
+        </span>
+        <span aria-hidden="true" className="text-foreground/60">
+          {moveLabel(ghost, size, pass)}?
+        </span>
+        <span className="sr-only">{t('game.ghostMove', { move: moveLabel(ghost, size, pass) })}</span>
       </span>
-      {pair.w && <FigurineSan san={pair.w.san} color="w" />}
-      {pair.b && <FigurineSan san={pair.b.san} color="b" />}
-    </span>
-  ) : (
-    <span className="text-muted-foreground" aria-hidden="true">
-      –
-    </span>
-  );
+    );
+  } else if (applied > 0) {
+    const last = applied - 1;
+    const { number } = plyInfo(last, firstMoveNumber, firstColor);
+    strip = (
+      <span className="inline-flex items-baseline gap-1.5" data-ply={last}>
+        <span className="text-muted-foreground">{number}.</span>
+        <span>{moveLabel(moves[last], size, pass)}</span>
+      </span>
+    );
+  } else {
+    strip = (
+      <span className="text-muted-foreground" aria-hidden="true">
+        –
+      </span>
+    );
+  }
 
   const jump = onJump
     ? (c: number) => {
@@ -162,7 +189,7 @@ export function InfoPill({
             )}
           >
             <div className={EYEBROW}>{t('game.eyebrow.move')}</div>
-            <div id={stripId} className={cn(VALUE, 'tracking-wide')}>
+            <div id={stripId} className={cn(VALUE, 'tracking-wide min-w-[4.5rem]')}>
               {strip}
             </div>
           </button>
@@ -174,6 +201,7 @@ export function InfoPill({
         >
           <MoveList
             moves={moves}
+            size={size}
             cursor={cursor}
             firstMoveNumber={firstMoveNumber}
             firstColor={firstColor}
@@ -184,7 +212,23 @@ export function InfoPill({
     </div>
   );
 
-  if (placement === 'inline') return pill;
+  const noteLine =
+    note !== undefined && note !== null && note !== false ? (
+      <div data-part="note" className="mt-1.5 font-mono text-xs tabular-nums text-muted-foreground">
+        {note}
+      </div>
+    ) : null;
+
+  if (placement === 'inline') {
+    return noteLine ? (
+      <div className="flex flex-col items-center">
+        {pill}
+        {noteLine}
+      </div>
+    ) : (
+      pill
+    );
+  }
 
   return (
     <div
@@ -203,6 +247,7 @@ export function InfoPill({
       )}
     >
       {pill}
+      {noteLine}
     </div>
   );
 }

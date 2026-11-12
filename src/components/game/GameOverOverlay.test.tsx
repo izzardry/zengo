@@ -1,17 +1,30 @@
 import { act, fireEvent, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Score } from '@/lib/types';
 import { GameOverOverlay, PageTint, type GameOverOverlayProps } from './GameOverOverlay';
 import { renderWithI18n } from './testUtils';
+
+/** B 45 · W 40 + 7.5 → Black wins by 2.5 (margin ×2 = 5). */
+const SCORE: Score = {
+  rules: 'area',
+  B: { territory: 20, stones: 25, prisoners: 0 },
+  W: { territory: 15, stones: 25, prisoners: 0 },
+  komi2: 15,
+  compensation2: 0,
+  total2: { B: 90, W: 95 },
+  margin2: -5,
+};
 
 function props(over: Partial<GameOverOverlayProps> = {}): GameOverOverlayProps {
   return {
     open: true,
-    end: { result: '1-0', by: 'mate' },
+    result: { winner: 'B', by: 'score', margin: 9 },
     mode: 'computer',
-    myColor: 'w',
+    myColor: 'B',
     code: 'K7QW2M',
+    size: 9,
     level: 5,
-    plies: 67,
+    plies: 54,
     durationMs: 728_000,
     onShare: vi.fn(),
     onPrimary: vi.fn(),
@@ -22,40 +35,66 @@ function props(over: Partial<GameOverOverlayProps> = {}): GameOverOverlayProps {
 }
 
 describe('GameOverOverlay', () => {
-  it('win: glyph, title, summary line, Share and New game', () => {
+  it('win by score: glyph, title with margin, summary line, Share and New game (DESIGN 8.5)', () => {
     renderWithI18n(<GameOverOverlay {...props()} />);
-    const dialog = screen.getByRole('dialog', { name: 'Checkmate!' });
+    const dialog = screen.getByRole('dialog', { name: 'You won by 4.5!' });
     expect(within(dialog).getByText('🎉')).toHaveAttribute('aria-hidden', 'true');
-    expect(dialog).toHaveAccessibleDescription('K7QW2M • Level 5 • 34 moves • 12:08');
-    // Each part (with the bullet before it) is one unbreakable piece: no dangling bullet, no split `34 moves`.
+    expect(dialog).toHaveAccessibleDescription('K7QW2M • 9×9 • Level 5 • 54 moves • 12:08');
+    // Each part (with the bullet before it) is one unbreakable piece: no dangling bullet, no split `54 moves`.
     const parts = Array.from(document.querySelectorAll('[data-part="summary"]'));
-    expect(parts.map((p) => p.textContent)).toEqual(['K7QW2M', '• Level 5', '• 34 moves', '• 12:08']);
+    expect(parts.map((p) => p.textContent)).toEqual(['K7QW2M', '• 9×9', '• Level 5', '• 54 moves', '• 12:08']);
     for (const p of parts) expect(p).toHaveClass('whitespace-nowrap');
     expect(within(dialog).getByRole('button', { name: 'Share' })).toHaveClass('btn-ghost');
     expect(within(dialog).getByRole('button', { name: 'New game' })).toHaveClass('btn-primary');
   });
 
-  it('loss: no glyph', () => {
-    renderWithI18n(<GameOverOverlay {...props({ myColor: 'b', end: { result: '1-0', by: 'time' } })} />);
-    const dialog = screen.getByRole('dialog', { name: 'Out of time' });
+  it('a scored game shows the count line under the summary', () => {
+    const { rerender } = renderWithI18n(
+      <GameOverOverlay {...props({ mode: 'local', result: { winner: 'W', by: 'score', margin: 5 }, score: SCORE })} />,
+    );
+    expect(screen.getByRole('dialog', { name: 'White wins by 2.5!' })).toBeInTheDocument();
+    expect(document.querySelector('[data-part="count"]')).toHaveTextContent('B 45 · W 40 + 7.5');
+    // A resignation has no count line, even when a score is passed.
+    rerender(<GameOverOverlay {...props({ result: { winner: 'B', by: 'resign' }, score: SCORE })} />);
+    expect(document.querySelector('[data-part="count"]')).toBeNull();
+  });
+
+  it('wins: by resignation, on time, and the computer resigning', () => {
+    const { rerender } = renderWithI18n(<GameOverOverlay {...props({ mode: 'room', result: { winner: 'B', by: 'resign' } })} />);
+    expect(screen.getByRole('dialog', { name: 'You won by resignation!' })).toBeInTheDocument();
+    rerender(<GameOverOverlay {...props({ result: { winner: 'B', by: 'time' } })} />);
+    expect(screen.getByRole('dialog', { name: 'You won on time!' })).toBeInTheDocument();
+    rerender(<GameOverOverlay {...props({ level: 8, result: { winner: 'B', by: 'resign' } })} />);
+    expect(screen.getByRole('dialog', { name: 'Level 8 resigned. You won!' })).toBeInTheDocument();
+  });
+
+  it('losses: no glyph; by score, resignation, time', () => {
+    const { rerender } = renderWithI18n(<GameOverOverlay {...props({ myColor: 'W' })} />);
+    const dialog = screen.getByRole('dialog', { name: 'Lost by 4.5' });
     expect(within(dialog).queryByText('🎉')).toBeNull();
-  });
-
-  it('win by resignation names the reason', () => {
-    renderWithI18n(<GameOverOverlay {...props({ end: { result: '1-0', by: 'resign' } })} />);
-    expect(screen.getByRole('dialog', { name: 'You won!' })).toHaveTextContent('Your opponent resigned');
-  });
-
-  it('draw: title plus reason', () => {
-    renderWithI18n(<GameOverOverlay {...props({ end: { result: '1/2-1/2', by: 'repetition' } })} />);
-    expect(screen.getByRole('dialog', { name: 'Draw' })).toHaveTextContent('Threefold repetition');
+    rerender(<GameOverOverlay {...props({ myColor: 'W', result: { winner: 'B', by: 'resign' } })} />);
+    expect(screen.getByRole('dialog', { name: 'Resigned' })).toBeInTheDocument();
+    rerender(<GameOverOverlay {...props({ myColor: 'W', result: { winner: 'B', by: 'time' } })} />);
+    expect(screen.getByRole('dialog', { name: 'Out of time' })).toBeInTheDocument();
   });
 
   it('pass-and-play: color wins with glyph, 2 players in the summary', () => {
-    renderWithI18n(<GameOverOverlay {...props({ mode: 'local', level: undefined, end: { result: '0-1', by: 'mate' }, plies: 2 })} />);
-    const dialog = screen.getByRole('dialog', { name: 'Black wins!' });
+    const { rerender } = renderWithI18n(
+      <GameOverOverlay {...props({ mode: 'local', level: undefined, result: { winner: 'W', by: 'resign' }, plies: 1, size: 19 })} />,
+    );
+    const dialog = screen.getByRole('dialog', { name: 'White wins by resignation!' });
     expect(within(dialog).getByText('🎉')).toBeInTheDocument();
-    expect(dialog).toHaveAccessibleDescription('K7QW2M • 2 players • 1 move • 12:08');
+    expect(dialog).toHaveAccessibleDescription('K7QW2M • 19×19 • 2 players • 1 move • 12:08');
+    rerender(<GameOverOverlay {...props({ mode: 'local', result: { winner: 'B', by: 'score', margin: 9 } })} />);
+    expect(screen.getByRole('dialog', { name: 'Black wins by 4.5!' })).toBeInTheDocument();
+    rerender(<GameOverOverlay {...props({ mode: 'local', result: { winner: 'B', by: 'time' } })} />);
+    expect(screen.getByRole('dialog', { name: 'Black wins on time!' })).toBeInTheDocument();
+  });
+
+  it('writes the margin with the language’s decimal sign', () => {
+    renderWithI18n(<GameOverOverlay {...props()} />, 'de');
+    expect(screen.getByRole('dialog', { name: 'Gewonnen mit 4,5 Punkten!' })).toBeInTheDocument();
+    expect(screen.getByRole('dialog')).toHaveAccessibleDescription('K7QW2M • 9×9 • Level 5 • 54 Züge • 12:08');
   });
 
   it('room: the primary action is Rematch and can wait for the opponent', () => {
@@ -94,7 +133,7 @@ describe('GameOverOverlay', () => {
     expect(p.onShare).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole('button', { name: 'New game' }));
     expect(p.onPrimary).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole('heading', { name: 'Checkmate!' }));
+    fireEvent.click(screen.getByRole('heading', { name: 'You won by 4.5!' }));
     expect(p.onDismiss).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('dialog'));
     expect(p.onDismiss).toHaveBeenCalledTimes(1);
@@ -113,12 +152,12 @@ describe('GameOverOverlay', () => {
     expect(primary).toHaveFocus();
   });
 
-  it('with onCopyPgn, Share opens the link / PGN menu', async () => {
-    const p = props({ onCopyPgn: vi.fn() });
+  it('with onCopySgf, Share opens the link / SGF menu', async () => {
+    const p = props({ onCopySgf: vi.fn() });
     renderWithI18n(<GameOverOverlay {...p} />);
     fireEvent.click(screen.getByRole('button', { name: 'Share' }));
-    fireEvent.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: 'Copy PGN' }));
-    expect(p.onCopyPgn).toHaveBeenCalledTimes(1);
+    fireEvent.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: 'Copy SGF' }));
+    expect(p.onCopySgf).toHaveBeenCalledTimes(1);
     expect(p.onDismiss).not.toHaveBeenCalled();
   });
 

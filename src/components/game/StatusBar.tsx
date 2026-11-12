@@ -1,19 +1,21 @@
 /**
  * Game chrome: Back (top left), Help (top right) and the toolbar (bottom pill in portrait, right
- * rail in mobile landscape). Ported from Zudoku's StatusBar with the slot table of DESIGN 4.2:
+ * rail in mobile landscape), with the slot table of DESIGN 4.2:
  *
- * | Slot     | computer            | local      | room               | review                       |
- * |----------|---------------------|------------|--------------------|------------------------------|
- * | Undo     | one full turn back  | one ply    | takeback request   | step back (hold: to start)   |
- * | Redo     | replay              | replay     | hidden             | step forward (hold: to end)  |
- * | Hint     | yes                 | yes        | hidden             | hidden                       |
- * | Helpers  | yes                 | yes        | yes                | yes                          |
- * | Seating  | hidden              | yes        | hidden             | flip board                   |
- * | Flag     | draw / hold: resign | hold: resign | draw / hold: resign | continue from here        |
+ * | Slot     | computer               | local                  | room                   | review                      |
+ * |----------|------------------------|------------------------|------------------------|-----------------------------|
+ * | Undo     | one full turn back     | one move back          | takeback request       | step back (hold: to start)  |
+ * | Redo     | replay                 | replay                 | hidden                 | step forward (hold: to end) |
+ * | Hint     | tap / hold territory   | same                   | hidden                 | hidden                      |
+ * | Helpers  | yes                    | yes                    | yes                    | yes                         |
+ * | Seating  | hidden                 | yes                    | hidden                 | flip board                  |
+ * | Flag     | tap pass, hold resign  | tap pass, hold resign  | tap pass, hold resign  | continue from here          |
+ * | Share    | yes                    | yes                    | invite link            | link or SGF                 |
  *
+ * After the opponent's pass the flag carries a dot and says `Pass and end the game` (DESIGN 6.2).
  * In a room whose current game is over the flag slot reopens the game-over overlay, where the
- * rematch is asked for; it pulses while this device's rematch request waits (DESIGN 9.7).
- * | Share    | yes                 | yes        | invite link        | link or PGN                  |
+ * rematch is asked for; it pulses while this device's rematch request waits.
+ * During scoring the toolbar is replaced by the scoring bar (`scoringBar`, DESIGN 8.4).
  *
  * Presentational: the parent decides what each callback does (e.g. how far undo goes).
  */
@@ -46,9 +48,9 @@ import { TARGET, railVars, toolbarLayout } from './toolbarLayout';
 export type ToolbarMode = Mode | 'review';
 
 export interface HintControls {
-  /** Tap: show the hint (first tap the piece, second tap its target). */
+  /** Tap: show the hint (first tap the best point, second tap the top three). */
   onHint: () => void;
-  /** Held 1 s: the threat peek starts… */
+  /** Held 1 s: the territory preview starts… */
   onPeekStart: () => void;
   /** …and ends on release. */
   onPeekEnd: () => void;
@@ -92,14 +94,14 @@ export interface StatusBarProps {
   /** Review: flip the board (the seating slot). */
   onFlip?: () => void;
 
-  /** Tap on the flag (computer, room). Never called in pass-and-play. */
-  onOfferDraw?: () => void;
-  /** Flag held 500 ms (computer, room, pass-and-play). */
+  /** Tap on the flag: pass (every play mode, DESIGN 6.2). */
+  onPass?: () => void;
+  /** Flag held 500 ms, or Shift+Enter: resign (every play mode, DESIGN 8.3). */
   onResign?: () => void;
-  /** E.g. the game is over or the board is locked. */
+  /** The opponent's last ply was a pass: the flag shows a dot and says `Pass and end the game`. */
+  opponentPassed?: boolean;
+  /** E.g. not this side's turn, the game is over or the board is locked. */
   flagDisabled?: boolean;
-  /** Room: this device's draw offer is outstanding (the flag shows it; hold still resigns). */
-  flagPending?: boolean;
   /** Review: the flag slot becomes "continue from here". Undefined hides it. */
   onContinue?: () => void;
   /** Room, game over: the flag slot becomes Rematch (reopens the game-over overlay). */
@@ -109,8 +111,14 @@ export interface StatusBarProps {
 
   /** Share the game link (or room invite). */
   onShare: () => void;
-  /** Review: with this set, Share opens a menu with the link and `Copy PGN`. */
-  onCopyPgn?: () => void;
+  /** Review: with this set, Share opens a menu with the link and `Copy SGF`. */
+  onCopySgf?: () => void;
+
+  /**
+   * Scoring phase: this node (the `ScoringBar`) takes the toolbar's place; Back and Help stay
+   * (DESIGN 4, 8.4).
+   */
+  scoringBar?: ReactNode;
 }
 
 
@@ -159,15 +167,16 @@ export function StatusBar(props: StatusBarProps) {
     seating,
     onToggleSeating,
     onFlip,
-    onOfferDraw,
+    onPass,
     onResign,
+    opponentPassed,
     flagDisabled,
-    flagPending,
     onContinue,
     onRematch,
     rematchPending,
     onShare,
-    onCopyPgn,
+    onCopySgf,
+    scoringBar,
   } = props;
   const { t } = useI18n();
   const review = mode === 'review';
@@ -178,7 +187,7 @@ export function StatusBar(props: StatusBarProps) {
     if (barRef.current) barRef.current.inert = !visible;
   }, [visible]);
 
-  // Each long press is announced in the aria-label (DESIGN 6.4, Ztyle 08).
+  // Each long press is announced in the aria-label (DESIGN 6.3, Ztyle 08).
   const helpLabel = onHelpHold ? t('game.showHelpHold') : t('game.showHelp');
   const help = useLongPress({
     ms: HOLD_MS.help,
@@ -290,31 +299,41 @@ export function StatusBar(props: StatusBarProps) {
         data-pending={rematchPending ? 'true' : undefined}
       />,
     );
-  } else if (onResign || onOfferDraw) {
-    const local = mode === 'local';
+  } else if (onResign || onPass) {
+    const label = opponentPassed ? t('game.passEnd') : t('game.pass');
     out.push(
       <ToolbarButton
         key="flag"
-        label={local ? t('game.holdToResign') : flagPending ? t('game.drawPending') : t('game.drawOrResign')}
-        icon={<Flag className={cn(flagPending && !local && PENDING)} aria-hidden="true" />}
-        // Pass-and-play has no draw offer: the tap is ignored and the button only resigns (DESIGN 8.3).
-        onClick={local ? undefined : onOfferDraw}
+        label={label}
+        icon={
+          <span className="relative inline-flex">
+            <Flag aria-hidden="true" />
+            {opponentPassed && (
+              <span
+                aria-hidden="true"
+                data-part="dot"
+                className="absolute -top-0.5 -right-1 w-1.5 h-1.5 rounded-full bg-foreground"
+              />
+            )}
+          </span>
+        }
+        onClick={onPass}
         hold={onResign ? { ms: HOLD_MS.flag, onHold: onResign } : undefined}
         disabled={flagDisabled}
         data-slot="flag"
-        data-pending={flagPending && !local ? 'true' : undefined}
+        data-opponent-passed={opponentPassed ? 'true' : undefined}
       />,
     );
   }
 
-  const shareLabel = review && onCopyPgn ? t('game.shareMenu') : mode === 'room' ? t('game.shareInvite') : t('game.shareGame');
-  if (review && onCopyPgn) {
+  const shareLabel = review && onCopySgf ? t('game.shareMenu') : mode === 'room' ? t('game.shareInvite') : t('game.shareGame');
+  if (review && onCopySgf) {
     out.push(
       <ShareMenu
         key="share"
         side={landscape ? 'left' : 'top'}
         onShareLink={onShare}
-        onCopyPgn={onCopyPgn}
+        onCopySgf={onCopySgf}
         trigger={<ToolbarButton label={shareLabel} icon={<Share2 aria-hidden="true" />} data-slot="share" />}
       />,
     );
@@ -399,32 +418,34 @@ export function StatusBar(props: StatusBarProps) {
         <HelpCircle aria-hidden="true" />
       </button>
 
-      <div
-        role="toolbar"
-        aria-label={t('game.toolbar')}
-        aria-orientation={landscape ? 'vertical' : 'horizontal'}
-        aria-hidden={visible ? undefined : true}
-        ref={barRef}
-        data-mode={mode}
-        data-columns={grid ? 2 : 1}
-        style={style}
-        className={cn(
-          'fixed z-chrome',
-          GLASS,
-          'transition-[opacity,transform] duration-chrome ease-out',
-          landscape
-            ? cn(
-                'top-[var(--rail-top)] right-[max(1rem,env(safe-area-inset-right))]',
-                grid ? 'grid grid-cols-2 gap-0.5 rounded-3xl p-1.5' : 'flex flex-col items-center gap-0.5 rounded-full px-1.5 py-4',
-              )
-            : 'flex items-center gap-[var(--tb-gap)] rounded-full px-[var(--tb-pad)] py-1.5 left-1/2 -translate-x-1/2 bottom-[max(1rem,env(safe-area-inset-bottom))]',
-          // hide toward the owning edge (Ztyle 07): bottom bar down, right rail right
-          visible ? 'opacity-100' : 'opacity-0 pointer-events-none',
-          landscape ? (visible ? 'translate-x-0' : 'translate-x-4') : visible ? 'translate-y-0' : 'translate-y-4',
-        )}
-      >
-        {items}
-      </div>
+      {scoringBar ?? (
+        <div
+          role="toolbar"
+          aria-label={t('game.toolbar')}
+          aria-orientation={landscape ? 'vertical' : 'horizontal'}
+          aria-hidden={visible ? undefined : true}
+          ref={barRef}
+          data-mode={mode}
+          data-columns={grid ? 2 : 1}
+          style={style}
+          className={cn(
+            'fixed z-chrome',
+            GLASS,
+            'transition-[opacity,transform] duration-chrome ease-out',
+            landscape
+              ? cn(
+                  'top-[var(--rail-top)] right-[max(1rem,env(safe-area-inset-right))]',
+                  grid ? 'grid grid-cols-2 gap-0.5 rounded-3xl p-1.5' : 'flex flex-col items-center gap-0.5 rounded-full px-1.5 py-4',
+                )
+              : 'flex items-center gap-[var(--tb-gap)] rounded-full px-[var(--tb-pad)] py-1.5 left-1/2 -translate-x-1/2 bottom-[max(1rem,env(safe-area-inset-bottom))]',
+            // hide toward the owning edge (Ztyle 07): bottom bar down, right rail right
+            visible ? 'opacity-100' : 'opacity-0 pointer-events-none',
+            landscape ? (visible ? 'translate-x-0' : 'translate-x-4') : visible ? 'translate-y-0' : 'translate-y-4',
+          )}
+        >
+          {items}
+        </div>
+      )}
     </>
   );
 }

@@ -1,7 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { I18nProvider } from '@/lib/i18n';
+import { I18nProvider, type I18nProviderProps } from '@/lib/i18n';
 import { createStore, memoryStorage } from '@/lib/storage';
 import type { Language } from '@/lib/types';
 import type { ShareNavigator } from './share';
@@ -13,7 +13,7 @@ vi.mock('sonner', () => ({ toast: toastMock }));
 const wrapper =
   (lang: Language = 'en') =>
   ({ children }: { children: ReactNode }) => (
-    <I18nProvider language={lang} store={createStore(memoryStorage())}>
+    <I18nProvider language={lang} store={createStore(memoryStorage()) as unknown as NonNullable<I18nProviderProps['store']>}>
       {children}
     </I18nProvider>
   );
@@ -32,11 +32,18 @@ describe('useShare', () => {
     await act(() => result.current.shareLink('u2', 'solo'));
     await act(() => result.current.shareLink('u3', 'win', 7));
     expect(share.mock.calls.map((c) => [c[0].text, c[0].url, c[0].title])).toEqual([
-      ['Join my chess game!', 'u1', 'Zigo'],
-      ['Look at this chess game.', 'u2', 'Zigo'],
+      ['Join my Go game!', 'u1', 'Zigo'],
+      ['Look at this Go game.', 'u2', 'Zigo'],
       ['I beat Level 7! Can you?', 'u3', 'Zigo'],
     ]);
     expect(toastMock.success).not.toHaveBeenCalled();
+  });
+
+  it('shares in every language with the Go glossary (go in French)', async () => {
+    const share = vi.fn().mockResolvedValue(undefined);
+    const { result } = renderHook(() => useShare({ share }), { wrapper: wrapper('fr') });
+    await act(() => result.current.shareLink('u', 'room'));
+    expect(share.mock.calls[0][0].text).toBe('Rejoignez ma partie de go !');
   });
 
   it('copies the link with a toast when there is no share sheet', async () => {
@@ -51,12 +58,12 @@ describe('useShare', () => {
     expect(toastMock.success).toHaveBeenCalledWith('Link copied to clipboard!');
   });
 
-  it('copies PGN with a toast, or reports failure', async () => {
+  it('copies SGF with a toast, or reports failure', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     const { result } = renderHook(() => useShare({ clipboard: { writeText } }), { wrapper: wrapper('de') });
-    await act(() => result.current.copyPgn('1. e4 *'));
-    expect(writeText).toHaveBeenCalledWith('1. e4 *');
-    expect(toastMock.success).toHaveBeenCalledWith('PGN kopiert!');
+    await act(() => result.current.copySgf('(;FF[4]GM[1]SZ[9];B[ee])'));
+    expect(writeText).toHaveBeenCalledWith('(;FF[4]GM[1]SZ[9];B[ee])');
+    expect(toastMock.success).toHaveBeenCalledWith('SGF kopiert!');
 
     writeText.mockRejectedValue(new Error('denied'));
     const original = document.execCommand;
@@ -64,7 +71,7 @@ describe('useShare', () => {
     try {
       let ok: boolean | undefined;
       await act(async () => {
-        ok = await result.current.copyPgn('x');
+        ok = await result.current.copySgf('x');
       });
       expect(ok).toBe(false);
       expect(toastMock.error).toHaveBeenCalledWith('Kopieren fehlgeschlagen');

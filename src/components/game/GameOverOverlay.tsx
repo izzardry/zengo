@@ -2,13 +2,13 @@ import { Fragment, useEffect, useRef, useState } from 'react';
 import { Loader2, Share2 } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
 import { formatElapsed } from '@/lib/timeUtils';
-import type { Color, GameEnd, Mode } from '@/lib/chessTypes';
+import type { Color, Mode, Result, Score, Size } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { ShareMenu } from './ShareMenu';
+import { localHalf, scoreLine } from './format';
 import { endTexts, tintClass, type Tint } from './outcome';
-import { fullMoves } from './notation';
 
-/** Delay between the page tint starting and the overlay appearing (DESIGN 8.4, Ztyle 09). */
+/** Delay between the page tint starting and the overlay appearing (DESIGN 8.5, Ztyle 09). */
 export const TINT_MS = 1000;
 
 export interface PageTintProps {
@@ -43,21 +43,25 @@ export function PageTint({ tint, className }: PageTintProps) {
 export interface GameOverOverlayProps {
   /** The game has ended and the overlay should show (after `delayMs`). */
   open: boolean;
-  end: GameEnd;
+  result: Result;
   mode: Mode;
   /** This device's side (ignored in pass-and-play). */
   myColor: Color;
   code: string;
-  /** Computer level, for the summary line. */
+  /** Board size, for the summary line (`9×9`). */
+  size: Size;
+  /** Computer level, for the summary line and `Level 8 resigned. You won!`. */
   level?: number;
-  /** Plies played; the summary shows full moves. */
+  /** Plies played (passes included); Go counts every ply as a move. */
   plies: number;
   /** Time used by both sides together. */
   durationMs: number;
+  /** The agreed count of a scored game: a second line under the summary (DESIGN 8.4 score line). */
+  score?: Score;
   /** Ghost Share: the game link. */
   onShare: () => void;
-  /** With this set, Share opens a menu with the link and `Copy PGN` (DESIGN 13.2 finished game). */
-  onCopyPgn?: () => void;
+  /** With this set, Share opens a menu with the link and `Copy SGF` (DESIGN 12.3, 13.2 finished game). */
+  onCopySgf?: () => void;
   /** Primary action: New game (computer, pass-and-play) or Rematch (room). */
   onPrimary: () => void;
   /** Rematch asked and waiting for the opponent: the primary button spins and is disabled. */
@@ -73,20 +77,23 @@ export interface GameOverOverlayProps {
 }
 
 /**
- * Game-over overlay (DESIGN 8.4, Ztyle 09 "End of game"): blurred scrim, glyph, title, reason,
- * summary `K7QW2M • Level 5 • 34 moves • 12:08`, ghost Share and primary New game / Rematch.
+ * Game-over overlay (DESIGN 8.5, Ztyle 09 "End of game"): blurred scrim, glyph, title
+ * (`You won by 4.5!`), summary `K7QW2M • 9×9 • Level 5 • 54 moves • 12:08`, the count line of a
+ * scored game, ghost Share and primary New game / Rematch.
  */
 export function GameOverOverlay({
   open,
-  end,
+  result,
   mode,
   myColor,
   code,
+  size,
   level,
   plies,
   durationMs,
+  score,
   onShare,
-  onCopyPgn,
+  onCopySgf,
   onPrimary,
   primaryBusy = false,
   primaryDisabled = false,
@@ -94,7 +101,7 @@ export function GameOverOverlay({
   onDismiss,
   delayMs = TINT_MS,
 }: GameOverOverlayProps) {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const [shown, setShown] = useState(false);
   const primaryRef = useRef<HTMLButtonElement>(null);
   const returnFocus = useRef<Element | null>(null);
@@ -125,10 +132,12 @@ export function GameOverOverlay({
 
   if (!open || !shown) return null;
 
-  const texts = endTexts(end, mode, myColor);
-  const n = fullMoves(plies);
+  const texts = endTexts(result, mode, myColor);
+  const title = t(texts.title, { margin: localHalf(result.margin ?? 0, language), level: level ?? '' });
   const opponent = mode === 'computer' ? `${t('level')} ${level ?? ''}`.trim() : mode === 'local' ? t('twoPlayers') : t('room');
-  const summaryParts = [code, opponent, n === 1 ? t('game.summary.move') : t('game.summary.moves', { n }), formatElapsed(durationMs)];
+  const moves = plies === 1 ? t('game.summary.move') : t('game.summary.moves', { n: plies });
+  const summaryParts = [code, `${size}×${size}`, opponent, moves, formatElapsed(durationMs)];
+  const countLine = result.by === 'score' && score ? scoreLine(score) : null;
   // Lines break only between whole parts; each separator travels with the part after it, so no
   // line ends in a bullet and no number is split from its unit.
   const summary = summaryParts.map((part, i) => (
@@ -165,7 +174,7 @@ export function GameOverOverlay({
   };
 
   const shareButton = (
-    <button type="button" onClick={onCopyPgn ? undefined : onShare} className="btn-ghost" data-action="share">
+    <button type="button" onClick={onCopySgf ? undefined : onShare} className="btn-ghost" data-action="share">
       <Share2 className="w-4 h-4" aria-hidden="true" />
       {t('share')}
     </button>
@@ -191,14 +200,18 @@ export function GameOverOverlay({
           </div>
         )}
         <h2 id="game-over-title" className="text-2xl font-mono font-bold mb-2">
-          {t(texts.title)}
+          {title}
         </h2>
-        {texts.reason && <p className="text-sm mb-2">{t(texts.reason)}</p>}
-        <p id="game-over-summary" className="text-muted-foreground mb-8">
+        <p id="game-over-summary" className={cn('text-muted-foreground', countLine ? 'mb-1' : 'mb-8')}>
           {summary}
         </p>
+        {countLine && (
+          <p data-part="count" className="font-mono text-sm tabular-nums text-muted-foreground mb-8">
+            {countLine}
+          </p>
+        )}
         <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-          {onCopyPgn ? <ShareMenu trigger={shareButton} onShareLink={onShare} onCopyPgn={onCopyPgn} side="top" /> : shareButton}
+          {onCopySgf ? <ShareMenu trigger={shareButton} onShareLink={onShare} onCopySgf={onCopySgf} side="top" /> : shareButton}
           <button
             ref={primaryRef}
             type="button"

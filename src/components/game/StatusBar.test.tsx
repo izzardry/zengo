@@ -19,7 +19,7 @@ function props(over: Partial<StatusBarProps> = {}): StatusBarProps {
     seating: 'face',
     onToggleSeating: vi.fn(),
     onFlip: vi.fn(),
-    onOfferDraw: vi.fn(),
+    onPass: vi.fn(),
     onResign: vi.fn(),
     onContinue: vi.fn(),
     onShare: vi.fn(),
@@ -45,21 +45,22 @@ describe('StatusBar slots per mode (DESIGN 4.2)', () => {
     renderWithI18n(<StatusBar {...props()} />);
     expect(slots()).toEqual(['undo', 'redo', 'hint', 'helpers', 'flag', 'share']);
     expect(screen.getByRole('button', { name: 'Take back your last move' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Offer a draw (hold to resign)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Pass (hold to resign)' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Share game' })).toBeInTheDocument();
   });
 
-  it('two players: adds seating; the flag only resigns', () => {
+  it('two players: adds seating; the flag passes and resigns', () => {
     renderWithI18n(<StatusBar {...props({ mode: 'local' })} />);
     expect(slots()).toEqual(['undo', 'redo', 'hint', 'helpers', 'seating', 'flag', 'share']);
     expect(screen.getByRole('button', { name: 'Undo' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Resign (hold)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Pass (hold to resign)' })).toBeInTheDocument();
   });
 
   it('room: takeback request, no redo, no hint, no seating, invite link', () => {
     renderWithI18n(<StatusBar {...props({ mode: 'room' })} />);
     expect(slots()).toEqual(['undo', 'helpers', 'flag', 'share']);
     expect(screen.getByRole('button', { name: 'Ask for a takeback' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Pass (hold to resign)' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Share invite link' })).toBeInTheDocument();
   });
 
@@ -81,29 +82,32 @@ describe('StatusBar slots per mode (DESIGN 4.2)', () => {
     expect(screen.getByRole('button', { name: 'Takeback requested' })).toBeDisabled();
   });
 
-  it('room: an outstanding draw offer shows on the flag, which still resigns on hold (DESIGN 9.7)', () => {
-    vi.useFakeTimers();
-    const p = props({ mode: 'room', flagPending: true });
-    renderWithI18n(<StatusBar {...p} />);
-    const flag = screen.getByRole('button', { name: 'Draw offered (hold to resign)' });
-    expect(flag).toBeEnabled();
-    expect(flag).toHaveAttribute('data-pending', 'true');
-    hold(flag, 500);
-    expect(p.onResign).toHaveBeenCalledTimes(1);
+  it('after the opponent passed, the flag carries a dot and says it ends the game (DESIGN 6.2)', () => {
+    const { rerender } = renderWithI18n(<StatusBar {...props({ opponentPassed: true })} />);
+    const flag = screen.getByRole('button', { name: 'Pass and end the game (hold to resign)' });
+    expect(flag).toHaveAttribute('data-opponent-passed', 'true');
+    expect(flag.querySelector('[data-part="dot"]')).not.toBeNull();
+    rerender(<StatusBar {...props({ opponentPassed: false })} />);
+    const plain = screen.getByRole('button', { name: 'Pass (hold to resign)' });
+    expect(plain.querySelector('[data-part="dot"]')).toBeNull();
   });
 
-  it('pass-and-play ignores flagPending: the flag only resigns', () => {
-    renderWithI18n(<StatusBar {...props({ mode: 'local', flagPending: true })} />);
-    expect(screen.getByRole('button', { name: 'Resign (hold)' })).not.toHaveAttribute('data-pending');
+  it('has no draw offer and no premove slot', () => {
+    for (const mode of ['computer', 'local', 'room'] as const) {
+      const { unmount } = renderWithI18n(<StatusBar {...props({ mode })} />);
+      expect(screen.queryByRole('button', { name: /draw/i })).toBeNull();
+      expect(screen.getByRole('toolbar').querySelector('[data-slot="premove"]')).toBeNull();
+      unmount();
+    }
   });
 
   it('review: stepping, flip, continue from here, share menu', () => {
-    renderWithI18n(<StatusBar {...props({ mode: 'review', onCopyPgn: vi.fn() })} />);
+    renderWithI18n(<StatusBar {...props({ mode: 'review', onCopySgf: vi.fn() })} />);
     expect(slots()).toEqual(['undo', 'redo', 'helpers', 'flip', 'continue', 'share']);
     expect(screen.getByRole('button', { name: 'Previous move (hold for the start)' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Next move (hold for the end)' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Continue from here' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Share link or PGN' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Share link or SGF' })).toBeInTheDocument();
   });
 
   it('hides optional slots whose callbacks are missing', () => {
@@ -129,41 +133,51 @@ describe('StatusBar actions', () => {
     expect(p.onRedo).toHaveBeenCalledTimes(1);
   });
 
-  it('flag: tap offers a draw, a 500 ms hold resigns (and offers nothing)', () => {
+  it('flag: a tap passes, a 500 ms hold resigns (and passes nothing)', () => {
     vi.useFakeTimers();
     const p = props();
     renderWithI18n(<StatusBar {...p} />);
-    const flag = screen.getByRole('button', { name: 'Offer a draw (hold to resign)' });
+    const flag = screen.getByRole('button', { name: 'Pass (hold to resign)' });
     down(flag);
     fireEvent.pointerUp(flag);
     fireEvent.click(flag);
-    expect(p.onOfferDraw).toHaveBeenCalledTimes(1);
+    expect(p.onPass).toHaveBeenCalledTimes(1);
     hold(flag, 500);
     expect(p.onResign).toHaveBeenCalledTimes(1);
-    expect(p.onOfferDraw).toHaveBeenCalledTimes(1);
+    expect(p.onPass).toHaveBeenCalledTimes(1);
   });
 
-  it('pass-and-play: the flag tap is ignored, the hold resigns', () => {
-    vi.useFakeTimers();
+  it('flag: the keyboard twin of the hold is Shift+Enter (DESIGN 6.3)', () => {
     const p = props({ mode: 'local' });
     renderWithI18n(<StatusBar {...p} />);
-    const flag = screen.getByRole('button', { name: 'Resign (hold)' });
+    const flag = screen.getByRole('button', { name: 'Pass (hold to resign)' });
+    fireEvent.keyDown(flag, { key: 'Enter', shiftKey: true });
+    fireEvent.keyUp(flag, { key: 'Enter', shiftKey: true });
+    expect(p.onResign).toHaveBeenCalledTimes(1);
+    expect(p.onPass).not.toHaveBeenCalled();
+  });
+
+  it('room: the flag passes and resigns too (DESIGN 4.2)', () => {
+    vi.useFakeTimers();
+    const p = props({ mode: 'room' });
+    renderWithI18n(<StatusBar {...p} />);
+    const flag = screen.getByRole('button', { name: 'Pass (hold to resign)' });
     fireEvent.click(flag);
-    expect(p.onOfferDraw).not.toHaveBeenCalled();
+    expect(p.onPass).toHaveBeenCalledTimes(1);
     hold(flag, 500);
     expect(p.onResign).toHaveBeenCalledTimes(1);
   });
 
   it('flagDisabled disables the flag', () => {
     renderWithI18n(<StatusBar {...props({ flagDisabled: true })} />);
-    expect(screen.getByRole('button', { name: 'Offer a draw (hold to resign)' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Pass (hold to resign)' })).toBeDisabled();
   });
 
   it('hint: tap hints, a 1 s hold peeks until release', () => {
     vi.useFakeTimers();
     const p = props();
     renderWithI18n(<StatusBar {...p} />);
-    const bulb = screen.getByRole('button', { name: 'Hint (hold to see threats)' });
+    const bulb = screen.getByRole('button', { name: 'Hint (hold for territory)' });
     fireEvent.click(bulb);
     expect(p.hint!.onHint).toHaveBeenCalledTimes(1);
     down(bulb);
@@ -180,7 +194,7 @@ describe('StatusBar actions', () => {
 
   it('hint: shows a spinner while the engine loads', () => {
     renderWithI18n(<StatusBar {...props({ hint: { onHint: vi.fn(), onPeekStart: vi.fn(), onPeekEnd: vi.fn(), busy: true } })} />);
-    const bulb = screen.getByRole('button', { name: 'Loading the engine' });
+    const bulb = screen.getByRole('button', { name: 'Loading the computer' });
     expect(bulb).toHaveAttribute('aria-busy', 'true');
     expect(bulb.querySelector('.animate-spin')).not.toBeNull();
   });
@@ -221,15 +235,15 @@ describe('StatusBar actions', () => {
     expect(p.onContinue).toHaveBeenCalledTimes(1);
   });
 
-  it('review share opens a menu with the link and Copy PGN', async () => {
-    const p = props({ mode: 'review', onCopyPgn: vi.fn() });
+  it('review share opens a menu with the link and Copy SGF', async () => {
+    const p = props({ mode: 'review', onCopySgf: vi.fn() });
     renderWithI18n(<StatusBar {...p} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Share link or PGN' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Share link or SGF' }));
     const menu = await screen.findByRole('menu');
-    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Copy PGN' }));
-    expect(p.onCopyPgn).toHaveBeenCalledTimes(1);
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Copy SGF' }));
+    expect(p.onCopySgf).toHaveBeenCalledTimes(1);
     expect(p.onShare).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'Share link or PGN' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Share link or SGF' }));
     fireEvent.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: 'Share link' }));
     expect(p.onShare).toHaveBeenCalledTimes(1);
   });
@@ -247,13 +261,21 @@ describe('StatusBar actions', () => {
     renderWithI18n(<StatusBar {...p} />);
     fireEvent.click(screen.getByRole('button', { name: 'Back to start' }));
     expect(p.onBack).toHaveBeenCalledTimes(1);
-    // The hold is announced in the aria-label (DESIGN 6.4).
+    // The hold is announced in the aria-label (DESIGN 6.3).
     const help = screen.getByRole('button', { name: 'Show help (hold for a surprise)' });
     fireEvent.click(help);
     expect(p.onHelp).toHaveBeenCalledTimes(1);
     hold(help, 3000);
     expect(p.onHelpHold).toHaveBeenCalledTimes(1);
     expect(p.onHelp).toHaveBeenCalledTimes(1);
+  });
+
+  it('scoring: the scoring bar takes the toolbar’s place; Back and Help stay (DESIGN 8.4)', () => {
+    renderWithI18n(<StatusBar {...props()} scoringBar={<div data-testid="scoring" />} />);
+    expect(screen.queryByRole('toolbar')).toBeNull();
+    expect(screen.getByTestId('scoring')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Back to start' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Show help' })).toBeInTheDocument();
   });
 
   it('help without a hold action does not announce one', () => {
@@ -351,7 +373,7 @@ describe('StatusBar layout', () => {
 
   it('is translated', () => {
     renderWithI18n(<StatusBar {...props({ mode: 'local' })} />, 'de');
-    expect(screen.getByRole('button', { name: 'Aufgeben (halten)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Passen (halten zum Aufgeben)' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Hilfen ausschalten' })).toBeInTheDocument();
     expect(screen.getByRole('toolbar', { name: 'Spielsteuerung' })).toBeInTheDocument();
   });
