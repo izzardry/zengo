@@ -87,18 +87,43 @@ export async function pass(page: Page) {
   await flag(page).click();
 }
 
-/** Two passes: the board enters scoring. */
+/** Two passes: the board enters scoring, and the engine's dead-stone proposal has had its chance. */
 export async function passTwice(page: Page) {
   await pass(page);
   await expect(passedBadge(page)).toBeVisible();
   await pass(page);
   await expect(stage(page)).toHaveAttribute('data-phase', 'scoring');
   await expect(scoringBar(page)).toBeVisible();
+  await settleProposal(page);
 }
 
-/** Taps a stone in scoring: its group turns dead. */
+/**
+ * How long the dead-stone proposal may take once the engine is ready: its search stops after 3 s
+ * (lib/proposal.ts), and a hint search still running from the last turn may be ahead of it.
+ */
+export const PROPOSAL_SETTLE_MS = 7_000;
+
+/**
+ * Waits out the engine's dead-stone proposal on entering scoring (DESIGN 8.4: in every solo mode,
+ * pass-and-play included). The proposal applies only to an unmarked position, all at once, so the
+ * marks are settled once it shows, or once it had time to and showed nothing (every stone alive).
+ * Without this, a tap and the proposal race: a tap on a stone the proposal already marked dead
+ * would mark it alive again.
+ */
+export async function settleProposal(page: Page) {
+  // The proposal's search loads the engine itself.
+  await expect(stage(page)).toHaveAttribute('data-engine', /^(ready|failed)$/, { timeout: 60_000 });
+  await expect
+    .poll(() => page.locator('[data-mark="dead"]').count(), { timeout: PROPOSAL_SETTLE_MS })
+    .toBeGreaterThan(0)
+    .catch(() => undefined);
+}
+
+/** Makes a stone's group dead in scoring: taps it unless the proposal already marked it. */
 export async function markDead(page: Page, gtp: string) {
-  await cell(page, gtp).click();
+  if (!/\bdead\b/.test((await cell(page, gtp).getAttribute('aria-label')) ?? '')) {
+    await cell(page, gtp).click();
+  }
   await expect(cell(page, gtp)).toHaveAccessibleName(/dead/);
 }
 
