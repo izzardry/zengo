@@ -40,6 +40,9 @@ export function PageTint({ tint, className }: PageTintProps) {
   );
 }
 
+/** Index of the summary part (moves) that starts the second row on phones. */
+const SUMMARY_BREAK = 3;
+
 export interface GameOverOverlayProps {
   /** The game has ended and the overlay should show (after `delayMs`). */
   open: boolean;
@@ -138,17 +141,25 @@ export function GameOverOverlay({
   const moves = plies === 1 ? t('game.summary.move') : t('game.summary.moves', { n: plies });
   const summaryParts = [code, `${size}×${size}`, opponent, moves, formatElapsed(durationMs)];
   const countLine = result.by === 'score' && score ? scoreLine(score) : null;
-  // Lines break only between whole parts; each separator travels with the part after it, so no
-  // line ends in a bullet and no number is split from its unit.
-  const summary = summaryParts.map((part, i) => (
+  // Lines break only between whole parts, so no number is split from its unit. From 640 px the line
+  // fits on one row. Below that it breaks on purpose after the opponent (`K7QW2M • 9×9 • Level 5` /
+  // `54 moves • 12:08`) and the bullet that would open the second row is kept for screen readers
+  // only, so no row starts with a separator.
+  const part = (text: string, i: number) => (
     <Fragment key={i}>
       {i > 0 && ' '}
       <span className="whitespace-nowrap" data-part="summary">
-        {i > 0 && '• '}
-        {part}
+        {i > 0 && <span className={cn(i === SUMMARY_BREAK && 'max-sm:sr-only')}>• </span>}
+        {text}
       </span>
     </Fragment>
-  ));
+  );
+  const summary = (
+    <>
+      <span className="block sm:inline">{summaryParts.slice(0, SUMMARY_BREAK).map((p, i) => part(p, i))}</span>{' '}
+      <span className="block sm:inline">{summaryParts.slice(SUMMARY_BREAK).map((p, i) => part(p, i + SUMMARY_BREAK))}</span>
+    </>
+  );
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     // Keys from the share menu (portaled, but bubbling through the React tree) belong to the menu.
@@ -193,7 +204,7 @@ export function GameOverOverlay({
       }}
       onKeyDown={onKeyDown}
     >
-      <div className="text-center p-8 animate-scale-in max-w-md">
+      <div className="text-center px-4 py-8 sm:p-8 animate-scale-in max-w-md sm:max-w-xl">
         {texts.glyph && (
           <div className="text-6xl mb-6" aria-hidden="true">
             🎉
