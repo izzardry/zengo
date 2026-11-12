@@ -24,7 +24,6 @@
     "@tensorflow/tfjs-backend-wasm": "4.22.0",
     "@tensorflow/tfjs-backend-webgpu": "4.22.0",
     "@tensorflow/tfjs-core": "4.22.0",
-    "chess.js": "1.4.0",
     "clsx": "^2.1.1",
     "lucide-react": "^0.462.0",
     "peerjs": "1.5.5",

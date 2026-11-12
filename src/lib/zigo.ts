@@ -957,7 +957,7 @@ export function byoyomiStep(
 }
 
 /**
- * Each side's clock at the cursor, excluding the running turn. As Zhess: each side's first move is
+ * Each side's clock at the cursor, excluding the running turn. Each side's first move is
  * untimed (it starts that side's clock). Fischer: every counted move subtracts its ms and adds the
  * increment. Byo-yomi: `byoyomiStep`. Clock off: time used per side in `mainMs`.
  * Package 2B owns the clock and may replace the byo-yomi part.

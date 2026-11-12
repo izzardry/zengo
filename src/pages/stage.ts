@@ -2,21 +2,27 @@
  * Pure helpers of the stage (pages/Index.tsx): what the board, strips, pill and overlay show for a
  * session. No React, no DOM, so they are unit-tested on their own.
  */
-import { clockView, toTimeControl, type ClockView } from '@/lib/clock';
-import { flags } from '@/lib/flags';
+import { budgetMs, clockView, toTimeControl, type ClockView } from '@/lib/clock';
+import { COMPUTER_ENABLED, flags } from '@/lib/flags';
 import type { GameSession } from '@/lib/gameRecord';
-import type { Color, Game, Mode, PgnMeta, TcString, TimeControl } from '@/lib/chessTypes';
-import zhess, { legalMoves, parseTc } from '@/lib/zhess';
+import type { Color, Game, Mode, Point, TcString, TimeControl } from '@/lib/types';
+import zigo, { isPass } from '@/lib/zigo';
 
 /**
- * Modes that can be started in this build. Milestone 2 turned `computer` on (behind
- * `flags.computer`); milestone 3 turned on `room` (behind `flags.rooms`). The Start pill answers a mode that
- * is off with a `Coming soon` toast (PLAN Integrator 1).
+ * Milestone switch for rooms (milestone 3 sets it to true and plugs the room into `useGameState`'s
+ * `onRoom`). Typed as a plain boolean so code can test it either way.
+ */
+export const ROOMS_ENABLED: boolean = false;
+
+/**
+ * Modes that can be started in this build. Milestone 2 turns `computer` on (`COMPUTER_ENABLED`),
+ * milestone 3 turns on `room` (`ROOMS_ENABLED`). The Start pill answers a mode that is off with a
+ * `Coming soon` toast (PLAN Integrator 1).
  */
 export const PLAYABLE_MODES: Readonly<Record<Mode, boolean>> = {
   local: true,
-  computer: flags.computer,
-  room: flags.rooms,
+  computer: COMPUTER_ENABLED && flags.computer,
+  room: ROOMS_ENABLED && flags.rooms,
 };
 
 /** Duration of the start ⇄ game blur transition (Ztyle 07, Zudoku). */
@@ -25,82 +31,69 @@ export const TRANSITION_MS = 500;
 /** Minimum horizontal travel of a swipe on the review board (px). */
 export const SWIPE_MIN_PX = 40;
 
+export const other = (c: Color): Color => (c === 'B' ? 'W' : 'B');
+
 /**
- * Board cell size. DESIGN 5.1's `clamp(34px, min(11.5vw, 10vh), 96px)`, with one more bound in
- * portrait: 14rem of height stay free for the chrome, so on desktop windows the info pill, the two
- * player strips and the toolbar never overlap the board in a game. On the start screen the header
- * and footer may cover the edge of the blurred preview. The board keeps one size in every state, so
- * it never moves. Phones are limited by width (11.5vw) and are unaffected. Mobile landscape has the
- * chrome in side rails, so only the height of the screen limits the board there.
+ * The player whose strip is at the near edge: Black in pass-and-play (Black moves first; the
+ * session's color is `B` there), the player's own side otherwise (DESIGN 5.1).
  */
-export const CELL_SIZE_PORTRAIT = 'clamp(34px, min(11.5vw, 10vh, calc((100dvh - 14rem) / 8)), 96px)';
-export const CELL_SIZE_LANDSCAPE = 'clamp(34px, calc((100dvh - 3rem) / 8), 96px)';
-
-export const other = (c: Color): Color => (c === 'w' ? 'b' : 'w');
-
-/** The color drawn at the bottom: white in pass-and-play, the player's side otherwise (DESIGN 5.1). */
-export function baseOrientation(s: Pick<GameSession, 'mode' | 'color'>): Color {
-  return s.mode === 'local' ? 'w' : s.color;
+export function nearColor(s: Pick<GameSession, 'mode' | 'color'>): Color {
+  return s.mode === 'local' ? 'B' : s.color;
 }
 
-/** SAN of every ply of the live game, including the redo tail (for the move strip and list). */
-export function allSan(g: Game): string[] {
-  return zhess.san(g.cursor === g.plies.length ? g : zhess.goto(g, g.plies.length));
+/** Every recorded ply of the live game as an SGF point, the redo tail included (move strip and list). */
+export function allMoves(g: Game): Point[] {
+  return g.plies.map((p) => p.m);
+}
+
+/** The color of the first ply: White in a handicap game, else Black. */
+export function firstColor(g: Game): Color {
+  return g.settings.handicap >= 2 ? 'W' : 'B';
 }
 
 /**
- * Time used by both sides up to the cursor (overlay summary, DESIGN 8.4). The log holds only played
- * plies, so a game lost on time (`tc` given) also counts the flagged turn: the whole time the side
- * to move had left when it began. That follows from the log and the time control alone, so the
- * live overlay, a reload and a saved game all give the same duration.
+ * Which players' latest ply is a pass in the shown position (the strips' `passed` badge, DESIGN
+ * 4.2): the trailing run of consecutive passes, so a stone by either side clears both badges.
+ */
+export function passedBadges(g: Game): Record<Color, boolean> {
+  const out: Record<Color, boolean> = { B: false, W: false };
+  for (let i = g.cursor - 1; i >= 0 && i >= g.cursor - 2; i--) {
+    if (!isPass(g.plies[i].m)) break;
+    out[zigo.colorOfPly(g, i)] = true;
+  }
+  return out;
+}
+
+/** The last ply before the cursor was a pass by the side not to move: the flag's dot (DESIGN 6.2). */
+export function opponentPassed(g: Game): boolean {
+  if (g.cursor === 0 || g.end || g.scoring) return false;
+  return isPass(g.plies[g.cursor - 1].m);
+}
+
+/**
+ * Time used by both sides up to the cursor (overlay summary, DESIGN 8.5). The log holds only played
+ * plies, so a game lost on time (`tc` given) also counts the flagged turn: the whole time the loser
+ * had left when it began. That follows from the log and the time control alone, so the live
+ * overlay, a reload and a saved game all give the same duration.
  */
 export function totalTime(g: Game, tc?: TimeControl | TcString | null): number {
   let ms = 0;
   for (let i = 0; i < g.cursor; i++) ms += g.plies[i].ms;
   const control = toTimeControl(tc);
-  if (control && g.end?.by === 'time' && g.cursor === g.plies.length) {
-    ms += Math.max(0, zhess.clocks(g, control)[g.turn]);
+  const result = g.end?.result;
+  if (control && result?.by === 'time' && g.cursor === g.plies.length) {
+    const loser = other(result.winner);
+    ms += Math.max(0, budgetMs(zigo.clocks(g, control)[loser], control));
   }
   return ms;
 }
 
 /**
- * True when the shown position still has a move to play ("continue from here" is possible). The
- * review view of a finished game carries that game's end, so the position is judged on its own.
- */
-export function canContinueFrom(g: Game): boolean {
-  if (!g.end) return legalMoves(g).length > 0;
-  try {
-    return !zhess.replay(g.plies.slice(0, g.cursor), g.start).end;
-  } catch {
-    return false;
-  }
-}
-
-/**
  * The strips' clocks in review (DESIGN 12.3): both clocks as they stood at the shown move, not
  * running. A finished game's review view carries the ending; before the last move it does not
- * apply, so it is dropped there (otherwise the side to move at that point would read `0.0`).
+ * apply, so it is dropped there (otherwise the loser on time would read `0.0` throughout).
  */
-export function reviewClockView(view: Game, tc: string | null): ClockView {
+export function reviewClockView(view: Game, tc: TcString | null): ClockView {
   const g = view.end && view.cursor < view.plies.length ? { ...view, end: undefined } : view;
-  return clockView(g, parseTc(tc), 0, { live: false });
-}
-
-/** PGN headers for a session (English names; DESIGN 14: English letters in PGN). */
-export function pgnMeta(s: GameSession, site: string): PgnMeta {
-  const d = new Date(s.createdAt);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const you = 'Player';
-  const cpu = `Zigo Level ${s.level ?? ''}`.trim();
-  const [white, black] =
-    s.mode === 'computer' ? (s.color === 'w' ? [you, cpu] : [cpu, you]) : s.mode === 'local' ? ['White', 'Black'] : [you, 'Opponent'];
-  return {
-    event: `Zigo ${s.code}`,
-    site,
-    date: `${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())}`,
-    white,
-    black,
-    timeControl: parseTc(s.tc),
-  };
+  return clockView(g, toTimeControl(tc), 0, { live: false });
 }

@@ -1,45 +1,43 @@
 /**
  * The single stage (DESIGN 4, Ztyle 05): one route, one board that is always centered and never
- * moves. Start screen, game, hidden UI, review and overlays are states of this stage.
+ * moves. Start screen, game, scoring, hidden UI, review and overlays are states of this stage.
  *
  * | State          | Board                      | Chrome                                                |
  * |----------------|----------------------------|-------------------------------------------------------|
  * | start          | blurred preview            | StartChrome (header, footer, pill), language, version |
  * | start scrolled | blurred, scrolled away     | sticky header, history, back-to-top, support, credits |
  * | playing        | sharp, interactive         | Back, info pill, help, two strips, toolbar            |
+ * | scoring        | sharp, dead stones marked  | as playing, the scoring bar in the toolbar's place    |
  * | UI hidden      | sharp                      | board and the two clocks only (tap empty stage)       |
  * | review         | sharp, read-only           | as playing, toolbar with stepping controls            |
  * | overlay        | behind the scrim           | game-over overlay, tutorial, donation                 |
  *
- * Game state lives in `useGameState` (package 1B); this file only wires packages together:
- * the computer opponent (`useComputer`, `useEngineStart`), the clock and premoves (`useClock`,
- * `usePremove`), the hint bulb (`useHint`), the blunder guard (`useBlunderGuard`) and draw offers
- * to the computer (`askComputerDraw`) all share the one engine of `useZhessEngine`.
+ * Game state lives in `useGameState` (package 1B); this file only wires packages together: the Go
+ * board (1A), the game chrome (1C), the start screen (1D), history, tutorial and the live-region
+ * texts (1E), and the clock (1F).
  *
- * Rooms (DESIGN 9): `useGameState` runs the room (`gs.room`, package 3D's `useRoom` over 3C's
- * controller) and derives the session from it. This file adds the room chrome: the presence dot
- * and the score in the info pill, the toolbar's room column (takeback, draw and rematch as
- * requests, resign, the invite sheet on Share), the invite and manual-connection sheets, the
- * request and presence toasts, the tab-guard banner, the clock in external mode with the
- * controller's stamps, and premoves in timed rooms.
+ * Milestone 1 plays pass-and-play end to end. `COMPUTER n` and `ROOM` answer Start with a
+ * `Coming soon` toast (`PLAYABLE_MODES`); milestone 2 adds the engine (computer moves, hint bulb,
+ * blunder guard, dead-stone proposal), milestone 3 the room chrome.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent } from 'react';
 import { toast } from 'sonner';
-import { BoardThumbnail, ChessBoard, PieceIcon } from '@/components/board';
+import { BOARD_SIZE_LANDSCAPE, BOARD_SIZE_PORTRAIT, GoBoard, useGoBoardGame } from '@/components/board';
 import {
   GameOverOverlay,
   InfoPill,
   PageTint,
-  TINT_MS,
-  PieceRenderProvider,
+  PassUndoToast,
   PlayerStrip,
   ResignUndoToast,
+  ScoringAccept,
+  ScoringBar,
   StatusBar,
+  TINT_MS,
   outcomeFor,
   tintFor,
   useShare,
   type InfoOpponent,
-  type PieceRender,
   type ToolbarMode,
 } from '@/components/game';
 import {
@@ -52,66 +50,44 @@ import {
   PWAInstallPrompt,
   SupportButton,
   TutorialOverlay,
+  newAtariAnnouncements,
+  plyAnnouncement,
 } from '@/components/platform';
-import { BoardPreview, ClockDial, EngineStatus, StartChrome, StartPill, useScrolled, type ClockPillAnchor } from '@/components/start';
-import { InviteSheet, ManualConnectSheet, PresenceDot, RoomBanner, RoomToasts, shouldOfferInvite, waitsAsAnchor } from '@/components/room';
+import { BoardPreview, EngineStatus, StartChrome, StartPill, useScrolled } from '@/components/start';
 import { useIsMobileLandscape } from '@/hooks/use-orientation';
-import { useBlunderGuard } from '@/hooks/useBlunderGuard';
-import { useClock, usePremove } from '@/hooks/useClock';
-import { useComputer, useEngineStart } from '@/hooks/useComputer';
+import { useClock } from '@/hooks/useClock';
 import { DONATION_DELAY_MS, useDonationPrompt } from '@/hooks/useDonationPrompt';
+import { useEngineOffline } from '@/hooks/useEngineOffline';
 import { useGameState } from '@/hooks/useGameState';
 import { useHelpers } from '@/hooks/useHelpers';
-import { useHint } from '@/hooks/useHint';
-import { useZhessEngine } from '@/hooks/useZhessEngine';
 import { usePWAInstall } from '@/hooks/usePWAInstall';
 import { useSavedGames } from '@/hooks/useSavedGames';
 import { useSeating } from '@/hooks/useSeating';
 import { useSWUpdate } from '@/hooks/useSWUpdate';
-import { useEngineOffline } from '@/hooks/useEngineOffline';
 import { useTutorial } from '@/hooks/useTutorial';
-import { askComputerDraw } from '@/lib/drawOffer';
 import { flags } from '@/lib/flags';
-import { DEFAULT_LEVEL, gameFromSaved, opponentOf } from '@/lib/gameRecord';
+import { opponentOf } from '@/lib/gameRecord';
 import { useI18n } from '@/lib/i18n';
+import scoringApi from '@/lib/scoring';
 import { bankTurn, bankedTurnMs } from '@/lib/turnBank';
-import type { Color, LockReason, Opponent, SavedGame, Square, TimeControl } from '@/lib/chessTypes';
-import { appBaseUrl } from '@/lib/url';
+import type { Color, Game, IllegalReason, Point, SavedGame } from '@/lib/types';
 import { cn } from '@/lib/utils';
-import zhess, { attacked, formatTc, lastMove, material, parseTc } from '@/lib/zhess';
+import { formatTc, parseTc } from '@/lib/zigo';
 import {
-  CELL_SIZE_LANDSCAPE,
-  CELL_SIZE_PORTRAIT,
   PLAYABLE_MODES,
   SWIPE_MIN_PX,
   TRANSITION_MS,
-  allSan,
-  baseOrientation,
-  canContinueFrom,
+  allMoves,
+  firstColor,
+  nearColor,
+  opponentPassed,
   other,
-  pgnMeta,
+  passedBadges,
   reviewClockView,
   totalTime,
 } from './stage';
 
-/** A paused room turn before the controller has loaded. */
-const NO_TURN = Object.freeze({ turnStart: null, turnUsed: 0 });
 const NO_SCORE: readonly [number, number] = Object.freeze([0, 0] as const);
-
-/** Board locks that also forbid resigning (resignation works offline, DESIGN 9.6). */
-const HARD_LOCKS: ReadonlySet<LockReason> = new Set<LockReason>(['other-tab', 'version', 'denied', 'no-seat']);
-
-/** The flag (draw offer / resign) is usable in this room state. */
-function roomResignable(rs: { seat: 0 | 1 | null; locked: LockReason | null } | null): boolean {
-  return !!rs && rs.seat !== null && !(rs.locked && HARD_LOCKS.has(rs.locked));
-}
-
-const renderPiece: PieceRender = (type, color, className) => <PieceIcon type={type} color={color} className={className} />;
-
-const renderThumbnail = (g: SavedGame, size: number) => {
-  const game = gameFromSaved(g);
-  return <BoardThumbnail fen={game.fen} size={size} orientation={g.mode === 'local' ? 'w' : g.color} lastMove={lastMove(game)} />;
-};
 
 function isTypingTarget(t: EventTarget | null): boolean {
   if (!(t instanceof HTMLElement)) return false;
@@ -125,18 +101,13 @@ export default function Index() {
   const { helpers, toggleHelpers } = useHelpers();
   const { seating, toggleSeating } = useSeating();
   const landscape = useIsMobileLandscape();
-  const { shareLink, copyPgn } = useShare();
+  const { shareLink, copySgf } = useShare();
   const { shouldShowPrompt, canInstall, install, dismiss: dismissInstall } = usePWAInstall();
   const { showTutorial, startTutorial, forceShowTutorial, completeTutorial } = useTutorial();
   const { showPrompt: showDonation, triggerPrompt: triggerDonation, dismissPrompt: dismissDonation } = useDonationPrompt();
-  const engine = useZhessEngine();
 
   const { phase, session, view } = gs;
   const isStart = phase === 'start';
-  /** The open room (room mode), and its controller snapshot. */
-  const room = gs.room;
-  const rs = room?.state ?? null;
-  const roomMode = !!room;
   const phaseRef = useRef(phase);
   phaseRef.current = phase;
   const sessionRef = useRef(session);
@@ -144,14 +115,14 @@ export default function Index() {
   const gsRef = useRef(gs);
   gsRef.current = gs;
   const { checkForUpdate } = useSWUpdate({ shouldAutoReload: () => phaseRef.current === 'start' });
-  // Offline copy of the engine, downloaded on the first launch (DESIGN 14).
+  // Offline copy of the engine (DESIGN 14). Off until milestone 2 (`COMPUTER_ENABLED`): nothing is fetched.
   const engineOffline = useEngineOffline();
 
   const scrolled = useScrolled(50, isStart);
   const [showUI, setShowUI] = useState(true);
   const [animating, setAnimating] = useState(false);
   const [flipped, setFlipped] = useState(false);
-  const [threats, setThreats] = useState<readonly Square[] | null>(null);
+  const [ghost, setGhost] = useState<Point | null>(null);
 
   /* ---- start ⇄ game transition: the board stays put, only the blur and the chrome animate ---- */
   const animTimer = useRef<ReturnType<typeof setTimeout>>();
@@ -167,7 +138,7 @@ export default function Index() {
   useEffect(() => {
     setShowUI(true);
     setFlipped(false);
-    setThreats(null);
+    setGhost(null);
     if (sessionId && typeof window !== 'undefined' && window.scrollY !== 0) window.scrollTo({ top: 0, behavior: 'auto' });
   }, [sessionId]);
 
@@ -180,19 +151,16 @@ export default function Index() {
     const prev = prevEnd.current;
     prevEnd.current = { id: sessionId, ended };
     if (sessionId !== prev.id) {
-      // A room whose current game is over opens with its overlay, where the rematch is asked for
-      // (DESIGN 8.4, 9.7). No tint: the game did not end in this session.
-      const s = sessionRef.current;
-      setOverlay(!!s && s.mode === 'room' && !!gsRef.current.room && ended);
+      setOverlay(false);
       setEndedHere(false);
       return;
     }
     if (ended && !prev.ended) {
       setOverlay(true);
       setEndedHere(true);
-      // The one-time donation prompt follows the first win, 1.5 s after the overlay (DESIGN 8.4).
+      // The one-time donation prompt follows the first win, 1.5 s after the overlay (DESIGN 8.5).
       const s = sessionRef.current;
-      if (s?.game.end && outcomeFor(s.game.end, s.mode, s.color) === 'win') triggerDonation(TINT_MS + DONATION_DELAY_MS);
+      if (s?.game.end && outcomeFor(s.game.end.result, s.mode, s.color) === 'win') triggerDonation(TINT_MS + DONATION_DELAY_MS);
     } else if (!ended) {
       setOverlay(false);
       setEndedHere(false);
@@ -205,7 +173,7 @@ export default function Index() {
     if (!ended) setResigned(null);
   }, [ended]);
 
-  /* ---- the chess clock (DESIGN 11): performance.now() stamps, paused on Back / hidden tab ---- */
+  /* ---- the clock (DESIGN 11): performance.now() stamps, paused on Back, a hidden tab and scoring ---- */
   const sessionGame = session?.game ?? null;
   const { timeout } = gs;
   // Time already spent on this turn before a reload or Back → Resume (lib/turnBank).
@@ -213,9 +181,6 @@ export default function Index() {
   if (banked.current.id !== sessionId) {
     banked.current = { id: sessionId, ms: session && session.mode !== 'room' ? bankedTurnMs(session.id, session.game) : 0 };
   }
-  // In a room the controller times the turn (DESIGN 9.8): external mode with its stamps, which use
-  // the same performance.now() clock. Its flag rule (own at zero, the opponent's 2 s past zero)
-  // is the controller's too; `timeout` hands the flag to it.
   // A move-list jump in a live game (review) does not stop the clock: solo clocks pause only when
   // the tab is hidden or on Back (DESIGN 11), and Back leaves the game (phase `start`).
   const clock = useClock(sessionGame, session?.tc ?? null, {
@@ -223,9 +188,6 @@ export default function Index() {
     key: sessionId,
     onFlag: timeout,
     initialTurnMs: banked.current.ms,
-    external: roomMode ? (rs?.clock ?? NO_TURN) : null,
-    ownColor: roomMode ? session?.color : undefined,
-    pauseWhenHidden: !roomMode,
   });
   const clockRef = useRef(clock);
   clockRef.current = clock;
@@ -248,89 +210,17 @@ export default function Index() {
     };
   }, [bankNow]);
 
-  /* ---- engine trouble: one calm toast (DESIGN 10.1) ---- */
-  const engineFailed = useCallback(
-    (retry?: () => void) => {
-      const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
-      toast(t(offline ? 'engine.failedOffline' : 'engine.failed'), {
-        id: 'engine-failed',
-        action: retry ? { label: t('engine.retry'), onClick: retry } : undefined,
-      });
-    },
-    [t],
-  );
-
-  /* ---- the computer's turn (DESIGN 10) ---- */
   const mode = session?.mode ?? 'local';
-  const computerRetry = useRef<() => void>(() => {});
-  const computer = useComputer({
-    engine,
-    game: sessionGame,
-    // The computer plays on while the player looks back through the moves.
-    enabled: flags.computer && mode === 'computer' && phase !== 'start',
-    computerColor: session ? other(session.color) : null,
-    level: session?.level ?? DEFAULT_LEVEL,
-    tc: session?.tc ?? null,
-    onMove: (uci, ms) => void gsRef.current.move(uci, ms),
-    onFail: () => engineFailed(() => computerRetry.current()),
-    elapsed: clock.elapsed,
-    sessionKey: sessionId,
-  });
-  computerRetry.current = computer.retry;
 
-  /* ---- the room's board: seated, not locked, this tab owns the room (DESIGN 9.6, 9.12) ---- */
-  const roomPlayable = !roomMode || (!!rs && rs.seat !== null && !rs.locked && room?.tab === 'owner');
+  /* ---- pass with a 5-second undo (DESIGN 6.2) ---- */
+  const [passToast, setPassToast] = useState<{ who: 'you' | Color; cursor: number; key: number } | null>(null);
+  useEffect(() => setPassToast(null), [sessionId]);
 
-  /* ---- premove in timed games against the computer and in timed rooms (DESIGN 6.3); it bypasses the guard ---- */
-  const premove = usePremove(sessionGame, {
-    player: session?.color ?? 'w',
-    mode,
-    tc: session?.tc ?? null,
-    live: phase === 'playing' && roomPlayable,
-    key: sessionId,
-    onFire: (uci) => void gsRef.current.move(uci, clockRef.current.elapsed()),
-  });
-
-  /* ---- hint bulb (DESIGN 7.3) ---- */
-  const hintEnabled =
-    flags.hint && (mode === 'computer' || mode === 'local') && phase === 'playing' && gs.isPlayerTurn;
-  const hint = useHint({
-    engine,
-    game: sessionGame,
-    enabled: hintEnabled,
-    onAssisted: gs.markAssisted,
-    onFail: () => engineFailed(),
-    sessionKey: sessionId,
-  });
-
-  /* ---- blunder guard: against the computer, helpers on (DESIGN 7.2) ---- */
-  const guard = useBlunderGuard({
-    engine,
-    game: sessionGame,
-    enabled: flags.blunderGuard && mode === 'computer' && helpers && phase === 'playing',
-    playerColor: session?.color ?? null,
-  });
-  const guardRef = useRef(guard);
-  guardRef.current = guard;
-
-  /* ---- screen-reader notes of the assistance (hint squares, refused blunder) ---- */
-  const [assistNote, setAssistNote] = useState('');
-  const hintSquares = hint.squares;
-  const hintStep = hint.step;
-  useEffect(() => {
-    if (!hintSquares?.[0]) return;
-    setAssistNote(t(hintStep === 2 ? 'assist.hintTo' : 'assist.hintFrom', { square: hintSquares[0] }));
-  }, [hintSquares, hintStep, t]);
-  const liveFen = sessionGame?.fen;
-  useEffect(() => setAssistNote(''), [liveFen]);
-
-  /* ---- settings shown on the start screen (dimmed: the stored game's own) ---- */
+  /* ---- start-screen settings (StartChrome shows a saved game's own, dimmed) ---- */
   const pillSaved = gs.startPill.saved;
-  const shownOpponent: Opponent = pillSaved ? opponentOf(pillSaved) : gs.opponent;
-  const shownColor = pillSaved ? pillSaved.color : gs.colorChoice;
-  const shownClock: TimeControl = parseTc(pillSaved ? pillSaved.tc : gs.tc);
+  const startClock = useMemo(() => parseTc(gs.tc), [gs.tc]);
 
-  const comingSoon = useCallback(() => toast(t('comingSoon')), [t]);
+  const comingSoon = useCallback(() => toast(t('comingSoon'), { id: 'coming-soon' }), [t]);
 
   /* ---- actions ---- */
   const begin = useCallback(
@@ -343,37 +233,28 @@ export default function Index() {
     [animate],
   );
 
-  /* ---- Start: a computer game waits for the engine (spinner with progress, DESIGN 10.1) ---- */
-  const engineStart = useEngineStart(engine, { onFail: () => engineFailed(() => void handleStartRef.current()) });
-  const { cancel: cancelEngineStart } = engineStart;
-  useEffect(() => {
-    if (!isStart) cancelEngineStart();
-  }, [isStart, cancelEngineStart]);
-
-  const handleStart = useCallback(async () => {
+  const handleStart = useCallback(() => {
     const pill = gs.startPill;
-    const label = pill.label;
-    if (label === 'start' && !PLAYABLE_MODES[gs.opponent.mode]) {
+    const target = pill.saved ? opponentOf(pill.saved) : gs.opponent;
+    // The computer (milestone 2) and rooms (milestone 3): a stored game can still be reviewed.
+    if (pill.label !== 'review' && !PLAYABLE_MODES[target.mode]) {
       comingSoon();
       return;
-    }
-    const target = pill.saved ? opponentOf(pill.saved) : gs.opponent;
-    if (label !== 'review' && target.mode === 'computer') {
-      if (!(await engineStart.prepare())) return;
-      // The player went elsewhere meanwhile (a history card, a link).
-      if (phaseRef.current !== 'start') return;
     }
     if (!begin(gsRef.current.start)) {
       comingSoon();
       return;
     }
-    if (label === 'start') startTutorial();
-  }, [gs.startPill, gs.opponent, engineStart, begin, comingSoon, startTutorial]);
-  const handleStartRef = useRef(handleStart);
-  handleStartRef.current = handleStart;
+    if (pill.label === 'start') startTutorial();
+  }, [gs.startPill, gs.opponent, begin, comingSoon, startTutorial]);
 
   const handleOpen = useCallback(
     (g: SavedGame) => {
+      const finished = !!g.result;
+      if (!finished && !PLAYABLE_MODES[g.mode]) {
+        comingSoon();
+        return;
+      }
       if (!begin(() => gs.open(g))) comingSoon();
     },
     [begin, gs, comingSoon],
@@ -382,159 +263,81 @@ export default function Index() {
   const handleExit = useCallback(() => {
     animate();
     setResigned(null);
+    setPassToast(null);
     // The clock pauses on Back and resumes with this turn's time on return (DESIGN 11).
     bankNow();
     gs.exit();
   }, [animate, gs, bankNow]);
 
   const handleNewGame = useCallback(() => {
-    // A room plays on in the same room: Rematch asks the opponent (DESIGN 8.4, 9.7). The overlay
-    // stays, its button showing the pending state, until game n+1 starts or the answer is No.
-    // When it cannot be asked (the opponent is away) the button is disabled with a note.
-    const r = gsRef.current.room;
-    if (r) {
-      if (r.state?.canAsk.rematch) r.ask('rematch');
-      return;
-    }
     setOverlay(false);
     gs.newGame();
   }, [gs]);
 
   const handleResign = useCallback(() => {
-    if (!session) return;
-    // In a room resignation is final: no undo toast (DESIGN 8.3).
-    if (gsRef.current.room) {
-      gs.resign();
-      return;
+    const s = sessionRef.current;
+    if (!s) return;
+    const who: 'you' | Color = s.mode === 'local' ? s.game.turn : 'you';
+    if (gsRef.current.resign()) {
+      setPassToast(null);
+      setResigned(who);
     }
-    const who: 'you' | Color = session.mode === 'local' ? session.game.turn : 'you';
-    if (gs.resign()) setResigned(who);
-  }, [gs, session]);
+  }, []);
 
   const handleUndoResign = useCallback(() => {
     gs.reopen();
     setResigned(null);
   }, [gs]);
 
-  const handleShare = useCallback(() => {
-    const url = gs.shareUrl();
-    if (session?.mode === 'room') return void shareLink(url, 'room');
-    const end = session?.game.end;
-    const won = !!end && session?.mode === 'computer' && outcomeFor(end, session.mode, session.color) === 'win';
-    void shareLink(url, won ? 'win' : 'solo', session?.level);
-  }, [gs, session, shareLink]);
+  /** A stone placed on the board (tap, confirmed ghost, keyboard, typed `D4`). */
+  const handlePlay = useCallback((p: Point) => {
+    gsRef.current.play(p, clockRef.current.elapsed());
+  }, []);
 
-  const handleCopyPgn = useCallback(() => {
-    if (!session) return;
-    void copyPgn(zhess.pgn(session.game, pgnMeta(session, appBaseUrl())));
-  }, [session, copyPgn]);
+  /** The flag's tap, or `pass` typed: a pass with its 5-second undo toast. */
+  const handlePass = useCallback(() => {
+    const s = sessionRef.current;
+    if (!s) return;
+    const who: 'you' | Color = s.mode === 'local' ? s.game.turn : 'you';
+    if (!gsRef.current.pass(clockRef.current.elapsed())) return;
+    const cursor = s.game.cursor + 1;
+    setPassToast((prev) => ({ who, cursor, key: (prev?.key ?? 0) + 1 }));
+  }, []);
 
-  const handleContinue = useCallback(() => {
-    if (!begin(gs.continueFromHere)) comingSoon();
-  }, [begin, gs, comingSoon]);
+  const handleUndoPass = useCallback(() => {
+    gsRef.current.undoPass();
+    setPassToast(null);
+  }, []);
 
-  /** A move made on the board: through the blunder guard against the computer, else at once. */
-  const handleMove = useCallback(
-    (uci: string) => {
-      const g = guardRef.current;
-      if (!g.active) {
-        gsRef.current.move(uci, clockRef.current.elapsed());
-        return;
-      }
-      void g.check(uci).then((r) => {
-        if (r.action === 'commit') gsRef.current.move(uci, clockRef.current.elapsed());
-        else if (r.action === 'refuse') setAssistNote(t('assist.blunderRefused'));
-      });
+  /* ---- ko and superko: one toast the first time per game, helpers on (DESIGN 6.1) ---- */
+  const illegalToasted = useRef(new Set<string>());
+  const handleIllegal = useCallback(
+    (_p: Point, reason: IllegalReason) => {
+      if (reason !== 'ko' && reason !== 'superko') return;
+      const key = `${sessionRef.current?.id ?? ''}:${reason}`;
+      if (illegalToasted.current.has(key)) return;
+      illegalToasted.current.add(key);
+      toast(t(reason === 'ko' ? 'stage.ko' : 'stage.superko'), { id: 'illegal' });
     },
     [t],
   );
 
-  /* ---- draw offer to the computer: accepted past move 30 at ±0.3, else `Declined` (DESIGN 8.3) ---- */
-  const drawAsked = useRef(false);
-  const handleOfferDraw = useCallback(() => {
+  const handleShare = useCallback(() => {
     const s = sessionRef.current;
-    if (!s || s.mode !== 'computer' || s.game.end || drawAsked.current) return;
-    drawAsked.current = true;
-    const g = s.game;
-    void askComputerDraw(engine, g).then((answer) => {
-      drawAsked.current = false;
-      const cur = sessionRef.current;
-      if (!cur || cur.id !== s.id || cur.game.end) return;
-      if (answer === 'accept' && cur.game === g) gsRef.current.finish({ result: '1/2-1/2', by: 'agreed' });
-      else toast(t('assist.drawDeclined'));
-    });
-  }, [engine, t]);
+    const url = gsRef.current.shareUrl();
+    const end = s?.game.end;
+    const won = !!end && s?.mode === 'computer' && outcomeFor(end.result, s.mode, s.color) === 'win';
+    void shareLink(url, won ? 'win' : 'solo', s?.level);
+  }, [shareLink]);
 
-  /* ---- custom time control: the clock pill's 500 ms hold opens the dial (DESIGN 4.1) ---- */
-  const [dial, setDial] = useState<{ x: number; y: number; dragging: boolean } | null>(null);
-  const openDial = useCallback((a: ClockPillAnchor) => setDial({ x: a.x, y: a.y, dragging: a.source === 'pointer' }), []);
-  useEffect(() => {
-    if (!isStart) setDial(null);
-  }, [isStart]);
+  const handleCopySgf = useCallback(() => {
+    const text = gsRef.current.sgf();
+    if (text) void copySgf(text);
+  }, [copySgf]);
 
-  /* ---- rooms: invite sheet and manual connection (DESIGN 9.2, 9.9) ---- */
-  const [inviteOpen, setInviteOpen] = useState(false);
-  const [manualOpen, setManualOpen] = useState(false);
-  const roomCode = room?.code ?? null;
-  const roomLive = !!rs?.live;
-  // A new room (or none) starts with both sheets closed.
-  const invited = useRef<string | null>(null);
-  useEffect(() => {
-    setInviteOpen(false);
-    setManualOpen(false);
-    if (!roomCode) invited.current = null;
-  }, [roomCode]);
-  // The creator's room shows the invite sheet by itself while nobody has joined (DESIGN 9.2), once;
-  // after the first-game tutorial, so the two overlays do not stack.
-  const offerInvite = shouldOfferInvite(rs) && room?.tab === 'owner' && !showTutorial;
-  useEffect(() => {
-    if (!offerInvite || !roomCode || invited.current === roomCode) return;
-    invited.current = roomCode;
-    setInviteOpen(true);
-  }, [offerInvite, roomCode]);
-  // The opponent is here: the sheets have done their job.
-  useEffect(() => {
-    if (!roomLive) return;
-    setInviteOpen(false);
-    setManualOpen(false);
-  }, [roomLive]);
-
-  /** `Connect manually` (invite sheet, failure toast): this device sends the offer (DESIGN 9.9). */
-  const connectManually = useCallback(() => {
-    const r = gsRef.current.room;
-    if (!r) return;
-    r.openManual();
-    setInviteOpen(false);
-    setManualOpen(true);
-  }, []);
-  const manual = room?.manual;
-  const manualStep = manual?.step ?? 'idle';
-  // This device answers an offer link (`x`) and the exchange is still running.
-  const manualGuestActive = manual?.role === 'guest' && manualStep !== 'idle' && manualStep !== 'connected';
-  // An offer link (`x`) or an answer link (`y`) opened here shows its step without a tap.
-  const manualAuto = manualGuestActive || manualStep === 'handover';
-  // The sheets are modal: they step aside once the manual channel is open and while a request
-  // waits for an answer, so its toast (e.g. Allow for a rejoin, DESIGN 9.5) can be reached.
-  const requestWaiting = !!rs?.requests.incoming;
-  const manualShown = !!room && (manualOpen || manualAuto) && !roomLive && manualStep !== 'connected' && !requestWaiting;
-  const inviteShown = inviteOpen && !manualShown && !requestWaiting;
-  // The failure toast (with its own `Connect manually`) steps aside while a sheet that shows the
-  // cause or the step is open, and never shows to the guest of a manual exchange (an `x` link).
-  const failureQuiet = inviteShown || manualShown || manualGuestActive;
-  // Done once its channel is open: a later loss starts from `Connect manually` again, not this sheet.
-  useEffect(() => {
-    if (manualStep === 'connected') setManualOpen(false);
-  }, [manualStep]);
-  const onManualOpenChange = useCallback((open: boolean) => {
-    if (open) return;
-    setManualOpen(false);
-    gsRef.current.room?.closeManual();
-  }, []);
-
-  const handleRoomDraw = useCallback(() => {
-    const r = gsRef.current.room;
-    if (r?.state?.canAsk.draw) r.ask('draw');
-  }, []);
+  const handleContinue = useCallback(() => {
+    if (!begin(gs.continueFromHere)) comingSoon();
+  }, [begin, gs, comingSoon]);
 
   /* ---- keyboard: Z / Shift+Z undo and redo; ← / → step in review (DESIGN 6.1, 12.3) ---- */
   useEffect(() => {
@@ -543,19 +346,19 @@ export default function Index() {
       if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || isTypingTarget(e.target)) return;
       const inGrid = e.target instanceof Element && !!e.target.closest('[role="grid"],[role="menu"],[role="dialog"]');
       const key = e.key;
-      const gs = gsRef.current;
+      const g = gsRef.current;
       if (key === 'z' || key === 'Z') {
         e.preventDefault();
-        if (phase === 'review') gs.step(e.shiftKey ? 1 : -1);
-        else if (e.shiftKey) gs.redo();
-        else gs.undo();
+        if (phase === 'review') g.step(e.shiftKey ? 1 : -1);
+        else if (e.shiftKey) g.redo();
+        else g.undo();
       } else if (phase === 'review' && !inGrid && (key === 'ArrowLeft' || key === 'ArrowRight')) {
         e.preventDefault();
-        gs.step(key === 'ArrowLeft' ? -1 : 1);
+        g.step(key === 'ArrowLeft' ? -1 : 1);
       } else if (phase === 'review' && !inGrid && (key === 'Home' || key === 'End')) {
         e.preventDefault();
-        if (key === 'Home') gs.toStart();
-        else gs.toEnd();
+        if (key === 'Home') g.toStart();
+        else g.toEnd();
       }
     };
     window.addEventListener('keydown', onKey);
@@ -580,105 +383,136 @@ export default function Index() {
   /* ---- tap on empty stage toggles the chrome (DESIGN 4) ---- */
   const onStageClick = (e: MouseEvent<HTMLDivElement>) => {
     if (isStart || e.target !== e.currentTarget) return;
-    // "Tapping anywhere cancels it" (DESIGN 6.3): the first tap only drops a queued premove.
-    if (premove.premove) {
-      premove.cancel();
-      return;
-    }
     setShowUI((v) => !v);
   };
 
+  /* ---- polite live region (DESIGN 14.1): `Black: D4, captures 2`, `White passes`, atari ---- */
+  const [liveText, setLiveText] = useState('');
+  const announced = useRef<{ id: string | null; game: Game | null }>({ id: null, game: null });
+  useEffect(() => {
+    const prev = announced.current;
+    announced.current = { id: sessionId, game: view };
+    if (!view || !session || prev.id !== sessionId || !prev.game || prev.game === view) return;
+    const ply = plyAnnouncement(t, prev.game, view);
+    if (!ply) return;
+    const parts = [ply];
+    // Atari is part of the helpers bundle (DESIGN 7.1): announced with the ring it stands for.
+    if (helpers) {
+      const c = view.turn;
+      const owner: Color | 'you' = session.mode !== 'local' && c === session.color ? 'you' : c;
+      parts.push(...newAtariAnnouncements(t, prev.game, view, c, owner));
+    }
+    setLiveText(parts.join('. '));
+  }, [view, session, sessionId, helpers, t]);
+  useEffect(() => {
+    if (isStart) setLiveText('');
+  }, [isStart]);
+
   /* ---- derived view ---- */
   const boardGame = isStart || !view ? gs.preview : view;
-  const orientation: Color = session ? (flipped ? other(baseOrientation(session)) : baseOrientation(session)) : 'w';
-  const farColor = other(orientation);
-  const faceToFace = !!session && mode === 'local' && seating === 'face' && phase === 'playing';
-  const interactive = phase === 'playing' && !!session && !session.game.end && roomPlayable;
-  const movable = mode === 'local' ? 'both' : (session?.color ?? 'none');
+  const boardProps = useGoBoardGame(boardGame);
+  const near: Color = session ? (flipped ? other(nearColor(session)) : nearColor(session)) : 'B';
+  const far = other(near);
+  const faceToFace = !!session && mode === 'local' && seating === 'face' && (phase === 'playing' || phase === 'scoring');
+  const live = !!session && !session.game.end;
+  const scoringNow = phase === 'scoring' && live;
+  const interactive = live && ((phase === 'playing' && gs.isPlayerTurn) || (scoringNow && gs.scoring.editable));
   const chromeVisible = !isStart && showUI;
   const toolbarMode: ToolbarMode = phase === 'review' ? 'review' : mode;
-  const cellSize = landscape ? CELL_SIZE_LANDSCAPE : CELL_SIZE_PORTRAIT;
+  const boardSize = landscape ? BOARD_SIZE_LANDSCAPE : BOARD_SIZE_PORTRAIT;
 
-  const mat = useMemo(() => (view ? material(view) : null), [view]);
+  // The ghost previews `D4?` only while it can be placed.
+  useEffect(() => {
+    if (!interactive || scoringNow) setGhost(null);
+  }, [interactive, scoringNow]);
+
+  // Scoring layer: live scoring, and the final position of a scored game (review, after Accept).
+  const sc = gs.scoring;
+  const boardScoring = useMemo(
+    () => (!isStart && sc.active && sc.territory ? { dead: sc.dead, territory: sc.territory } : null),
+    [isStart, sc.active, sc.dead, sc.territory],
+  );
+  const finalScore = useMemo(() => {
+    const g = session?.game;
+    if (!g?.end || g.end.result.by !== 'score' || !g.scoring) return undefined;
+    return scoringApi.score(g, g.scoring.dead);
+  }, [session?.game]);
+
   const reviewFaces = useMemo(
     () => (phase === 'review' && view && session ? reviewClockView(view, session.tc) : null),
     [phase, view, session],
   );
   const faces = reviewFaces ?? clock;
-  const sans = useMemo(() => (session ? allSan(session.game) : []), [session]);
-  // A timed room while disconnected: both strips say `Paused` (DESIGN 9.6).
-  const pausedNote = roomMode && !!rs?.clock.paused && !!session?.tc && !view?.end && phase === 'playing' ? t('room.paused') : undefined;
-  // The opponent's strip dims while they are disconnected (DESIGN 9.10).
-  const opponentAway = roomMode && rs?.presence !== 'connected';
+  const moves = useMemo(() => (session ? allMoves(session.game) : []), [session]);
+  const passed = useMemo(() => (view ? passedBadges(view) : { B: false, W: false }), [view]);
+
+  /* ---- scoring bar (DESIGN 8.4): one Accept side by side, one per player face to face ---- */
+  const acceptFor = useCallback((side?: Color) => void gsRef.current.scoring.accept(side), []);
+  const scoringBar = scoringNow ? (
+    <ScoringBar
+      onResume={() => void gsRef.current.scoring.resume()}
+      onAccept={() => acceptFor(faceToFace ? near : undefined)}
+      accepted={faceToFace ? sc.acceptedBy[near] : false}
+      side={faceToFace ? near : undefined}
+      disabled={!sc.editable}
+      visible={chromeVisible}
+      landscape={landscape}
+    />
+  ) : undefined;
+  const farAccept =
+    scoringNow && faceToFace ? (
+      <ScoringAccept variant="compact" side={far} accepted={sc.acceptedBy[far]} onAccept={() => acceptFor(far)} />
+    ) : undefined;
+
   const strip = (color: Color, rotated: boolean, layout: 'row' | 'rail') =>
-    session && view && mat ? (
+    session && view ? (
       <PlayerStrip
         color={color}
-        captured={mat.captured[color]}
-        advantage={color === 'w' ? mat.diff : -mat.diff}
-        clock={pausedNote ? { ...faces[color], note: pausedNote } : faces[color]}
-        active={!view.end && view.turn === color && !(opponentAway && color !== session.color)}
+        prisoners={view.prisoners[color]}
+        komi2={view.settings.komi2}
+        passed={passed[color]}
+        clock={faces[color]}
+        active={!view.end && view.turn === color}
+        score={sc.active && sc.score ? sc.score : undefined}
+        action={color === far ? farAccept : undefined}
         rotated={rotated}
         details={showUI}
         layout={layout}
       />
     ) : null;
 
-  // The room score from this device's point of view (DESIGN 9.7); a room game reviewed from
-  // history reads it from the stored room record.
-  const reviewedRoom = !room && session?.mode === 'room' ? saved.rooms.find((r) => r.code === session.code) : undefined;
-  const roomScore: readonly [number, number] = room
-    ? room.score
-    : reviewedRoom
-      ? [reviewedRoom.score[reviewedRoom.seat] / 2, reviewedRoom.score[reviewedRoom.seat === 0 ? 1 : 0] / 2]
-      : NO_SCORE;
+  // A room game reviewed from history reads the room score from the stored room record (DESIGN 9).
+  const reviewedRoom = session?.mode === 'room' ? saved.rooms.find((r) => r.code === session.code) : undefined;
+  const roomScore: readonly [number, number] = reviewedRoom
+    ? [reviewedRoom.score[reviewedRoom.seat] / 2, reviewedRoom.score[reviewedRoom.seat === 0 ? 1 : 0] / 2]
+    : NO_SCORE;
   const infoOpponent: InfoOpponent =
     mode === 'computer' ? { kind: 'computer', level: session?.level ?? 5 } : mode === 'room' ? { kind: 'room', score: roomScore } : { kind: 'local' };
-  const info = session ? (
-    <InfoPill
-      code={session.code}
-      presence={room ? <PresenceDot presence={rs?.presence ?? 'connecting'} onClick={() => setInviteOpen(true)} /> : undefined}
-      opponent={infoOpponent}
-      moves={sans}
-      cursor={view?.cursor ?? 0}
-      onJump={gs.goto}
-      visible={chromeVisible}
-      landscape={landscape}
-      placement={landscape ? 'inline' : 'fixed'}
-    />
-  ) : null;
-
-  const peekColor: Color | null = session ? (mode === 'local' ? other(session.game.turn) : other(session.color)) : null;
-  const hintControls =
-    flags.hint && session && (mode === 'computer' || mode === 'local') && phase === 'playing'
-      ? {
-          // Tap: the engine's move (piece, then target). Hold 1 s: the threat peek (chess.js only).
-          onHint: hint.tap,
-          onPeekStart: () => view && peekColor && setThreats(attacked(view, peekColor)),
-          onPeekEnd: () => setThreats(null),
-          busy: hint.pending,
-          disabled: !hintEnabled,
-        }
-      : undefined;
-  const highlights = useMemo(
-    () => ({ hint: hint.squares, threats: threats ?? undefined, blunder: guard.blunder, blunderKey: guard.blunderKey }),
-    [hint.squares, threats, guard.blunder, guard.blunderKey],
-  );
+  const info =
+    session && view ? (
+      <InfoPill
+        code={session.code}
+        opponent={infoOpponent}
+        moves={moves}
+        size={view.settings.size}
+        cursor={view.cursor}
+        firstColor={firstColor(view)}
+        ghost={ghost}
+        onJump={gs.goto}
+        visible={chromeVisible}
+        landscape={landscape}
+        placement={landscape ? 'inline' : 'fixed'}
+      />
+    ) : null;
 
   const end = session?.game.end;
-  const tint = end && endedHere && session ? tintFor(end, session.mode, session.color) : null;
-  // A room whose current game is over: Rematch lives on the overlay, and the toolbar's flag slot
-  // brings the overlay back after it was dismissed, pulsing while this device's request waits.
-  const roomOver = roomMode && !!end && phase === 'playing';
-  const rematchPending = roomMode && rs?.requests.outgoing === 'rematch';
-  const rematchBlocked = roomMode && !rematchPending && !rs?.canAsk.rematch;
-  // Room games too: the new game is a solo one (DESIGN 4.2, 12.3: never forked into a room).
-  const canContinue = useMemo(() => phase === 'review' && !!view && canContinueFrom(view), [phase, view]);
+  const tint = end && endedHere && session ? tintFor(end.result, session.mode, session.color) : null;
+  const flagLive = phase === 'playing' && live && gs.isPlayerTurn;
 
   return (
-    <PieceRenderProvider render={renderPiece}>
+    <>
       {/* `isolate`: the stage root is the stacking context of the page tint's `-z-10` layer, so the
-          tint paints over the root's background (and html/body's) but under the stage (DESIGN 8.4). */}
+          tint paints over the root's background (and html/body's) but under the stage (DESIGN 8.5). */}
       <div className={cn('halftone-bg relative isolate select-none', isStart ? 'min-h-[100dvh]' : 'h-[100dvh] overflow-hidden')}>
         <PageTint tint={tint} />
 
@@ -688,14 +522,7 @@ export default function Index() {
           onClick={onStageClick}
           data-testid="stage"
           data-phase={phase}
-          data-engine={engine.state}
-          data-computer={computer.thinking ? 'thinking' : undefined}
-          data-room-phase={rs?.phase}
-          data-room-presence={rs?.presence}
-          data-room-failure={rs?.failureKind ?? undefined}
-          data-room-cause={room?.manualCause ?? undefined}
-          data-room-tab={room?.tab}
-          data-room-via={room?.via ?? undefined}
+          data-size={boardGame.settings.size}
           className={cn(
             'flex h-[100dvh] min-h-[320px] items-center justify-center',
             landscape
@@ -706,35 +533,27 @@ export default function Index() {
           <BoardPreview
             blurred={isStart}
             animate={animating}
-            overlay={
-              <StartPill
-                label={gs.startPill.label}
-                onClick={() => void handleStart()}
-                loading={engineStart.loading}
-                onCancel={cancelEngineStart}
-                progress={engineStart.progress}
-                disabled={!isStart || animating}
-              />
-            }
+            overlay={<StartPill label={gs.startPill.label} onClick={handleStart} disabled={!isStart || animating} />}
             overlayVisible={isStart}
           >
             <div className="relative" onPointerDown={onSwipeDown} onPointerUp={onSwipeUp} onPointerCancel={() => (swipe.current = null)}>
-              {!isStart && !landscape && <div className="absolute inset-x-0 bottom-full mb-1 px-1">{strip(farColor, faceToFace, 'row')}</div>}
-              <ChessBoard
-                game={boardGame}
-                orientation={orientation}
+              {!isStart && !landscape && <div className="absolute inset-x-0 bottom-full mb-1 px-1">{strip(far, faceToFace, 'row')}</div>}
+              <GoBoard
+                {...boardProps}
                 helpers={helpers}
                 interactive={interactive}
-                movable={movable}
+                onPlay={handlePlay}
+                onIllegal={handleIllegal}
+                onPass={handlePass}
+                onGhostChange={setGhost}
+                scoring={boardScoring}
+                onToggleGroup={sc.toggle}
                 seating={faceToFace ? 'face' : 'side'}
-                premove={premove.premove}
-                onPremove={premove.onPremove}
-                highlights={highlights}
-                onMove={handleMove}
-                announce={!isStart}
-                cellSize={cellSize}
+                farColor={faceToFace ? far : null}
+                announce={false}
+                boardSize={boardSize}
               />
-              {!isStart && !landscape && <div className="absolute inset-x-0 top-full mt-1 px-1">{strip(orientation, false, 'row')}</div>}
+              {!isStart && !landscape && <div className="absolute inset-x-0 top-full mt-1 px-1">{strip(near, false, 'row')}</div>}
             </div>
           </BoardPreview>
         </main>
@@ -752,7 +571,7 @@ export default function Index() {
                 )}
               >
                 {/* Face to face, the far player's strip and clock are drawn rotated here too (DESIGN 5.2). */}
-                {strip(farColor, faceToFace, 'rail')}
+                {strip(far, faceToFace, 'rail')}
                 <div
                   aria-hidden={chromeVisible ? undefined : true}
                   className={cn(
@@ -762,7 +581,7 @@ export default function Index() {
                 >
                   {info}
                 </div>
-                {strip(orientation, false, 'rail')}
+                {strip(near, false, 'rail')}
               </div>
             ) : (
               info
@@ -776,27 +595,24 @@ export default function Index() {
               onHelp={forceShowTutorial}
               onHelpHold={flags.donationPrompt ? () => triggerDonation() : undefined}
               canUndo={phase === 'review' ? gs.canStepBack : gs.canUndo}
-              undoPending={roomMode && rs?.requests.outgoing === 'takeback'}
               canRedo={phase === 'review' ? gs.canStepForward : gs.canRedo}
               onUndo={phase === 'review' ? () => gs.step(-1) : () => void gs.undo()}
               onRedo={phase === 'review' ? () => gs.step(1) : () => void gs.redo()}
               onUndoHold={gs.toStart}
               onRedoHold={gs.toEnd}
-              hint={hintControls}
               helpers={helpers}
               onToggleHelpers={toggleHelpers}
               seating={mode === 'local' ? seating : undefined}
               onToggleSeating={mode === 'local' ? toggleSeating : undefined}
               onFlip={() => setFlipped((f) => !f)}
-              onOfferDraw={mode === 'computer' ? handleOfferDraw : roomMode ? handleRoomDraw : undefined}
+              onPass={handlePass}
               onResign={handleResign}
-              flagDisabled={!!end || (roomMode && !roomResignable(rs))}
-              flagPending={roomMode && rs?.requests.outgoing === 'draw'}
-              onRematch={roomOver ? () => setOverlay(true) : undefined}
-              rematchPending={rematchPending}
-              onContinue={canContinue ? handleContinue : undefined}
-              onShare={roomMode && phase !== 'review' ? () => setInviteOpen(true) : handleShare}
-              onCopyPgn={handleCopyPgn}
+              opponentPassed={!!view && flagLive && opponentPassed(view)}
+              flagDisabled={!flagLive}
+              onContinue={phase === 'review' ? handleContinue : undefined}
+              onShare={handleShare}
+              onCopySgf={handleCopySgf}
+              scoringBar={scoringBar}
             />
           </>
         )}
@@ -804,63 +620,40 @@ export default function Index() {
         {session && end && (
           <GameOverOverlay
             open={overlay && !resigned}
-            end={end}
+            result={end.result}
             mode={session.mode}
             myColor={session.color}
             code={session.code}
+            size={session.game.settings.size}
             level={session.level}
             plies={session.game.cursor}
             durationMs={totalTime(session.game, session.tc)}
+            score={finalScore}
             onShare={handleShare}
-            onCopyPgn={handleCopyPgn}
+            onCopySgf={handleCopySgf}
             onPrimary={handleNewGame}
-            primaryBusy={rematchPending}
-            primaryDisabled={rematchBlocked}
-            primaryNote={rematchPending ? t('room.pending.waiting') : rematchBlocked && rs?.presence !== 'connected' ? t('room.presence.waiting') : undefined}
             onDismiss={() => setOverlay(false)}
           />
         )}
 
-        {room && (
-          <>
-            <RoomToasts
-              room={room.code}
-              onNotice={room.onNotice}
-              requests={rs?.requests}
-              onReply={room.reply}
-              manualCause={room.manualCause}
-              live={roomLive}
-              quiet={failureQuiet}
-              onConnectManually={connectManually}
-              onUpdateCheck={() => void checkForUpdate()}
-            />
-            <InviteSheet
-              open={inviteShown}
-              onOpenChange={setInviteOpen}
-              code={room.code}
-              presence={rs?.presence ?? null}
-              manualCause={room.manualCause}
-              onConnectManually={connectManually}
-            />
-            {manual && (
-              <ManualConnectSheet
-                open={manualShown}
-                onOpenChange={onManualOpenChange}
-                manual={manual}
-                onAcceptAnswer={room.acceptAnswer}
-                onStartOver={room.restartManual}
-              />
-            )}
-            <RoomBanner tab={room.tab} phase={rs?.phase} waiting={waitsAsAnchor(rs)} onTakeOver={room.takeOver} />
-          </>
-        )}
-
-        {session && !roomMode && (
+        {session && (
           <ResignUndoToast
             open={!!resigned && !!end}
             who={resigned ?? 'you'}
             onUndo={handleUndoResign}
             onExpire={() => setResigned(null)}
+            placement={landscape ? 'rail' : 'game'}
+          />
+        )}
+
+        {session && passToast && (
+          <PassUndoToast
+            key={passToast.key}
+            open={!resigned && gs.canUndoPass && session.game.cursor === passToast.cursor}
+            who={passToast.who}
+            onUndo={handleUndoPass}
+            onExpire={() => setPassToast(null)}
+            placement={landscape ? 'rail' : 'game'}
           />
         )}
 
@@ -871,17 +664,22 @@ export default function Index() {
           landscape={landscape}
           code={gs.code}
           onCodeChange={(code) => void gs.setCode(code)}
-          opponent={shownOpponent}
+          opponent={gs.opponent}
           onOpponentChange={gs.setOpponent}
-          color={shownColor}
+          color={gs.colorChoice}
           onColorChange={gs.setColorChoice}
-          clock={shownClock}
+          size={gs.size}
+          onSizeChange={gs.setSize}
+          rules={gs.rules}
+          onRulesChange={gs.setRules}
+          handicap={gs.handicap}
+          onHandicapChange={gs.setHandicap}
+          clock={startClock}
           onClockChange={(tc) => gs.setTc(formatTc(tc))}
-          onClockLongPress={openDial}
-          settingsLocked={!!pillSaved}
+          saved={pillSaved}
           busy={animating}
           showChevron={saved.games.length > 0}
-          engineStatus={<EngineStatus state={engineOffline.state} onDownload={engineOffline.download} />}
+          engineStatus={<EngineStatus line={engineOffline.line} onDownload={engineOffline.download} />}
           footerExtra={canInstall ? <InstallButton onClick={() => void install()} /> : undefined}
           onVersionTap={() => void checkForUpdate()}
         />
@@ -906,7 +704,6 @@ export default function Index() {
               onOpen={handleOpen}
               onDelete={(g) => void saved.remove(g.id)}
               onRestore={(g) => saved.restore(g)}
-              renderThumbnail={renderThumbnail}
               isVisible={scrolled}
             />
             <div
@@ -925,30 +722,16 @@ export default function Index() {
         {shouldShowPrompt && isStart && <PWAInstallPrompt onInstall={() => void install()} onDismiss={dismissInstall} />}
 
         {showTutorial && session && !isStart && (
-          <TutorialOverlay onDismiss={completeTutorial} mode={session.mode} isLandscape={landscape} />
+          <TutorialOverlay onDismiss={completeTutorial} mode={session.mode} size={session.game.settings.size} isLandscape={landscape} />
         )}
 
-        {dial && isStart && (
-          <ClockDial
-            x={dial.x}
-            y={dial.y}
-            dragging={dial.dragging}
-            value={shownClock}
-            onPick={(tc) => {
-              gs.setTc(tc);
-              setDial(null);
-            }}
-            onCancel={() => setDial(null)}
-          />
-        )}
-
-        {/* Screen-reader notes of the hint and the blunder guard (the guard shows no text, DESIGN 7.2). */}
-        <div aria-live="polite" aria-atomic className="sr-only" data-testid="assist-live">
-          {assistNote}
+        {/* Moves, passes, captures and atari for screen readers (DESIGN 14.1). */}
+        <div aria-live="polite" aria-atomic className="sr-only" data-testid="board-live">
+          {liveText}
         </div>
 
         <DonationPrompt open={showDonation} onDismiss={dismissDonation} />
       </div>
-    </PieceRenderProvider>
+    </>
   );
 }

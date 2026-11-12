@@ -7,10 +7,6 @@
  *
  * This file holds types and a handful of `as const` values only. No logic.
  *
- * Transition (package 0b): the chess contracts copied from Zhess live in `./chessTypes.ts` until
- * milestone 1 deletes the chess modules. Shapes that Go does not change (rooms, presence, seating,
- * language, `Now`, `Rng`, …) are defined identically in both files, so either import works.
- *
  * Conventions used throughout:
  * - A `Point` is two SGF letters, column then row from the top (`aa` = top-left); `tt` = pass.
  * - Board arrays (`Game.board`, ownership maps) are row-major from the top: index = row × size + col,
@@ -377,7 +373,7 @@ export interface SavedGame {
   lastPlayedAt: number;
 }
 
-/** A stored room record and its seat lock (as Zhess). */
+/** A stored room record and its seat lock. */
 export interface Room {
   /** Room code, e.g. `K7QW2M`. */
   code: string;
@@ -387,7 +383,7 @@ export interface Room {
   createdAt: number;
   /** Last successful sync. */
   lastSeenAt: number;
-  /** Points per seat, in half points ×2 (as Zhess: a win adds 2). */
+  /** Points per seat, in half points ×2 (a win adds 2). */
   score: [number, number];
   /** Ids of this room's games (`SavedGame.id`), oldest first. */
   games: string[];
@@ -450,7 +446,7 @@ export type Language = 'en' | 'de' | 'fr' | 'es';
 
 /**
  * Live record of one game in a room (DESIGN 9.2).
- * Additions as in Zhess (a device restored by `grant` must learn each game's colors and settings,
+ * Additions (a device restored by `grant` must learn each game's colors and settings,
  * which the design's shape does not carry): `black`, `tc`, `size`, `rules`, `handicap`.
  */
 export interface GameLog {
@@ -503,7 +499,7 @@ export interface GrantMsg { t: 'grant'; v: ProtocolVersion; key: string; seat: S
 /** Rejoin declined. */
 export interface DenyMsg { t: 'deny'; v: ProtocolVersion }
 /**
- * Reconcile summary of the current game (as Zhess). `hash` covers the plies and the scoring state.
+ * Reconcile summary of the current game. `hash` covers the plies and the scoring state.
  * `turnMs`: the ms the sender has already used on its own running turn, reported after a pause.
  */
 export interface HeadMsg { t: 'head'; v: ProtocolVersion; n: number; epoch: number; len: number; hash: string; ended: boolean; turnMs?: number }
@@ -519,7 +515,7 @@ export interface MarkMsg { t: 'mark'; v: ProtocolVersion; n: number; epoch: numb
 export interface AcceptMsg { t: 'accept'; v: ProtocolVersion; n: number; rev: number }
 /** Leave scoring and play on. */
 export interface ResumeMsg { t: 'resume'; v: ProtocolVersion; n: number; epoch: number }
-/** A request (`n`, `epoch`, `len` let the receiver drop a stale one, as Zhess). */
+/** A request (`n`, `epoch`, `len` let the receiver drop a stale one). */
 export interface AskMsg { t: 'ask'; v: ProtocolVersion; kind: RequestKind; n: number; epoch: number; len: number }
 /** Answer to `ask`, echoing its context. */
 export interface ReplyMsg { t: 'reply'; v: ProtocolVersion; kind: RequestKind; ok: boolean; n: number; epoch: number; len: number }
@@ -612,7 +608,7 @@ export interface RoomNotice {
   readonly request?: RequestKind;
 }
 
-/** Everything the room UI renders. Produced by `RoomController` (Zhess's shape, Go types). */
+/** Everything the room UI renders. Produced by `RoomController`. */
 export interface RoomSnapshot {
   readonly code: string;
   readonly presence: Presence;
@@ -639,7 +635,7 @@ export interface RoomSnapshot {
   readonly locked: LockReason | null;
   /** Plies played here but not yet acknowledged by the opponent. */
   readonly unsent: number;
-  /** Running-turn clock: as Zhess. Stopped during scoring. */
+  /** Running-turn clock. Stopped during scoring. */
   readonly clock: { readonly paused: boolean; readonly turnStart: number | null; readonly turnUsed: number };
   /** The latest notice, if any. */
   readonly notice: RoomNotice | null;
@@ -647,7 +643,7 @@ export interface RoomSnapshot {
   readonly failure: TransportFailure | null;
 }
 
-/** `lib/room.ts` — Zhess's RoomController, extended for Go (PLAN 4). */
+/** `lib/room.ts` — the room controller, with Go's pass, marking, Accept and Resume (PLAN 4). */
 export interface RoomController {
   readonly snapshot: RoomSnapshot;
   subscribe(cb: (s: RoomSnapshot) => void): () => void;

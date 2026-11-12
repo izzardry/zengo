@@ -1,7 +1,7 @@
 /** The i18n provider component (index.ts re-exports it with the rest of the i18n API). */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { store as defaultStore } from '../storage';
-import type { Language, Store } from '../chessTypes';
+import type { Language, Store } from '../types';
 import { I18nContext, type I18nContextValue } from './context';
 import { getInitialLanguage, translate, type TranslationKey, type TranslationVars } from './core';
 

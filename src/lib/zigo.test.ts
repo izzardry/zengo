@@ -705,7 +705,7 @@ describe('time controls', () => {
   });
 });
 
-describe('clocks (DESIGN 11, Fischer as Zhess)', () => {
+describe('clocks (DESIGN 11, Fischer)', () => {
   const tc = parseTc('5+7');
 
   it('subtracts ms and adds the increment; each side’s first move is untimed', () => {

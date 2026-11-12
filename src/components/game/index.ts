@@ -20,6 +20,7 @@ export {
   type UndoToastProps,
   type ResignUndoToastProps,
   type PassUndoToastProps,
+  type ToastPlacement,
 } from './ResignUndoToast';
 export { useShare, type ShareApi, type ShareKind } from './useShare';
 export { shareOrCopy, copyText, type ShareOutcome, type ShareNavigator } from './share';

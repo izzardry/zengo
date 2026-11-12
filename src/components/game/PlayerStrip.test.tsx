@@ -166,8 +166,8 @@ describe('PlayerStrip', () => {
 
   it('is translated', () => {
     renderWithI18n(<PlayerStrip {...props({ prisoners: 2, clock: { text: '1:00' }, passed: true })} />, 'fr');
-    expect(screen.getByRole('img', { name: 'Prisonniers des Blancs : 2' })).toBeInTheDocument();
-    expect(screen.getByRole('timer', { name: 'Pendule Blancs' })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'Prisonniers de Blanc : 2' })).toBeInTheDocument();
+    expect(screen.getByRole('timer', { name: 'Pendule de Blanc' })).toBeInTheDocument();
     expect(part('passed')).toHaveTextContent('passé');
   });
 });
