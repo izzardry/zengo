@@ -1,4 +1,4 @@
-/** Strings owned by package "assist" (see PLAN.md): 2A's engine.* and 2C's assist.* keys. EN is the source of truth; DE du, FR vous, ES tú. */
+/** Strings owned by package "assist" (see PLAN.md): 2A's engine.* and 2C's assist.* keys. EN is the source of truth; DE du, FR vous, ES tú. Score leads keep Go notation ({points} as 3.5). */
 import { defineTable } from './define';
 
 export default defineTable({
@@ -24,6 +24,9 @@ export default defineTable({
     'assist.hintBusy': 'Looking for a hint',
     'assist.previewNeedsEngine': 'The computer is still downloading',
     'assist.blunderRefused': 'That move looks like a blunder. Play it again to confirm.',
+    'assist.hintPass': 'The computer would pass here',
+    'assist.previewLead.B': 'Territory preview: Black leads by {points}',
+    'assist.previewLead.W': 'Territory preview: White leads by {points}',
   },
   de: {
     'engine.loading': 'Computer wird geladen',
@@ -44,6 +47,9 @@ export default defineTable({
     'assist.hintBusy': 'Tipp wird gesucht',
     'assist.previewNeedsEngine': 'Der Computer wird noch geladen',
     'assist.blunderRefused': 'Dieser Zug sieht nach einem groben Fehler aus. Spiel ihn nochmal, um ihn zu bestätigen.',
+    'assist.hintPass': 'Der Computer würde hier passen',
+    'assist.previewLead.B': 'Gebietsvorschau: Schwarz führt mit {points}',
+    'assist.previewLead.W': 'Gebietsvorschau: Weiß führt mit {points}',
   },
   fr: {
     'engine.loading': 'Chargement de l’ordinateur',
@@ -65,6 +71,9 @@ export default defineTable({
     'assist.hintBusy': 'Recherche d’un indice',
     'assist.previewNeedsEngine': 'L’ordinateur est encore en cours de téléchargement',
     'assist.blunderRefused': 'Ce coup ressemble à une gaffe. Rejouez-le pour confirmer.',
+    'assist.hintPass': 'L’ordinateur passerait ici',
+    'assist.previewLead.B': 'Aperçu du territoire : Noir mène de {points}',
+    'assist.previewLead.W': 'Aperçu du territoire : Blanc mène de {points}',
   },
   es: {
     'engine.loading': 'Cargando el ordenador',
@@ -85,5 +94,8 @@ export default defineTable({
     'assist.hintBusy': 'Buscando una pista',
     'assist.previewNeedsEngine': 'El ordenador todavía se está descargando',
     'assist.blunderRefused': 'Esa jugada parece un error grave. Juégala otra vez para confirmar.',
+    'assist.hintPass': 'El ordenador pasaría aquí',
+    'assist.previewLead.B': 'Vista del territorio: Negro gana por {points}',
+    'assist.previewLead.W': 'Vista del territorio: Blanco gana por {points}',
   },
 });
