@@ -12,12 +12,28 @@ test("start page shows the wordmark and tagline", async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
-test("engine files are served next to each other", async ({ request }) => {
-  const js = await request.get("engine/stockfish-19-lite-single.js");
-  expect(js.ok()).toBe(true);
-  const wasm = await request.get("engine/stockfish-19-lite-single.wasm");
-  expect(wasm.ok()).toBe(true);
-  expect(wasm.headers()["content-type"]).toContain("application/wasm");
+test("engine files are served as shipped: networks as gzip bytes, TF.js backends as wasm", async ({ request }) => {
+  // The 6-block network (stage 1). Served as plain gzip bytes without Content-Encoding, as GitHub
+  // Pages does, so the worker inflates it itself (BUILD-LOG 0a).
+  const small = await request.get("engine/nets/g170-b6c96-s175395328-d26788732.bin.gz");
+  expect(small.ok()).toBe(true);
+  expect(small.headers()["content-type"]).toContain("application/gzip");
+  expect(small.headers()["content-encoding"]).toBeUndefined();
+  const bytes = await small.body();
+  expect(bytes.length).toBe(3_827_339);
+  expect([bytes[0], bytes[1]]).toEqual([0x1f, 0x8b]);
+
+  // The 10-block network (stage 2): only the headers.
+  const large = await request.head("engine/nets/g170e-b10c128-s1141046784-d204142634.bin.gz");
+  expect(large.ok()).toBe(true);
+  expect(large.headers()["content-type"]).toContain("application/gzip");
+  expect(large.headers()["content-encoding"]).toBeUndefined();
+
+  for (const file of ["tfjs-backend-wasm.wasm", "tfjs-backend-wasm-simd.wasm", "tfjs-backend-wasm-threaded-simd.wasm"]) {
+    const wasm = await request.get(`engine/tfjs/${file}`);
+    expect(wasm.ok(), file).toBe(true);
+    expect(wasm.headers()["content-type"], file).toContain("application/wasm");
+  }
 });
 
 test("unknown routes show the not-found page", async ({ page }) => {
