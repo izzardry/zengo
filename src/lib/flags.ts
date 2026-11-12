@@ -7,13 +7,11 @@
  * a flagged feature checks the flag and hides the feature cleanly when it is off.
  */
 const defaults = {
-  /** Milestone 2: the computer opponent (Stockfish in a worker). */
+  /** Milestone 2: the computer opponent (KataGo networks in a worker). */
   computer: true,
-  /** Milestone 2: the chess clock. */
+  /** Milestone 2: the game clock (Fischer and byo-yomi). */
   clock: true,
-  /** Milestone 2: premoves while the opponent is thinking. */
-  premove: true,
-  /** Milestone 2: the hint bulb (tap: best move, hold: threat peek). */
+  /** Milestone 2: the hint bulb (tap: best point, hold: territory preview). */
   hint: true,
   /** Milestone 2: the blunder guard inside the helpers shield. */
   blunderGuard: true,
@@ -35,3 +33,11 @@ export type FeatureFlag = keyof typeof defaults;
 
 /** Typed as plain booleans so code can test a flag either way without literal-type errors. */
 export const flags: Readonly<Record<FeatureFlag, boolean>> = defaults;
+
+/**
+ * Milestone switch, not a failure flag: the computer engine exists from milestone 2 on (package 2A
+ * sets this to `true`). While it is `false`, nothing engine-related runs: `useEngineOffline`
+ * downloads nothing and reports `unsupported`, and `EngineStatus` renders nothing. Typed as a
+ * plain boolean so code can test it either way.
+ */
+export const COMPUTER_ENABLED: boolean = false;

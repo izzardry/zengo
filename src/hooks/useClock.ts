@@ -1,22 +1,23 @@
 /**
- * The running chess clock (DESIGN 11, 9.8) and the premove queue (DESIGN 6.3) as React hooks.
+ * The running game clock (DESIGN 11, 9.7) as a React hook.
  *
  * `useClock` times the running turn with monotonic stamps (`performance.now()`), never by counting
- * ticks, and derives both clocks from the move log (`lib/clock.ts`). A ~100 ms display tick runs
- * only while the turn is timed. In solo modes the turn pauses while the tab is hidden and while
- * the caller says `paused` (Back / leave), and resumes on return. Undo / redo restore the clocks
- * by themselves: the log is the truth and a new position starts a new turn.
+ * ticks, and derives both clocks from the move log (`lib/clock.ts`: Fischer or byo-yomi). A ~100 ms
+ * display tick runs only while the turn is timed. In solo modes the turn pauses while the tab is
+ * hidden and while the caller says `paused` (Back / leave), and resumes on return. Clocks stop
+ * during scoring and after the end. Undo / redo restore the clocks by themselves: the log is the
+ * truth and a new position starts a new turn.
  *
- * The page passes `clock.elapsed()` as the `ms` of each move (`useGameState.move(uci, ms)`), and
- * `onFlag` ends the game (`useGameState.timeout(color)`); it fires once per turn.
- *
- * `usePremove` wires the pure premove machine of `lib/premove.ts` to the board's `premove` /
- * `onPremove` props and plays the queued move when the opponent has moved.
+ * The page passes `clock.elapsed()` as the `ms` of each stone or pass, and `onFlag` ends the game on
+ * time; it fires once per turn.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   clockView,
+  initialFace,
+  positionKey,
   remaining,
+  tcKey as keyOfTc,
   tickInterval,
   timerElapsed,
   timerReset,
@@ -25,23 +26,9 @@ import {
   type ClockView,
   type TurnTimer,
 } from '@/lib/clock';
-import {
-  NO_PREMOVE,
-  cancel as cancelPremove,
-  premoveAllowed,
-  queue,
-  settle,
-  type PremoveState,
-  type QueuedMove,
-} from '@/lib/premove';
-import type { Color, Game, Mode, Now, TcString, TimeControl, Uci } from '@/lib/chessTypes';
-import { formatClock, formatElapsed } from '@/lib/timeUtils';
+import type { Color, Game, Now, TcString, TimeControl } from '@/lib/types';
 
-/* ---------------------------------------------------------------------------------------------- */
-/* useClock                                                                                        */
-/* ---------------------------------------------------------------------------------------------- */
-
-/** A running turn measured elsewhere (room controller, DESIGN 9.8): `RoomSnapshot.clock`. */
+/** A running turn measured elsewhere (room controller, DESIGN 9.7): `RoomSnapshot.clock`. */
 export interface ExternalTurn {
   /** `now()` stamp at which the side to move's turn (re)started; null while paused. */
   readonly turnStart: number | null;
@@ -53,6 +40,7 @@ export interface UseClockOptions {
   /**
    * The game is on screen and playable: phase `playing`, not review, not the start screen.
    * Default true. False pauses the turn (it resumes, with the time already spent, on return).
+   * Scoring and the end pause it anyway.
    */
   readonly active?: boolean;
   /** Explicit pause, e.g. while the player has left the game with Back. Default false. */
@@ -66,7 +54,7 @@ export interface UseClockOptions {
   /** The side to move ran out of time. Fires once per turn, only while the turn is timed. */
   readonly onFlag?: (color: Color) => void;
   /**
-   * Room (DESIGN 9.8): this device's color. The opponent's flag is only reported once their clock
+   * Room (DESIGN 9.7): this device's color. The opponent's flag is only reported once their clock
    * has read zero for `opponentGraceMs` (default 2000); this device's own flag fires at zero.
    * Leave unset in solo modes (both flags fire at zero).
    */
@@ -83,7 +71,7 @@ export interface UseClockOptions {
   readonly tickMs?: number;
 }
 
-export interface ClockState extends ClockView {
+export interface GameClock extends ClockView {
   /**
    * Ms the side to move has spent on the running turn, read now. Pass it as the `ms` of the move
    * being made (player or computer). Works with the clock off too (time used is always recorded).
@@ -103,24 +91,22 @@ function defaultNow(): number {
   return typeof performance !== 'undefined' ? performance.now() : Date.now();
 }
 
-/** Identity of a turn: a new position (move, undo, redo, takeback) or another session starts a new one. */
+/** Identity of a turn: a new position (move, pass, undo, redo, takeback) or another session starts a new one. */
 function turnKeyOf(game: Game | null, key: string | null | undefined): string {
-  return game ? `${key ?? ''}|${game.cursor}|${game.fen}` : `${key ?? ''}|-`;
+  return game ? `${key ?? ''}|${positionKey(game)}` : `${key ?? ''}|-`;
 }
 
 /** Faces for "no game": the base time (timed) or nothing used. */
 function emptyView(tc: TimeControl): ClockView {
-  const face = tc
-    ? { text: formatClock(tc.baseMs), running: false, low: false, flagged: false, untimed: false, ms: tc.baseMs }
-    : { text: formatElapsed(0), running: false, low: false, flagged: false, untimed: true, ms: 0 };
-  return { w: face, b: face, timed: !!tc, counting: false, flagged: null };
+  const face = initialFace(tc);
+  return { B: face, W: face, timed: !!tc, counting: false, flagged: null };
 }
 
 /**
- * Chess clock for `game` under `tc` (object, `5+0` string or null = clock off).
+ * Game clock for `game` under `tc` (object, `5+7` / `20m5x30` string or null = clock off).
  * Returns both faces (ready for `PlayerStrip`'s `clock` prop), the flag, and `elapsed()`.
  */
-export function useClock(game: Game | null, tcIn: TimeControl | TcString | null, opts: UseClockOptions = {}): ClockState {
+export function useClock(game: Game | null, tcIn: TimeControl | TcString | null, opts: UseClockOptions = {}): GameClock {
   const {
     active = true,
     paused = false,
@@ -132,7 +118,7 @@ export function useClock(game: Game | null, tcIn: TimeControl | TcString | null,
     external = null,
     initialTurnMs = 0,
   } = opts;
-  const tcKey = typeof tcIn === 'string' ? tcIn : tcIn ? `${tcIn.baseMs}+${tcIn.incMs}` : null;
+  const tcKey = keyOfTc(tcIn);
   // Normalized once per distinct value so effects do not re-run on a new object each render.
   const tcRef = useRef<{ key: string | null; tc: TimeControl }>({ key: null, tc: null });
   if (tcRef.current.key !== tcKey) tcRef.current = { key: tcKey, tc: toTimeControl(tcIn) };
@@ -146,7 +132,7 @@ export function useClock(game: Game | null, tcIn: TimeControl | TcString | null,
   const [hidden, setHidden] = useState(documentHidden);
   const [, setTick] = useState(0);
 
-  const live = active && !!game && !game.end;
+  const live = active && !!game && !game.end && !game.scoring;
   const running = live && !paused && !(pauseWhenHidden && hidden);
 
   /* ---- own turn timer (solo modes) ---- */
@@ -224,81 +210,4 @@ export function useClock(game: Game | null, tcIn: TimeControl | TcString | null,
   }, [flagNow, turnKey]);
 
   return { ...view, ticking, turnMs, elapsed };
-}
-
-/* ---------------------------------------------------------------------------------------------- */
-/* usePremove                                                                                      */
-/* ---------------------------------------------------------------------------------------------- */
-
-export interface UsePremoveOptions {
-  /** The color this device plays. */
-  readonly player: Color;
-  readonly mode: Mode;
-  readonly tc: TimeControl | TcString | null;
-  /** False in review, on the start screen, while a room is locked. Default true. */
-  readonly live?: boolean;
-  /** Session identity; a change drops the premove. */
-  readonly key?: string | null;
-  /**
-   * Play the premove now: canonical UCI, legal for `player`. Call `useGameState.move` (or the
-   * room's) directly with `clock.elapsed()`; premoves bypass the blunder guard (DESIGN 6.3).
-   */
-  readonly onFire: (uci: Uci) => void;
-}
-
-export interface PremoveControls {
-  /** The queued move for the board's `premove` prop. */
-  readonly premove: QueuedMove | null;
-  /** For the board's `onPremove` prop; undefined when premoves are not allowed (turns them off). */
-  readonly onPremove: ((pm: QueuedMove | null) => void) | undefined;
-  /** Drop the queued move (e.g. on Escape or when leaving the game). */
-  cancel(): void;
-  /** Premoves are possible in this game (DESIGN 6.3). */
-  readonly allowed: boolean;
-}
-
-/** Premove queue for `game`: hands the board its props and fires the move when the opponent has moved. */
-export function usePremove(game: Game | null, opts: UsePremoveOptions): PremoveControls {
-  const { player, mode, tc, live = true, key = null } = opts;
-  const allowed = premoveAllowed({ mode, tc, live }) && !!game && !game.end;
-  const [state, setState] = useState<PremoveState>(NO_PREMOVE);
-  const stateRef = useRef(state);
-  const onFireRef = useRef(opts.onFire);
-  onFireRef.current = opts.onFire;
-  const gameRef = useRef(game);
-  gameRef.current = game;
-
-  const set = useCallback((s: PremoveState) => {
-    stateRef.current = s;
-    setState(s);
-  }, []);
-
-  useEffect(() => {
-    const cur = stateRef.current;
-    if (!cur.move) return;
-    if (!allowed || !game) {
-      set(NO_PREMOVE);
-      return;
-    }
-    const r = settle(cur, game, player, key);
-    if (r.state !== cur) set(r.state);
-    if (r.fire) onFireRef.current(r.fire);
-  }, [game, player, key, allowed, set]);
-
-  const onPremove = useCallback(
-    (pm: QueuedMove | null) => {
-      const g = gameRef.current;
-      if (!pm || !g) {
-        set(cancelPremove());
-        return;
-      }
-      const next = queue(stateRef.current, g, player, pm, key);
-      if (next !== stateRef.current) set(next);
-    },
-    [player, key, set],
-  );
-
-  const cancel = useCallback(() => set(cancelPremove()), [set]);
-
-  return { premove: allowed ? state.move : null, onPremove: allowed ? onPremove : undefined, cancel, allowed };
 }

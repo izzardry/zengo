@@ -6,7 +6,7 @@
 export const LOW_TIME_MS = 10_000;
 
 /**
- * A chess clock reading: `m:ss` (minutes are not wrapped into hours, e.g. `90:00`), and
+ * A clock reading: `m:ss` (minutes are not wrapped into hours, e.g. `90:00`), and
  * `s.t` with tenths below 10 seconds. Rounds down, so a clock never shows more than is left.
  * Zero and negative values show `0.0`.
  */

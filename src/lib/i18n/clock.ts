@@ -14,6 +14,9 @@ export default defineTable({
     'clock.incrementNone': 'No increment',
     'clock.incrementOne': 'Plus 1 second per move',
     'clock.increment': 'Plus {n} seconds per move',
+    // Spoken byo-yomi reading for role="timer" (DESIGN 14.1); package 2B wires it.
+    'clock.spokenPeriods': '{seconds} seconds, {periods} periods',
+    'clock.spokenLastPeriod': '{seconds} seconds, last period',
   },
   de: {
     'clock.dialMinutesTitle': 'Eigene Bedenkzeit: Minuten',
@@ -27,6 +30,8 @@ export default defineTable({
     'clock.incrementNone': 'Keine Zugabe',
     'clock.incrementOne': 'Plus 1 Sekunde pro Zug',
     'clock.increment': 'Plus {n} Sekunden pro Zug',
+    'clock.spokenPeriods': '{seconds} Sekunden, {periods} Perioden',
+    'clock.spokenLastPeriod': '{seconds} Sekunden, letzte Periode',
   },
   fr: {
     'clock.dialMinutesTitle': 'Cadence personnalisée : minutes',
@@ -40,6 +45,8 @@ export default defineTable({
     'clock.incrementNone': 'Sans incrément',
     'clock.incrementOne': 'Plus 1 seconde par coup',
     'clock.increment': 'Plus {n} secondes par coup',
+    'clock.spokenPeriods': '{seconds} secondes, {periods} périodes',
+    'clock.spokenLastPeriod': '{seconds} secondes, dernière période',
   },
   es: {
     'clock.dialMinutesTitle': 'Ritmo personalizado: minutos',
@@ -53,5 +60,7 @@ export default defineTable({
     'clock.incrementNone': 'Sin incremento',
     'clock.incrementOne': 'Más 1 segundo por jugada',
     'clock.increment': 'Más {n} segundos por jugada',
+    'clock.spokenPeriods': '{seconds} segundos, {periods} periodos',
+    'clock.spokenLastPeriod': '{seconds} segundos, último periodo',
   },
 });

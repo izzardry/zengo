@@ -1,99 +1,145 @@
 /**
- * FakeEngine: a deterministic `EngineApi` (plus the hook's `EngineHandle` extras) for tests.
+ * FakeEngine: a deterministic Go `EngineApi` (plus the `EngineHandle` extras) for tests.
  *
- * - `load()`: idle → loading (progress 0, then 0.5) → ready (1), after `loadMs` (0 = microtasks).
- *   With `loadResult: 'fail'` it ends in `failed` and rejects; a later `load()` tries again
- *   (call `setLoadResult('ready')` first to let it succeed).
- * - Searches load lazily like the real engine and take `delayMs` (0 = microtasks only).
- * - `bestMove`: the scripted move for the FEN (`moves`), else the first legal move in chess.js order.
- * - `evaluate`: the scripted eval (`evals`; `null` there simulates no answer), else `materialEval`.
+ * - `load(1)`: idle → loading (progress 0, then 0.5) → ready (1) after `loadMs` (0 = microtasks);
+ *   then `nets.small` is true and `backend` is set (`wasm` unless `backend` is given). `load(2)`
+ *   loads stage 1 first, then sets `nets.large`. With `loadResult: 'fail'` loading ends in `failed`
+ *   and rejects; a later `load()` tries again (call `setLoadResult('ready')` first).
+ * - Searches load stage 1 lazily, as the real engine does, and take `delayMs` (0 = microtasks only).
+ * - `genmove`: the scripted move (`moves`), else the first legal point (row-major from the top)
+ *   that does not fill one of the mover's own one-point eyes, else `tt` (pass).
+ * - `evaluate`: the scripted evaluation (`evals`; `null` there simulates no answer), else neutral:
+ *   win rate 0.5, score lead 0, ownership all 0, policy uniform over the legal points and pass.
  *   Resolves null when `delayMs > timeoutMs`, after `timeoutMs`.
- * - `multiPv`: every legal move scored one ply deep (scripted eval of the position after it,
- *   negated, else the material eval), best first, the first `n`.
- * - `stop()`: pending `bestMove` / `multiPv` reject with an `AbortError`, pending `evaluate` resolve null.
+ * - `analyze`: the scripted list (`analysis`), else the first `n` points `genmove` would consider,
+ *   each with win rate 0.5 and score lead 0.
+ * - `stop()`: pending `genmove` / `analyze` reject with an `AbortError`; pending `evaluate` resolve null.
  * - `calls` records every call; `stops` counts `stop()` calls.
  *
- * Scripted maps are keyed by FEN; a key matches the full FEN or its first four fields
- * (placement, side, castling, en passant).
+ * Scripted records are keyed by `movesKey(pos)`: the plies applied so far joined (`ddeett…`, `''`
+ * at the start). The function forms receive the whole position.
  */
-import { Chess, type Square as ChessSquare } from 'chess.js';
-import type { EngineState, Eval, Uci } from '../chessTypes';
-import { negateEval, scoreCp } from './uci.ts';
-import { EngineAbortError, EngineUnavailableError, type EngineHandle, type EngineSnapshot } from './driver.ts';
+import type { ClockInfo, Color, EngineApi, EngineState, Game, Point, Position } from '../types';
+import { PASS, indexToPoint, isLegal, isPass, newGame, play, pointToIndex, resume } from '../zigo';
+import { EngineAbortError, EngineUnavailableError, type EngineHandle, type EngineSnapshot } from './handle';
 
-export type FakeMoves = Readonly<Record<string, Uci>> | ((fen: string, level: number) => Uci | undefined);
-export type FakeEvals = Readonly<Record<string, Eval | null>> | ((fen: string, depth: number) => Eval | null | undefined);
+export type GenmoveResult = Point | 'resign';
+
+/** What `evaluate` resolves with. */
+export interface EvaluateResult {
+  readonly winrate: number;
+  readonly scoreLead: number;
+  readonly ownership: Float32Array;
+  readonly policy: Float32Array;
+}
+
+/** A scripted evaluation; missing arrays are filled with the neutral ones. */
+export type FakeEval = { readonly winrate: number; readonly scoreLead: number; readonly ownership?: Float32Array; readonly policy?: Float32Array };
+
+/** One candidate of `analyze`. */
+export interface Candidate {
+  readonly move: Point;
+  readonly winrate: number;
+  readonly scoreLead: number;
+}
+
+export type EvaluateOptions = Parameters<EngineApi['evaluate']>[1];
+
+export type FakeMoves = Readonly<Record<string, GenmoveResult>> | ((pos: Position, level: number) => GenmoveResult | undefined);
+export type FakeEvals = Readonly<Record<string, FakeEval | null>> | ((pos: Position, opts: EvaluateOptions) => FakeEval | null | undefined);
+export type FakeAnalysis = (pos: Position, n: number) => Candidate[] | undefined;
 
 export interface FakeEngineOptions {
   loadResult?: 'ready' | 'fail';
   loadMs?: number;
   delayMs?: number;
+  /** Backend reported after loading. Default `wasm`. */
+  backend?: 'webgpu' | 'wasm';
   moves?: FakeMoves;
   evals?: FakeEvals;
+  analysis?: FakeAnalysis;
 }
 
 export type FakeCall =
-  | { method: 'load'; args: [] }
-  | { method: 'bestMove'; args: [fen: string, level: number, clock?: { wMs: number; bMs: number; incMs: number }] }
-  | { method: 'evaluate'; args: [fen: string, depth: number, timeoutMs?: number] }
-  | { method: 'multiPv'; args: [fen: string, n: number, depth: number] };
+  | { method: 'load'; args: [stage: 1 | 2] }
+  | { method: 'genmove'; args: [pos: Position, level: number, clock?: ClockInfo] }
+  | { method: 'evaluate'; args: [pos: Position, opts: EvaluateOptions, timeoutMs?: number] }
+  | { method: 'analyze'; args: [pos: Position, n: number] };
 
-const PIECE_CP: Record<string, number> = { p: 100, n: 300, b: 300, r: 500, q: 900, k: 0 };
-
-function fenKey(fen: string): string {
-  return fen.trim().split(/\s+/).slice(0, 4).join(' ');
-}
-
-function lookup<T>(map: Readonly<Record<string, T>>, fen: string): T | undefined {
-  if (Object.prototype.hasOwnProperty.call(map, fen)) return map[fen];
-  const key = fenKey(fen);
-  for (const k of Object.keys(map)) if (fenKey(k) === key) return map[k];
-  return undefined;
-}
-
-function chess(fen: string): Chess | null {
-  try {
-    return new Chess(fen);
-  } catch {
-    return null;
-  }
-}
-
-function toUci(m: { from: string; to: string; promotion?: string }): Uci {
-  return m.from + m.to + (m.promotion ?? '');
+/** Key of a position in the scripted records: its plies joined, `''` at the start. */
+export function movesKey(pos: Position): string {
+  return pos.moves.join('');
 }
 
 /**
- * Material evaluation from the side to move: `{ mate: 0 }` when mated, `{ mate: 1 }` when the side
- * to move mates in one, `{ cp: 0 }` on a drawn position, else the material difference in cp
- * (P 100, N 300, B 300, R 500, Q 900). `{ cp: 0 }` for a bad FEN.
+ * The game a position describes: its setup stones, then its plies (so ko and superko are exact).
+ * A position whose plies do not replay falls back to its board and side to move.
  */
-export function materialEval(fen: string): Eval {
-  const c = chess(fen);
-  if (!c) return { cp: 0 };
-  if (c.isCheckmate()) return { mate: 0 };
-  if (c.isDraw() || c.isStalemate()) return { cp: 0 };
-  if (c.moves().some((san) => san.endsWith('#'))) return { mate: 1 };
-  const me = c.turn();
-  let cp = 0;
-  for (const row of c.board()) {
-    for (const sq of row) {
-      if (!sq) continue;
-      cp += (sq.color === me ? 1 : -1) * PIECE_CP[sq.type];
+export function gameFromPosition(pos: Position): Game {
+  const settings = { size: pos.size, rules: pos.rules, handicap: 0, komi2: pos.komi2 };
+  try {
+    const board = new Uint8Array(pos.size * pos.size);
+    for (const p of pos.setup.B) board[pointToIndex(p, pos.size)] = 1;
+    for (const p of pos.setup.W) board[pointToIndex(p, pos.size)] = 2;
+    let g = newGame(settings, { board, turn: pos.first });
+    for (const m of pos.moves) {
+      if (g.scoring) g = resume(g);
+      g = play(g, m, 0);
     }
+    return g;
+  } catch {
+    return newGame(settings, { board: pos.board.slice(), turn: pos.turn });
   }
-  return { cp };
+}
+
+/** True when `idx` is empty and every neighbour on the board is a stone of `color`. */
+function ownEye(board: Uint8Array, size: number, idx: number, color: Color): boolean {
+  if (board[idx] !== 0) return false;
+  const mine = color === 'B' ? 1 : 2;
+  const x = idx % size;
+  const y = (idx - x) / size;
+  const n = [x > 0 ? idx - 1 : -1, x < size - 1 ? idx + 1 : -1, y > 0 ? idx - size : -1, y < size - 1 ? idx + size : -1];
+  return n.every((j) => j < 0 || board[j] === mine);
+}
+
+/** Legal points of the side to move, row-major from the top, that do not fill its own one-point eyes. */
+export function sensiblePoints(pos: Position): Point[] {
+  const g = gameFromPosition(pos);
+  if (g.end || g.scoring) return [];
+  const size = pos.size;
+  const out: Point[] = [];
+  for (let i = 0; i < size * size; i++) {
+    if (g.board[i] !== 0 || ownEye(g.board, size, i, g.turn)) continue;
+    const p = indexToPoint(i, size);
+    if (isLegal(g, p)) out.push(p);
+  }
+  return out;
+}
+
+/** Neutral evaluation: even game, nobody owns anything, policy uniform over the legal points and pass. */
+export function neutralEval(pos: Position): EvaluateResult {
+  const n = pos.size * pos.size;
+  const policy = new Float32Array(n + 1);
+  const g = gameFromPosition(pos);
+  const legal: number[] = [];
+  if (!g.end && !g.scoring) for (let i = 0; i < n; i++) if (g.board[i] === 0 && isLegal(g, indexToPoint(i, pos.size))) legal.push(i);
+  const share = 1 / (legal.length + 1);
+  for (const i of legal) policy[i] = share;
+  policy[n] = share;
+  return { winrate: 0.5, scoreLead: 0, ownership: new Float32Array(n), policy };
 }
 
 interface Pending {
   abort(): void;
 }
 
+const NO_NETS = Object.freeze({ small: false, large: false });
+
 export class FakeEngine implements EngineHandle {
   readonly calls: FakeCall[] = [];
   stops = 0;
 
-  private snapshot: EngineSnapshot = { state: 'idle', progress: 0 };
+  private snapshot: EngineSnapshot = Object.freeze({ state: 'idle', progress: 0, backend: null, nets: NO_NETS });
   private readonly listeners = new Set<() => void>();
   private loadPromise: Promise<void> | null = null;
   private readonly pending = new Set<Pending>();
@@ -114,6 +160,14 @@ export class FakeEngine implements EngineHandle {
     return this.snapshot.progress;
   }
 
+  get backend(): EngineApi['backend'] {
+    return this.snapshot.backend;
+  }
+
+  get nets(): EngineApi['nets'] {
+    return this.snapshot.nets;
+  }
+
   /** Change what the next `load()` does. */
   setLoadResult(r: 'ready' | 'fail'): void {
     this.loadResult = r;
@@ -128,9 +182,18 @@ export class FakeEngine implements EngineHandle {
     };
   };
 
-  private set(state: EngineState, progress: number): void {
-    if (state === this.snapshot.state && progress === this.snapshot.progress) return;
-    this.snapshot = Object.freeze({ state, progress });
+  private set(patch: Partial<EngineSnapshot>): void {
+    const next = { ...this.snapshot, ...patch };
+    const s = this.snapshot;
+    if (
+      next.state === s.state &&
+      next.progress === s.progress &&
+      next.backend === s.backend &&
+      next.nets.small === s.nets.small &&
+      next.nets.large === s.nets.large
+    )
+      return;
+    this.snapshot = Object.freeze({ ...next, nets: Object.freeze({ ...next.nets }) });
     for (const cb of [...this.listeners]) cb();
   }
 
@@ -138,27 +201,36 @@ export class FakeEngine implements EngineHandle {
     return ms > 0 ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve();
   }
 
-  readonly load = (): Promise<void> => {
-    this.calls.push({ method: 'load', args: [] });
-    return this.ensureLoaded();
+  readonly load = (stage: 1 | 2 = 1): Promise<void> => {
+    this.calls.push({ method: 'load', args: [stage] });
+    const first = this.ensureLoaded();
+    if (stage === 1) return first;
+    return first.then(() => {
+      if (!this.snapshot.nets.large) this.set({ nets: { small: true, large: true } });
+    });
   };
 
   private ensureLoaded(): Promise<void> {
     if (this.disposed) return Promise.reject(new EngineUnavailableError('Engine disposed'));
     if (this.snapshot.state === 'ready') return Promise.resolve();
     if (this.loadPromise) return this.loadPromise;
-    this.set('loading', 0);
+    this.set({ state: 'loading', progress: 0 });
     const ms = this.opts.loadMs ?? 0;
     this.loadPromise = (async () => {
       await this.wait(ms / 2);
-      this.set('loading', 0.5);
+      this.set({ progress: 0.5 });
       await this.wait(ms / 2);
       this.loadPromise = null;
       if (this.loadResult === 'fail') {
-        this.set('failed', 0);
+        this.set({ state: 'failed', progress: 0 });
         throw new EngineUnavailableError('Fake engine failed to load');
       }
-      this.set('ready', 1);
+      this.set({
+        state: 'ready',
+        progress: 1,
+        backend: this.opts.backend ?? 'wasm',
+        nets: { small: true, large: this.snapshot.nets.large },
+      });
     })();
     return this.loadPromise;
   }
@@ -176,21 +248,7 @@ export class FakeEngine implements EngineHandle {
     return new Promise<T>((resolve, reject) => {
       let done = false;
       let timer: ReturnType<typeof setTimeout> | undefined;
-      const entry: Pending = {
-        abort: () => {
-          if (done) return;
-          done = true;
-          clearTimeout(timer);
-          this.pending.delete(entry);
-          try {
-            resolve(onAbort());
-          } catch (e) {
-            reject(e);
-          }
-        },
-      };
-      this.pending.add(entry);
-      const finish = (f: () => T) => {
+      const settle = (f: () => T) => {
         if (done) return;
         done = true;
         clearTimeout(timer);
@@ -201,48 +259,33 @@ export class FakeEngine implements EngineHandle {
           reject(e);
         }
       };
-      if (timeoutMs !== undefined && onTimeout) timer = setTimeout(() => finish(onTimeout), Math.max(0, timeoutMs));
+      const entry: Pending = { abort: () => settle(onAbort) };
+      this.pending.add(entry);
+      if (timeoutMs !== undefined && onTimeout) timer = setTimeout(() => settle(onTimeout), Math.max(0, timeoutMs));
       this.ensureLoaded()
         .then(() => this.wait(this.opts.delayMs ?? 0))
         .then(
-          () => finish(fn),
+          () => settle(fn),
           (err) => {
             if (done) return;
+            if (onFail) return settle(onFail);
             done = true;
             clearTimeout(timer);
             this.pending.delete(entry);
-            if (onFail) resolve(onFail());
-            else reject(err);
+            reject(err);
           },
         );
     });
   }
 
-  private scriptedEval(fen: string, depth: number): Eval | null | undefined {
-    const e = this.opts.evals;
-    if (!e) return undefined;
-    return typeof e === 'function' ? e(fen, depth) : lookup(e, fen);
-  }
-
-  private evalOf(fen: string, depth: number): Eval | null {
-    const s = this.scriptedEval(fen, depth);
-    return s === undefined ? materialEval(fen) : s;
-  }
-
-  readonly bestMove = (
-    fen: string,
-    level: number,
-    clock?: { wMs: number; bMs: number; incMs: number },
-  ): Promise<Uci> => {
-    this.calls.push({ method: 'bestMove', args: clock ? [fen, level, clock] : [fen, level] });
+  readonly genmove = (pos: Position, level: number, clock?: ClockInfo): Promise<{ move: GenmoveResult }> => {
+    this.calls.push({ method: 'genmove', args: clock ? [pos, level, clock] : [pos, level] });
     return this.search(
       () => {
         const m = this.opts.moves;
-        const scripted = m ? (typeof m === 'function' ? m(fen, level) : lookup(m, fen)) : undefined;
-        if (scripted) return scripted;
-        const first = chess(fen)?.moves({ verbose: true })[0];
-        if (!first) throw new Error('No legal move in this position');
-        return toUci(first);
+        const scripted = m ? (typeof m === 'function' ? m(pos, level) : lookup(m, movesKey(pos))) : undefined;
+        if (scripted !== undefined) return { move: scripted };
+        return { move: sensiblePoints(pos)[0] ?? PASS };
       },
       () => {
         throw new EngineAbortError();
@@ -250,31 +293,36 @@ export class FakeEngine implements EngineHandle {
     );
   };
 
-  readonly evaluate = (fen: string, depth: number, timeoutMs?: number): Promise<Eval | null> => {
-    this.calls.push({ method: 'evaluate', args: timeoutMs === undefined ? [fen, depth] : [fen, depth, timeoutMs] });
+  readonly evaluate = (pos: Position, opts: EvaluateOptions, timeoutMs?: number): Promise<EvaluateResult | null> => {
+    this.calls.push({ method: 'evaluate', args: timeoutMs === undefined ? [pos, opts] : [pos, opts, timeoutMs] });
     return this.search(
-      () => this.evalOf(fen, depth),
+      () => {
+        const e = this.opts.evals;
+        const s = e ? (typeof e === 'function' ? e(pos, opts) : lookup(e, movesKey(pos))) : undefined;
+        if (s === null) return null;
+        const neutral = neutralEval(pos);
+        if (s === undefined) return neutral;
+        return {
+          winrate: s.winrate,
+          scoreLead: s.scoreLead,
+          ownership: s.ownership ?? neutral.ownership,
+          policy: s.policy ?? neutral.policy,
+        };
+      },
       () => null,
       { timeoutMs, onTimeout: () => null, onFail: () => null },
     );
   };
 
-  readonly multiPv = (fen: string, n: number, depth: number): Promise<{ uci: Uci; eval: Eval }[]> => {
-    this.calls.push({ method: 'multiPv', args: [fen, n, depth] });
+  readonly analyze = (pos: Position, n: number): Promise<Candidate[]> => {
+    this.calls.push({ method: 'analyze', args: [pos, n] });
     return this.search(
       () => {
-        const c = chess(fen);
-        if (!c) return [];
-        const scored = c.moves({ verbose: true }).map((m, i) => {
-          c.move({ from: m.from as ChessSquare, to: m.to as ChessSquare, promotion: m.promotion });
-          const afterFen = c.fen();
-          c.undo();
-          const e = this.evalOf(afterFen, Math.max(0, depth - 1)) ?? { cp: 0 };
-          const ev = negateEval(e);
-          return { uci: toUci(m), eval: ev, i, s: scoreCp(ev) };
-        });
-        scored.sort((a, b) => b.s - a.s || a.i - b.i);
-        return scored.slice(0, Math.max(1, n)).map(({ uci, eval: ev }) => ({ uci, eval: ev }));
+        const scripted = this.opts.analysis?.(pos, n);
+        if (scripted) return scripted.slice(0, Math.max(0, n));
+        return sensiblePoints(pos)
+          .slice(0, Math.max(0, n))
+          .map((move) => ({ move, winrate: 0.5, scoreLead: 0 }));
       },
       () => {
         throw new EngineAbortError();
@@ -290,7 +338,16 @@ export class FakeEngine implements EngineHandle {
   readonly dispose = (): void => {
     this.stop();
     this.disposed = true;
-    this.set('idle', 0);
+    this.set({ state: 'idle', progress: 0, backend: null, nets: NO_NETS });
     this.listeners.clear();
   };
+}
+
+function lookup<T>(map: Readonly<Record<string, T>>, key: string): T | undefined {
+  return Object.prototype.hasOwnProperty.call(map, key) ? map[key] : undefined;
+}
+
+/** True for a pass result of `genmove`. */
+export function isPassMove(m: GenmoveResult): boolean {
+  return m !== 'resign' && isPass(m);
 }

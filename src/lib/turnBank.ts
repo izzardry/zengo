@@ -13,7 +13,8 @@
  * are device-wide), with an in-memory fallback when storage is blocked. Pure apart from the
  * injected storage; every access is guarded.
  */
-import type { Game, Now } from './chessTypes';
+import { positionKey } from './clock';
+import type { Game, Now } from './types';
 
 export const TURN_BANK_KEY = 'zigo:turn';
 
@@ -23,9 +24,9 @@ export const MAX_AGE_MS = 12 * 60 * 60 * 1000;
 export interface BankedTurn {
   /** `GameSession.id`. */
   readonly id: string;
-  /** Position the time belongs to. */
+  /** Position the time belongs to (`positionKey` of lib/clock.ts: the plies up to the cursor). */
   readonly cursor: number;
-  readonly fen: string;
+  readonly position: string;
   /** Ms spent on that turn. */
   readonly ms: number;
   /** Wall-clock time of banking (`Date.now`). */
@@ -62,7 +63,7 @@ function isBank(v: unknown): v is BankedTurn {
   return (
     typeof b.id === 'string' &&
     typeof b.cursor === 'number' &&
-    typeof b.fen === 'string' &&
+    typeof b.position === 'string' &&
     typeof b.ms === 'number' &&
     Number.isFinite(b.ms) &&
     typeof b.at === 'number'
@@ -72,7 +73,7 @@ function isBank(v: unknown): v is BankedTurn {
 /** Banks `ms` for the turn at `game`'s cursor of session `id`. Never throws. */
 export function bankTurn(id: string, game: Game, ms: number, now: Now = Date.now, storage: BankStorage = defaultStorage()): void {
   if (!Number.isFinite(ms) || ms < 0) return;
-  const entry: BankedTurn = { id, cursor: game.cursor, fen: game.fen, ms: Math.round(ms), at: now() };
+  const entry: BankedTurn = { id, cursor: game.cursor, position: positionKey(game), ms: Math.round(ms), at: now() };
   const json = JSON.stringify(entry);
   try {
     storage.setItem(TURN_BANK_KEY, json);
@@ -97,7 +98,7 @@ export function bankedTurnMs(id: string, game: Game, now: Now = Date.now, storag
     return 0;
   }
   if (!isBank(b)) return 0;
-  if (b.id !== id || b.cursor !== game.cursor || b.fen !== game.fen || game.end) return 0;
+  if (b.id !== id || b.cursor !== game.cursor || b.position !== positionKey(game) || game.end) return 0;
   const age = now() - b.at;
   if (age < 0 || age > MAX_AGE_MS) return 0;
   return Math.max(0, b.ms);
