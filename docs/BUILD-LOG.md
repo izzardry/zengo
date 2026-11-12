@@ -29,11 +29,12 @@ _(Written at the end of the run.)_
 
 ### Milestone 2 · Computer
 
-- [ ] 2A · Engine
-- [ ] 2B · Clock
-- [ ] 2C · Assistance
-- [ ] Integrator 2
-- [ ] Gate 2
+- [x] 2A · Engine
+- [x] 2B · Clock
+- [x] 2C · Assistance
+- [x] Integrator 2
+- [x] Gate 2 e2e suite
+- [x] Gate 2 (passed in round 1)
 
 ### Milestone 3 · Rooms
 
@@ -213,6 +214,59 @@ _(One line each: where the design was silent, what was chosen and why.)_
 - Gate 1 fix overlay summary: Game-over summary: one row from 640 px (overlay box sm:max-w-xl). On phones it breaks on purpose after the opponent part (code • size • opponent / moves • time), and the bullet opening the second row is screen-reader-only, so no row starts with a separator.
 - Gate 1 fix overlay summary: Game-over overlay padding on phones is px-4 py-8 (16 px gutter) instead of p-8, so the first summary group fits at 320 px in all four languages; sm and up keep p-8 as in Zhess.
 
+**Milestone 2**
+- Orchestrator: `@tensorflow/tfjs-backend-cpu@4.22.0` pinned as a dependency before M2 (it was only transitive through the WebGPU backend), so the engine's Node golden test and self-play can run without a mid-run install.
+- Orchestrator: M2 workflow: 2A and 2B in parallel, then 2C, the integrator, an e2e author, a verifier and up to three fix rounds.
+- 2A: Zigo area rules go to the network as KataGo's 'chinese' preset with positional ko, which is the golden test's setup. Territory rules go as 'japanese' with positional ko, because Zigo plays positional superko under both. Suicide is illegal under both.
+- 2A: The network's komi is the game's komi plus one point per handicap stone under area rules (DESIGN 8.2). A game counts as a handicap game when Black has 2 or more setup stones, White has none, and White moves first.
+- 2A: Two passes inside the search end that line, and the network judges the final position. There is no forced Tromp-Taylor count, because Zigo agrees dead stones after the game. The root uses KataGo's conservative-pass input, as in its GTP defaults.
+- 2A: The search is a compact port of Web KaTrain's: KataGo's utility (win/loss plus score), exploration scaled by the parent's utility spread, first-play reduction, virtual losses, and LCB for the final move. Left out: graph search, subtree value bias, noise pruning, uncertainty weighting, and human-SL exploration.
+- 2A: Batches: 8 leaves per network call on WebGPU, 1 on WASM. Batching made no difference on WASM in Node: 3.5 vs 3.3 ms per visit on 9×9 and 13.7 vs 13.5 on 19×19.
+- 2A: The engine never resigns; resigning is 2C's policy. Every level passes when pass is its best move. Level 1 never fills its own one-point eyes.
+- 2A: Search limits: with an explicit timeMs (levels 11 and 12), time rules over the minimum visits. Level 10 stops at its maximum visits, or after 2 s once its minimum is reached. Without a clock no search runs past 10 s. With a clock the cap is a 20th of the main time plus half the increment, or 40 % of a byo-yomi period.
+- 2A: analyze defaults to 32 visits within 1.5 s on the small net. evaluate defaults to one network evaluation on the small net. The root always uses the fixed symmetry 0, so repeated evaluations give the same answer.
+- 2A: The WebGPU check passes when win rate is within 0.02, score lead within 0.5, each policy entry within 0.02 and each ownership value within 0.05 of the WASM result, on a fixed 9×9 position.
+- 2A: The driver's `nets` flags mean 'loaded in the worker', not 'cached'; useEngineOffline reports what is cached. While stage 2 loads, the state stays 'ready' and progress shows the large net's download.
+- 2A: The worker reads networks from engine-cache itself, so a network downloaded by the offline manager is never fetched twice. The worker and TF.js chunks are precached by the service worker like the rest of the app.
+- 2B: One byo-yomi rule for the log, the running turn and the flag (byoyomiPeriodsLeft): a move made inside a period keeps it, including one made when the period reads exactly 0.0 (DESIGN 11 'overrunning' means going past it); each full period overrun uses one up; time is up when the last period reads zero, the same instant as the flag (remaining() <= 0). The old liveClock (floor) and byoyomiStep (ceil-1) disagreed at exact multiples of the period.
+- 2B: For the single ms when a period other than the last reads zero, the face shows '0.0 ·3' (periods still counted), not the out-of-time face.
+- 2B: Spoken readings for role='timer' are added for byo-yomi faces only: '24 seconds, 3 periods', '1 second, last period', and in main time '4:31, 3 periods'. Fischer, clock off and out-of-time faces have no label, because their text already reads well. Seconds are whole seconds rounded down, matching the display.
+- 2B: useClock adds the spoken labels when it runs inside the I18nProvider (useContext(I18nContext), not useI18n, so it still works without a provider in tests and tools); ClockFace gains an optional label field, which PlayerStrip already renders as sr-only text.
+- 2B: The clock string table now holds only the spoken-reading keys. The unused clock.dial* strings were removed, because the custom dial uses start.dial.* (1D).
+- 2B: The dial helpers duplicated in lib/clock.ts (DIAL_* lists, customTc, customByoyomiTc, nearestIndex, DIAL_GEOMETRY, dialAim, dialItemOffset) were dead code, since 1D moved them to start/dialGeometry.ts and ClockDial.tsx. They were removed with their clock.test.ts cases; the check that dial values make valid time controls moved to ClockDial.test.tsx against the dial's real lists, and dialGeometry keeps its own aim and nearest-value tests.
+- 2B: Added engineClock(g, tc) to lib/clock.ts as the ClockInfo source for genmove (the clock at the start of the side's turn, from the log).
+- 2C: The level rules sit on top of 2A's genmove, not inside it. The engine gets avoid = the big self-atari points (from level 3) and a seed from the game rng. pickMove then applies level 1's 30 % random reasonable moves and the capture-half rule, and checks the self-atari rule a second time.
+- 2C: Level 1's capture rule: when its chosen move captures, it keeps it with probability 0.5; otherwise it draws a non-capturing reasonable candidate by policy at temperature 2. When none exists, it captures.
+- 2C: 'Never pass while contested' (DESIGN 10.4) is a rules check under area rules only. When the computer wants to pass, one small-net evaluation runs, and it fills an open dame first: an empty point next to both colors with |ownership| < 0.3, legal, not its own eye, not a self-atari. Under territory rules a dame is worth nothing and capturing dead stones costs a point, so the engine's pass decision stands.
+- 2C: Resigning takes 'a few points' as more than 5 / 7 / 10 points behind on 9 / 13 / 19 (after KataGo's resignMinScoreDifference). It needs three of the computer's own turns in a row below 5 %, counted along the current line, so undo forgets them. The engine never resigns itself.
+- 2C: Blunder guard: the self-atari rule (3+ stones) is checked first and needs no engine. The engine check runs only when the engine is ready. When the turn's 'before' evaluation is missing, it is requested again within the same 150 ms budget.
+- 2C: The guard calls engine.stop() before its 'after' evaluation, so the hint's precomputation queued for this turn cannot push it past 150 ms. The only exception is while the 'before' evaluation is still running. The hint restarts a cancelled precomputation, at most twice per position. Zhess's guard never stopped; Zigo's hint precomputation makes the queue longer.
+- 2C: The hint precomputes 300 ms after the position settles (analyze 32 visits ≤ 1.5 s, then evaluate 16 visits ≤ 1 s, small net), only while the engine is ready. A tap before that asks the engine directly and shows 'pending'. Taps after the second keep showing the top three (a new object, so the board replays and refocuses).
+- 2C: The preview line rounds the score lead from Black's view to half points, with a minimum of 0.5 ('B+0.5', never 'B+0'). It keeps Go notation in every language. The screen-reader text is the assist.previewLead.B/W strings.
+- 2C: The dead-stone proposal is about 100 visits, at most 3 s, with an overall timeout of 20 s (loading included). It uses the large net only when the engine has it loaded, else the small net. With no answer it returns null, and every stone is alive.
+- 2C: useEngineStart.prepare(level) loads stage 2 for levels 8–12 and stage 1 otherwise. It returns true at once when the needed nets are already loaded.
+- 2C: Calibration anchor: GNU Go 3.8 level 10, taken as about 6k on 9×9. One kyu per 7 points of win rate away from 50 %. A level gets a rank only with at least 10 games and a win rate between 10 % and 90 %.
+- 2C: Self-play and calibration score finished games by area themselves (dead stones from the engine's ownership ≥ 0.7, then flood fill), because lib/scoring.ts imports './zigo' without an extension and plain Node cannot load it.
+- Integrator 2: The engine's dead-stone proposal runs in every solo mode, pass-and-play included (DESIGN 8.4 step 1 makes no mode exception).
+- Integrator 2: An unfinished solo game warms the engine up (load stage 1): always against the computer, in pass-and-play only once stage 1 is cached, so a hint nobody asked for never downloads anything.
+- Integrator 2: Offline, Start (or Resume) of a computer game does nothing when the level's networks are neither loaded in the engine nor cached (stage 1 for levels 1–7, stage 2 for 8–12); the status line says why. Online, or while the cache is still being checked or cannot be read, loading decides (failure: the calm toast).
+- Integrator 2: Opening an unfinished computer game from a history card does not wait on the Start pill (as Zhess): the engine loads for the computer's turn, and a failure shows the calm toast with Try again.
+- Integrator 2: The computer keeps playing while the player looks back through the moves in a live game (Zhess). The hint bulb shows only in phase playing of a live game, and is disabled on the computer's turn.
+- Integrator 2: A pass hint (the best move is a pass) is shown as a toast `assist.hintPass`, because nothing on the board can pulse.
+- Integrator 2: The preview's B+3.5 note in the info pill is aria-hidden; screen readers get assist.previewLead.B/W from a new sr-only assist-live region, which also carries the guard's assist.blunderRefused (the guard shows no text, DESIGN 7.2) and the pass hint.
+- Integrator 2: The rank line reads src/lib/ranks.json through import.meta.glob (the file is optional) and shows only a table calibrated on 19×19, because DESIGN 10.2 gives ranks for 19×19 strength. 2C's 9×9 ladder therefore shows nothing.
+- Integrator 2: useEngineOffline's `large` follows the level shown on the start screen (the saved game's level when the code has one), and the session's level during a game.
+- Integrator 2: Glossary review: ES 'Vista del territorio: Negro va ganando por {points}' instead of 'gana por', because the preview reports a lead, not a final result.
+- Gate 2 e2e suite: the m2 computer tests run at 1280×800, because Playwright's default 1280×720 is narrower than 768 px in height and so counts as a phone held sideways (`isMobileLandscape`); m1 uses 1280×800 too.
+- Gate 2 e2e suite: the stage-1 and stage-2 progress lines are checked from a log of every text the status line showed (a MutationObserver in an init script), because on localhost the download finishes faster than polling can catch.
+- Gate 2 e2e suite: the settled-position test uses territory rules (`g=t`). In Node the small net passed 20 of 20 times at levels 1, 3, 5, 7, 8, 9 and 10 in that position. Under area rules level 1 passed 0 of 10 times and level 10 6 of 10. Ownership of the dead B5 stone is about 0.97.
+- Gate 2 e2e suite: the big self-atari is a position prepared by link; the guard refuses E5 by its rules-only check (3 stones capturable at once), so the bounce does not depend on the engine.
+- Gate 2 e2e suite: the byo-yomi test uses `page.clock.install()` (time keeps running) and jumps it with `fastForward`. The first jump is read from the clock (main time left + 1 s), so real time spent waiting does not eat into the first period.
+- Gate 2 e2e suite: the computer's replies are read from the URL's `m`; a stone the blunder guard bounces is played again to confirm it, as in the sibling app's suite.
+- Gate 2 e2e suite: in the 10-move test a pass from the computer counts as a reply (DESIGN 10.4 allows a pass when it is the best move).
+- Gate 2 e2e suite: `markDead` and `passTwice` wait out the engine's dead-stone proposal: data-engine ready or failed, then up to 7 s for dead marks (the proposal search stops after 3 s, and a hint search may run ahead of it). In Node the m1 positions get no proposal, except the scripted 9×9 game, where B7 was proposed dead in 2 of 3 runs. Either way the m1 expectations hold.
+- Gate 2 e2e suite: the start footer keeps the status line's 24 px height while it is empty, so the pills do not jump when the line appears and a hold on a pill does not slip off it.
+
 ## Deviations
 
 _(Where a design decision could not be built as stated: what was built instead, and why.)_
@@ -237,6 +291,16 @@ _(Where a design decision could not be built as stated: what was built instead, 
 - src/hooks/usePWAInstall.ts: one import switched to lib/types.
 - Gate 1 fix overlay summary: The Zhess overlay is max-w-md with no deliberate break. Zigo's summary has a fifth part (board size), so the box widens from 640 px and the phone layout uses a fixed two-row split.
 
+- 2A: The search is not a full port of Web KaTrain's 4,700-line search. The parts listed in the decisions are left out, and every visit has weight 1. Its numbers still match KataGo's own formulas for exploration, first-play reduction and LCB.
+- 2A: src/lib/engine/fake.ts now takes gameFromPosition from the new position.ts (the export is unchanged), and its genmove accepts and honours opts.avoid.
+- 2B: Deleted test cases in clock.test.ts: 'dial values make valid time controls', 'nearestIndex finds the closest value' and 'dialAim follows the Ztyle zones and angles', together with the dead duplicate helpers they tested. The dial-value check was rewritten in ClockDial.test.tsx against the dial's real constants and fischerTc/byoyomiTc, and now covers all byo-yomi combinations, more than before. Aim and nearest-value logic stays covered by dials.test.tsx for dialGeometry.ts. No other test was changed or loosened; the existing byo-yomi expectations (including 'exactly one period: kept' and out at the full budget) pass unchanged.
+- 2C: The ranks table (src/lib/ranks.json) was not written. The calibration is too small and was measured on 9×9, while DESIGN 10.2 asks for 19×19 ranks, so the start screen's rank line stays empty for now.
+- 2C: DESIGN 15.4 asks for calibration on 9×9 and 19×19. Only 9×9 was run, as the brief allowed, within its 30-minute cap.
+- Integrator 2: src/pages/Index.test.tsx: the M1 test 'answers Start with the computer or a room with Coming soon until milestones 2 and 3' became 'answers Start with a room with Coming soon until milestone 3'. Computer Start now starts a game, as DESIGN 10 requires, and the new computer tests cover it.
+- Integrator 2: Glue outside src/pages: one Spanish string pair in src/lib/i18n/assist.ts (2C's table, under my i18n glossary review).
+- Gate 2 e2e suite: `src/components/start/StartFooter.tsx` (package 1D's file) got a one-line fix: `min-h-6` on the status line's wrapper in portrait. It fixes a real layout jump of the start pills that broke two m1 hold tests at 390×844 under load.
+- Gate 2 e2e suite: The info pill's lead note (`preview-note`) is shown on its own line under the info pill, not inside the 'Game info' group, so the test looks for it by test id instead of inside that group.
+
 ## Open items
 
 _(Features switched off in `src/lib/flags.ts`, and anything left unfinished.)_
@@ -244,11 +308,32 @@ _(Features switched off in `src/lib/flags.ts`, and anything left unfinished.)_
 - M1 (for the final visual pass and the owner): in the dark theme, Black stones are filled with `--ink-dark`, which is close to the dark `card` board, so they read almost as hollow circles with a light outline (DESIGN 5.1 as written). Theme-stable inks are an interview decision, so it was not changed.
 - M1: a URL with `o=c&p=1` still opens a computer session that never moves (only the Start pill and history are gated by `COMPUTER_ENABLED`); M2 replaces it.
 - M1: 1G's room scoring is a first cut (no resend timer for lost mark/accept/resume; crossing equal-rev toggles settle as a fork; seat 1 does not propose when seat 0 has no engine). M3's 3A/3B harden it.
-- Build warning: the main chunk is 627 kB (196 kB gzip), over Vite's 500 kB warning.
+- M2: no rank line yet. `src/lib/ranks.json` was not written: the 9×9 ladder against GNU Go level 10 (10 games per level) placed only levels 5 (≈6k) and 7 (≈3k), with about ±4 kyu uncertainty, and DESIGN 10.2 asks for 19×19 ranks. Run `node scripts/calibrate.mjs --size 19 --write` with more games to fill it.
+- M2: the worker does not warm the network up after loading, so the first WebGPU evaluation on a new board size includes shader compile time.
+- M2: the search is a compact port of Web KaTrain's (no graph search, subtree value bias, noise pruning, uncertainty weighting or human-SL exploration); numbers match KataGo's formulas for exploration, first-play reduction and LCB.
+- M2: in review, byo-yomi clock faces have no spoken label (review uses `reviewClockView`, which bypasses useClock).
+- Build warning: the main chunk is 653 kB (196 kB gzip), over Vite's 500 kB warning.
 
 ## Measured speeds
 
 _(Engine evaluation speeds the run could measure.)_
+
+All on this Mac (Apple silicon). **No phone was measured.** One network evaluation through `evaluate()` (features and messaging included), average of 8 warm calls:
+
+| | b6c96 9×9 | b6c96 19×19 | b10c128 9×9 | b10c128 19×19 |
+|---|---|---|---|---|
+| Node 26, WASM | 3.9 ms | 15.2 ms | 9.9 ms | 41.1 ms |
+| Headless Chromium, WASM-SIMD in the worker | 4.0–4.4 ms | 14.3–14.9 ms | 9.8–10.2 ms | 40.5–42.4 ms |
+| Chromium, WebGPU (Apple Metal adapter) | 5.4–6.3 ms | 4.6–7.2 ms | 7.2–8.8 ms | 6.0–10.0 ms |
+
+- WebGPU ran only with Playwright's `channel: 'chromium'` plus `--enable-unsafe-webgpu`; the default headless shell has no adapter (with the flag alone it gets a SwiftShader software adapter). The e2e suite therefore exercises the WASM path; the WebGPU path was exercised by 2A's scratch checks only.
+- Level 10 genmove on 19×19 (b10c128, 32 visits): about 1.4 s on WASM, 85–150 ms on WebGPU (batch 8).
+- Search in Node, WASM, small net: about 3.5 ms per visit on 9×9, 13.7 ms on 19×19. Batching (8 leaves) made no difference on WASM.
+- Dead-stone proposal (100 visits, small net, Node WASM): 9×9 320–385 ms, 13×13 630 ms, 19×19 1.33–1.38 s.
+- Loading the small net from `engine-cache` (inflate, parse, build): about 40 ms in Chromium.
+- In the preview: level 1 replies 429–430 ms after a stone (the 400 ms minimum plus the search); a level 1 game starts in about 150 ms with stage 1 cached.
+- Self-play (`node scripts/selfplay.mjs --strong 12 --weak 1 --size 9 --games 2`): level 12 won 2/2 on 9×9 (B+73.5 in 91 plies, W+88.5 in 94 plies), 3.0 s per level-12 move; one 19×19 game (400-ply cap) won by level 12 by about 326 points, 610 s.
+- Calibration (`node scripts/calibrate.mjs --levels 1,3,5,7,9,10 --games 10`, 9×9 area rules vs GNU Go 3.8 WASM level 10, 5.6 min): wins of 10 — L1 0, L3 1, L5 5 (≈6k), L7 7 (≈3k), L9 10, L10 10. Levels 5–7 resigned several times right at 0.4 moves per point.
 
 ## Gate results
 
@@ -261,4 +346,6 @@ _(Engine evaluation speeds the run could measure.)_
 - Round 2 failed on one visual fault: the game-over summary wrapped with a leading bullet. Fixed in `b8f8ce3`.
 - Round 3 and the orchestrator's own re-run: `npm run lint` clean, `npm run typecheck` clean, `npm test` 65 files / 1599 tests passed, `npm run build` ok (25 precache entries), chess grep 0 hits, `npx playwright test` 27/27 passed (smoke 5, m1 22). Nothing switched off by flag; computer and rooms show "Coming soon" by plan (`COMPUTER_ENABLED`, `ROOMS_ENABLED` milestone switches).
 - Note from the e2e author: a macOS Maintenance Sleep once froze two tests for 444 s; run long e2e under `caffeinate -i`.
+
+**Gate 2 (2026-11-12): passed in round 1.** Workflow `wf_769cdbea-aae`, 6 agents (2A, 2B, 2C, integrator, e2e author, verifier). Verifier and the orchestrator's own re-run: `npm run lint` clean, `npm run typecheck` clean, `npm test` 76 files / 1773 tests passed, `npm run build` ok (32 precache entries, engine worker its own 214 kB chunk, no Tailwind duration warning), chess grep 0 hits, `caffeinate -i npx playwright test` 40/40 passed (smoke 5, m1 22, m2 13; the e2e author also ran `--repeat-each 3`: 120/120). The verifier read 48 screenshots of its own (12 states × 390/1280 × light/dark) and found no fault. Self-play and calibration ran (see "Measured speeds"); not blocking. Nothing switched off by flag. During the e2e work a real layout jump of the start pills (24 px when the status line appeared) was fixed in `StartFooter.tsx`.
 
