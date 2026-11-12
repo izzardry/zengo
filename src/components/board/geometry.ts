@@ -21,6 +21,32 @@ export const STONE_R = 0.475;
  */
 export const TEXT_SCALE = 100;
 
+/**
+ * Coordinate label size in CSS px (DESIGN 5.4: `text-[0.5rem]`), clamped to the space the margin
+ * leaves: 0.45 of a pitch, at least 7 px (still legible) and at most 8 px (0.5rem). On 19×19 phones
+ * (pitch ≈ 15–19 px) a label of 7–8 px fits between an edge stone and the board's edge; on large
+ * boards it stays 8 px instead of growing with the pitch.
+ */
+export const COORD_PX = { min: 7, max: 8, perPitch: 0.45 } as const;
+
+/** Coordinate label size in CSS px for a rendered pitch (px). */
+export function coordFontPx(pitchPx: number): number {
+  return Math.min(COORD_PX.max, Math.max(COORD_PX.min, pitchPx * COORD_PX.perPitch));
+}
+
+/** Coordinate label size in pitches before the board is measured (jsdom, first paint). */
+export const COORD_FALLBACK = 0.28;
+
+/**
+ * Coordinate label size in pitches for a rendered board `widthPx` wide; the fallback when the width
+ * is unknown (0 or not finite).
+ */
+export function coordFontPitches(widthPx: number, size: number): number {
+  if (!Number.isFinite(widthPx) || widthPx <= 0) return COORD_FALLBACK;
+  const pitchPx = widthPx / extent(size);
+  return coordFontPx(pitchPx) / pitchPx;
+}
+
 /** Star point radius in pitches (DESIGN 5.1: ≈ 0.12 cell). */
 export const STAR_R = 0.12;
 

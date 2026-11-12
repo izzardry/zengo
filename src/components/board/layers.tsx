@@ -2,9 +2,9 @@
  * The static and memoized layers of the board SVG (DESIGN 5.1, 5.3, 5.4). Board units: one pitch;
  * intersection (col, row) at (col, row). Strokes that should stay 1 px use `non-scaling-stroke`.
  */
-import { memo, type CSSProperties } from 'react';
+import { memo, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import type { Color, Seating, Size } from '@/lib/types';
-import { MARGIN, STAR_R, TEXT_SCALE, columnLabel, pointToCell, rowLabel, starSet } from './geometry';
+import { MARGIN, STAR_R, TEXT_SCALE, columnLabel, coordFontPitches, pointToCell, rowLabel, starSet } from './geometry';
 import { STONE_FILL, STONE_OUTLINE } from './paint';
 import { CODE_STYLE, renderStats, type RowCode } from './marks';
 
@@ -12,7 +12,7 @@ const NSS = 'non-scaling-stroke' as const;
 const GRID: CSSProperties = { stroke: 'hsl(var(--foreground) / .4)', strokeWidth: 1, fill: 'none' };
 const EDGE: CSSProperties = { stroke: 'hsl(var(--foreground) / .4)', strokeWidth: 1.75, fill: 'none' };
 const STAR: CSSProperties = { fill: 'hsl(var(--foreground) / .55)' };
-const COORD: CSSProperties = { fill: 'hsl(var(--foreground) / .4)', fontSize: 0.28 * TEXT_SCALE };
+const COORD_FILL = 'hsl(var(--foreground) / .4)';
 
 /** Grid lines: 1 px `foreground/40`, the outer square slightly heavier (DESIGN 5.1). */
 export const GridLayer = memo(function GridLayer({ size }: { size: Size }) {
@@ -40,10 +40,36 @@ export const StarLayer = memo(function StarLayer({ size }: { size: Size }) {
 });
 
 /**
+ * The rendered (layout) width of the SVG that holds `ref`, in CSS px; 0 until measured. Layout
+ * size, not the transformed box: a scaled preview keeps the board's own label size.
+ */
+function useSvgWidth(ref: { readonly current: SVGGElement | null }): number {
+  const [width, setWidth] = useState(0);
+  useLayoutEffect(() => {
+    const svg = ref.current?.ownerSVGElement;
+    if (!svg) return;
+    const measure = () => {
+      const w = svg.clientWidth || (svg.parentElement?.clientWidth ?? 0);
+      setWidth((prev) => (Math.abs(prev - w) < 0.5 ? prev : w));
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(svg);
+    return () => ro.disconnect();
+  }, [ref]);
+  return width;
+}
+
+/**
  * GTP coordinates outside the left and bottom edge lines (DESIGN 5.4); in face-to-face seating also
- * outside the top and right edges, upside down for the far player (DESIGN 5.2).
+ * outside the top and right edges, upside down for the far player (DESIGN 5.2). The labels are
+ * 7–8 px whatever the pitch (`coordFontPx`): the layer measures its board and sizes them in pitches.
  */
 export const CoordinateLayer = memo(function CoordinateLayer({ size, seating }: { size: Size; seating: Seating }) {
+  const ref = useRef<SVGGElement>(null);
+  const width = useSvgWidth(ref);
+  const style: CSSProperties = { fill: COORD_FILL, fontSize: coordFontPitches(width, size) * TEXT_SCALE };
   const k = TEXT_SCALE;
   const off = (MARGIN - 0.16) * k;
   const last = (size - 1) * k;
@@ -71,9 +97,10 @@ export const CoordinateLayer = memo(function CoordinateLayer({ size, seating }: 
   }
   return (
     <g
+      ref={ref}
       data-layer="coordinates"
       transform={`scale(${1 / TEXT_SCALE})`}
-      style={COORD}
+      style={style}
       textAnchor="middle"
       dominantBaseline="central"
       className="select-none font-sans"

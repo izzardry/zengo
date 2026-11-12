@@ -6,7 +6,7 @@ import { fromDiagram, fromGtp, makeSettings, newGame, play } from '@/lib/zigo';
 import type { Game, Size } from '@/lib/types';
 import { GoBoard } from './GoBoard';
 import { goBoardGameProps } from './gameProps';
-import { LIFT_PX } from './geometry';
+import { COORD_FALLBACK, LIFT_PX, coordFontPitches, coordFontPx, extent } from './geometry';
 import { renderStats } from './marks';
 import type { GoBoardProps } from './types';
 import {
@@ -140,6 +140,41 @@ describe('GoBoard drawing', () => {
     renderBoard({ game, helpers: false });
     expect(svg().querySelector('[data-layer="coordinates"]')).toBeNull();
     expect(marks('last').length).toBe(0);
+  });
+
+  it('keeps coordinate labels between 7 px and 0.5rem whatever the pitch (DESIGN 5.4)', () => {
+    // 19×19 on a 320 px phone (pitch ≈ 15 px) and a 390 px phone (≈ 19 px), 9×9 on a desktop (≈ 80 px).
+    expect(coordFontPx(15.3)).toBe(7);
+    expect(coordFontPx(18.7)).toBe(8);
+    expect(coordFontPx(80)).toBe(8);
+    expect(coordFontPx(16.5)).toBeCloseTo(7.425, 5);
+    for (const [width, size] of [[300.8, 19], [366.6, 19], [280, 19], [366.6, 13], [768, 9], [592, 9]] as const) {
+      const pitch = width / extent(size);
+      const px = coordFontPitches(width, size) * pitch;
+      expect(px).toBeGreaterThanOrEqual(7);
+      expect(px).toBeLessThanOrEqual(8);
+      // A two-digit row label (about 1.1 em wide) centred 0.64 pitch out stays inside the margin
+      // plus the frame's 4 px padding.
+      expect(0.64 * pitch + 0.55 * px).toBeLessThanOrEqual(0.8 * pitch + 4);
+    }
+    expect(coordFontPitches(0, 19)).toBe(COORD_FALLBACK);
+    expect(coordFontPitches(Number.NaN, 19)).toBe(COORD_FALLBACK);
+  });
+
+  it('sizes the coordinate labels from the measured board, also for the far side', () => {
+    const spy = vi.spyOn(SVGElement.prototype, 'clientWidth', 'get').mockReturnValue(300.8);
+    try {
+      renderBoard({ size: 19, game: newGame(makeSettings(19)), helpers: true, seating: 'face' });
+      const coords = svg().querySelector<SVGGElement>('[data-layer="coordinates"]')!;
+      const pitch = 300.8 / extent(19);
+      // 7 px on screen; the group draws at 100× and scales down by 1/100.
+      expect(parseFloat(coords.style.fontSize)).toBeCloseTo((7 / pitch) * 100, 3);
+      expect(coords.querySelectorAll('text').length).toBe(19 * 4);
+      expect(coords.textContent).toContain('19');
+      expect(coords.textContent).toContain('T');
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('rings and pulses the mover’s groups in atari', () => {
