@@ -4,7 +4,98 @@ The run's memory (PLAN.md section 1, rule 5). Updated after every package and ev
 
 ## Summary
 
-_(Written at the end of the run.)_
+**The run is finished: the plan's definition of done is met.** Zigo is live at **https://izzardry.github.io/zigo/**. All four gates and the final gate passed, the last Pages deploy succeeded ([run 43371167524](https://github.com/izzardry/zigo/actions/runs/43371167524)), and the live smoke test passed. **Nothing is switched off by flag.**
+
+### What works, per milestone
+
+| Phase | Gate result | What works |
+|---|---|---|
+| Phase 0 | Passed with one exception: 11 e2e tests needed Stockfish, which phase 0 removes. M1 deleted them with the chess modules. | Zhess copied and renamed; repo `izzardry/zigo` public with Pages; nets b6c96 and b10c128, TF.js 4.22.0 and goscorer vendored; Go contracts in `types.ts`, rules core `zigo.ts` (suicide forbidden, positional superko, SGF, GTP) |
+| M1 · Board | Passed in round 3. Rounds 1 and 2 failed on screenshots: coordinate size, overlay summary wrap. 1599 unit tests, 27/27 e2e. | 9/13/19 board, input (tap, ghost and confirm, mouse, typed), pass-and-play, scoring with dead-stone marking, overlay, history, links, SGF, start screen with handicap, rules and clock dials, four languages, icons. No chess left (grep 0). |
+| M2 · Computer | Passed in round 1. 1773 unit tests, 40/40 e2e. | KataGo nets on TF.js (WebGPU with WASM fallback) in a worker, 12 levels, two-stage download with progress, Fischer and byo-yomi clocks, blunder guard, hint bulb and territory preview, the computer's dead-stone proposal, offline play, self-play and calibration scripts |
+| M3 · Rooms | Passed in round 3. Round 1 failed on screenshots; round 2 on room e2e under parallel load, then the macOS session broke. 2010 unit tests, 46/46 e2e. | Peer-to-peer rooms over PeerJS with a manual offer/answer fallback, sync and reconcile, the scoring protocol (mark, accept, resume, end), takeback, rematch, recovery, offline moves. The public PeerJS broker path ran and passed. |
+| Final | Passed in round 2. Round 1 failed on one screenshot: the room failure toast covered the landscape rail. 2054 unit tests, 55/55 e2e. | 10 auditors (design, Ztyle, 3 code reviewers, visual pass at 5 sizes) found 29 confirmed faults, all fixed (see Decisions › Final phase). README rewritten. Live smoke test passed: level 1, 9×9, engine ready in 3.0 s, reply E7 to E5 in 511 ms, 0 console errors, service worker registered. |
+
+The final gate, as re-run by the orchestrator at `bc271fc`: `npm run lint` clean, `npm run typecheck` clean, `npm test` 81 files / 2054 tests, `npm run build` ok (33 precache entries; only the chunk-size warning), chess grep 0 hits, `caffeinate -i npx playwright test` 55/55 (smoke 5, chrome 9, m1 22, m2 13, m3 6).
+
+### Switched off by flag
+
+Nothing. `flags.computer`, `flags.rooms` and the broker flag are on; `COMPUTER_ENABLED` and `ROOMS_ENABLED` are true.
+
+### Not verified automatically (needs you)
+
+- **WebGPU on real phones:** no phone was measured. WebGPU ran only on this Mac's Chromium with `--enable-unsafe-webgpu`. The e2e suite runs the WASM path. See "Measured speeds".
+- **Low-end Android speed:** not measured; levels were not shrunk, by your decision.
+- **iOS installed app (Safari PWA):** e2e is Chromium only.
+- **Two real phones on different networks:** rooms use STUN only, no TURN, so some symmetric-NAT pairs will not connect. The room tests ran two browser contexts on one machine.
+- **The public PeerJS broker path:** it passed once from this machine (best-effort test). Its availability from phones on mobile networks is untested.
+- **How the levels feel:** only measured by self-play (level 12 beat level 1 on 9×9 2/2, and in one 19×19 game).
+- **Calibrated ranks:** not done. A 9×9 run against GNU Go placed only level 5 (≈6k) and level 7 (≈3k), with about ±4 kyu uncertainty. `src/lib/ranks.json` was not written, so the start screen shows no rank line.
+
+### Decisions and deviations
+
+All 300 or so decisions are listed one per line under **Decisions** below, grouped by phase and package. The ones that change what a player sees:
+- Coordinates scale with the board, clamped to 7–8 px.
+- `P` passes only with Enter.
+- Go counts every ply as a move.
+- Every scoring ends with a proposal and two Accepts.
+- Rooms default to 9×9, area rules, random color.
+- The ko and superko toast shows once per game for each reason.
+- Level methods: 1 humanized, 2–8 KaTrain rank pick, 9 raw policy, 10–12 search.
+- Room tests run one at a time under Playwright's exclusive lock.
+- Toasts beside the landscape board are compact, and the rail moves up while one shows.
+
+The orchestrator made five structural decisions:
+- M1 got packages 1F and 1G, so that no chess was left at Gate 1.
+- `tfjs-backend-cpu` was pinned before M2.
+- The M3 workflow resumed from cache after the closed session.
+- The code review ran as three agents.
+- The final phase ran as one workflow.
+
+Every **deviation** is listed under **Deviations** below. In short:
+- **Search port:** the search is a compact port of Web KaTrain's search, not all 4,700 lines.
+- **Coordinates:** they scale with the board instead of a fixed `text-[0.5rem]`.
+- **Ranks and calibration:** no ranks table yet, and calibration ran on 9×9 only.
+- **Room scoring rule 6:** with equal revs, seat 0's dead stones win at rev+1 instead of seat 0's copy byte for byte.
+- **Seat-1 hand-over:** uses `mark {rev:0}`.
+- **Own pending Accept:** shows "Accepted" with a waiting note instead of a pulse.
+- **Icon stones:** 1.41 pitch across instead of 0.95, so they touch diagonally.
+- **Landscape toasts:** use text-xs.
+- **Tests changed, never loosened:** some tests were changed because they contradicted DESIGN.md or tested deleted chess modules (no draw offer, SGF not PGN, the clock dial opening on the system step, glossary wording). None was weakened or skipped to pass a gate.
+
+### Failures along the way
+
+- Gate 0 had 11 e2e tests failing on purpose: they needed Stockfish, which phase 0 removes. They were deleted with the chess modules in M1.
+- The Gate 3 room tests stalled under parallel load. The root cause (CPU starvation or concurrent WebRTC) was not established. They now run one at a time.
+- The macOS login session broke once (launchd error 141, Chromium could not start). Restarting the session fixed it.
+- One workflow resumed from cache after the session was closed. No work was lost.
+
+### Open items
+
+See **Open items** below. In short:
+- In the dark theme, Black stones look almost hollow (theme-stable inks, as designed).
+- The worker does not warm up the network, so the first WebGPU move on a new board size includes shader compilation.
+- Review byo-yomi clock faces have no spoken label.
+- Small toast overlaps remain on 320×568 and 667×375 screens.
+- Starting within about 1 s of a first launch downloads stage 1 twice.
+- The main chunk is 805 kB.
+
+### Commands
+
+```sh
+npm install && npm run dev                 # app on http://localhost:8080
+npm run build && npm run preview           # production build and preview
+npm run lint && npm run typecheck          # static checks
+npm test                                   # unit and component tests (Vitest)
+npx playwright install chromium            # once
+caffeinate -i npm run e2e                  # all e2e suites (builds, serves on 4173)
+caffeinate -i npx playwright test e2e/m1.spec.ts   # one suite: smoke, chrome, m1, m2, m3
+node scripts/selfplay.mjs --strong 12 --weak 1 --size 9 --games 2
+node scripts/calibrate.mjs --size 19 --levels 1,3,5,7,9,10,12 --games 10 --write
+node scripts/screenshots.mjs http://localhost:4180/ docs/screenshots/final   # against `npx vite preview --port 4180`
+```
+
+Live: https://izzardry.github.io/zigo/ · Repo: https://github.com/izzardry/zigo
 
 ## Package checklist
 
@@ -53,7 +144,7 @@ _(Written at the end of the run.)_
 - [x] 4 · Visual pass
 - [x] 5 · Fix confirmed findings, re-run all e2e suites and the full gate
 - [x] 6 · Docs
-- [ ] 7 · Publish and live smoke test
+- [x] 7 · Publish and live smoke test
 
 ## Decisions
 
@@ -459,3 +550,5 @@ All on this Mac (Apple silicon). **No phone was measured.** One network evaluati
 **Final gate (2026-11-13): passed in round 2.** Workflow `wf_f5761ffc-978`, 32 agents: 10 finders, 10 skeptics, triage, 6 fix clusters, the README, 2 verifier runs and 1 gate-fix agent.
 - Round 1: lint, typecheck, unit tests (2050), build, grep and e2e (51/51) all passed. The gate still failed on one visual fault. At 844×390 the room's broker-failure toast broke its text mid-word and covered the whole right rail, hiding pass, resign, Resume and Accept. Fixed in `b0cb55d`.
 - Round 2 and the orchestrator's own re-run: `npm run lint` clean, `npm run typecheck` clean, `npm test` 81 files / 2054 tests passed, `npm run build` ok (33 precache entries; the only warning is the known chunk size), chess grep 0 hits, `caffeinate -i npx playwright test` 55/55 passed (smoke 5, chrome 9, m1 22, m2 13, m3 6, including the broker path). The verifier read 30 new screenshots at 390×844, 844×390 and 1280×800, in light and dark, and found no regression. The visual pass's 130 screenshots at five sizes are in `docs/screenshots/final/`. Nothing is switched off by flag.
+
+**Live smoke test (2026-11-13): passed.** Against https://izzardry.github.io/zigo/ after deploy run 43371167524 (`scratchpad/live-smoke.mjs`, Playwright Chromium at 390×844). Level 1, 9×9, Black: engine ready 3.0 s after Start; E5 placed, and the computer replied E7 in 511 ms. No console errors; the service worker registered.
