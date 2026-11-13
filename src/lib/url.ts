@@ -30,7 +30,7 @@ import { useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { isValidCode, normalizeCode } from './codes';
 import type { Color, Mode, Result, Rules, Size, TcString } from './types';
-import { formatResult, formatTc, maxHandicap, parseTc } from './zigo';
+import { formatResult, formatTc, MAX_PLIES, maxHandicap, parseTc } from './zigo';
 
 /** Parsed query parameters. Absent or invalid values are `undefined`. */
 export interface UrlParams {
@@ -70,6 +70,8 @@ const PARAM_TO_MODE: Record<string, Mode> = { c: 'computer', l: 'local', r: 'roo
 
 /** Characters of the move encoding: SGF letters `a`–`s` and `t` (pass `tt`); decoded leniently. */
 const MOVES_RE = /^[a-t]*$/;
+/** Longest `m` accepted: two letters per ply, at most `MAX_PLIES` plies. A longer one is dropped. */
+export const MAX_MOVES_LENGTH = 2 * MAX_PLIES;
 
 /** `B+4.5` ← `{ winner: 'B', by: 'score', margin: 9 }`; `W+R`, `B+T`. Same as SGF's `RE`. */
 export function formatEnd(r: Result): string {
@@ -113,8 +115,8 @@ export function parseUrl(search: URLSearchParams | string): UrlParams {
 
   if (q.get('p') === '1') out.playing = true;
 
-  const o = q.get('o');
-  if (o !== null && PARAM_TO_MODE[o.trim().toLowerCase()]) out.mode = PARAM_TO_MODE[o.trim().toLowerCase()];
+  const o = q.get('o')?.trim().toLowerCase();
+  if (o !== undefined && Object.prototype.hasOwnProperty.call(PARAM_TO_MODE, o)) out.mode = PARAM_TO_MODE[o];
 
   const w = q.get('w')?.trim().toUpperCase();
   if (w === 'B' || w === 'W') out.color = w;
@@ -136,7 +138,7 @@ export function parseUrl(search: URLSearchParams | string): UrlParams {
   }
 
   const m = q.get('m');
-  if (m !== null && MOVES_RE.test(m)) out.moves = m;
+  if (m !== null && m.length <= MAX_MOVES_LENGTH && MOVES_RE.test(m)) out.moves = m;
 
   const result = parseEnd(q.get('r'));
   if (result) out.result = result;

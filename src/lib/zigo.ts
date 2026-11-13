@@ -194,9 +194,15 @@ export function formatTc(tc: TimeControl): TcString | null {
 }
 
 /**
+ * Upper bounds of a time control, far above the custom dial's (60 minutes, 10 periods of 120 s), so
+ * a link cannot carry an absurd clock: main time, Fischer increment, byo-yomi periods and period.
+ */
+export const TC_LIMITS = Object.freeze({ baseMs: 600 * 60_000, incMs: 600_000, periods: 60, periodMs: 3_600_000 });
+
+/**
  * `5+7` → Fischer; `20m5x30` (also `20m 5x30s`, `20m 5×30s`) → byo-yomi. Anything else
  * (including null and `off`) → null. Fischer needs a base above 0; byo-yomi needs at least one
- * period of more than 0 s (a base of 0 is pure byo-yomi).
+ * period of more than 0 s (a base of 0 is pure byo-yomi). Values above `TC_LIMITS` → null.
  */
 export function parseTc(s: string | null | undefined): TimeControl {
   if (!s) return null;
@@ -205,6 +211,7 @@ export function parseTc(s: string | null | undefined): TimeControl {
   if (f) {
     const baseMs = Math.round(Number(f[1]) * 60000);
     const incMs = Math.round(Number(f[2]) * 1000);
+    if (!(baseMs <= TC_LIMITS.baseMs && incMs <= TC_LIMITS.incMs)) return null;
     return baseMs > 0 ? { kind: 'fischer', baseMs, incMs } : null;
   }
   const b = /^(\d+(?:\.\d+)?)m\s*(\d+)\s*[x×]\s*(\d+(?:\.\d+)?)s?$/i.exec(t);
@@ -212,6 +219,7 @@ export function parseTc(s: string | null | undefined): TimeControl {
     const baseMs = Math.round(Number(b[1]) * 60000);
     const periods = Number(b[2]);
     const periodMs = Math.round(Number(b[3]) * 1000);
+    if (!(baseMs <= TC_LIMITS.baseMs && periods <= TC_LIMITS.periods && periodMs <= TC_LIMITS.periodMs)) return null;
     return periods >= 1 && periodMs > 0 ? { kind: 'byoyomi', baseMs, periods, periodMs } : null;
   }
   return null;
@@ -402,8 +410,14 @@ interface Core {
   readonly board: Uint8Array;
   readonly hi: number;
   readonly lo: number;
-  /** Hashes of the start position and of the position after every ply up to the cursor. */
-  readonly seen: ReadonlySet<string>;
+  /**
+   * Hashes of the start position and of the position after every stone, each with its order of
+   * first appearance. The map is shared along a game line: a hash belongs to this position's
+   * history when its order is below `seenLen` (see `seenHas`).
+   */
+  readonly seen: Map<string, number>;
+  /** How many entries of `seen` belong to this position's history. */
+  readonly seenLen: number;
   readonly prisoners: Readonly<Record<Color, number>>;
   /** Simple-ko index for the side to move, or -1. */
   readonly ko: number;
@@ -457,7 +471,7 @@ function compute(settings: Settings, setup: Game['setup'], plies: readonly Ply[]
   const size = settings.size;
   let board = startBoard(settings, setup);
   let { hi, lo } = hashOf(board);
-  const seen = new Set<string>([hkey(hi, lo)]);
+  const seen = new Map<string, number>([[hkey(hi, lo), 0]]);
   const prisoners = { B: 0, W: 0 };
   let ko = -1;
   let run = 0;
@@ -481,11 +495,33 @@ function compute(settings: Settings, setup: Game['setup'], plies: readonly Ply[]
       prisoners[color] += r.captured;
       ko = r.ko;
       run = 0;
-      seen.add(hkey(hi, lo));
+      const key = hkey(hi, lo);
+      if (!seen.has(key)) seen.set(key, seen.size);
     }
     color = other(color);
   }
-  return { board, hi, lo, seen, prisoners, ko, run, entries };
+  return { board, hi, lo, seen, seenLen: seen.size, prisoners, ko, run, entries };
+}
+
+/** Whether the position `key` occurred in `c`'s history (positional superko). */
+function seenHas(c: Core, key: string): boolean {
+  const order = c.seen.get(key);
+  return order !== undefined && order < c.seenLen;
+}
+
+/**
+ * `c`'s history plus `key`. The shared map grows in place when `c` is the newest position of its
+ * line (so replaying a long record stays linear); a branch from an earlier position copies only
+ * that position's own history.
+ */
+function seenWith(c: Core, key: string): { seen: Map<string, number>; seenLen: number } {
+  let seen = c.seen;
+  if (seen.size !== c.seenLen) {
+    seen = new Map();
+    for (const [k, order] of c.seen) if (order < c.seenLen) seen.set(k, order);
+  }
+  seen.set(key, seen.size);
+  return { seen, seenLen: seen.size };
 }
 
 function core(g: Game): Core {
@@ -596,7 +632,7 @@ export function illegalReason(g: Game, p: Point): IllegalReason | null {
   if (idx === c.ko) return 'ko';
   const r = place(c.board, size, idx, colorNum(g.turn), c.hi, c.lo);
   if (typeof r === 'string') return r;
-  if (c.seen.has(hkey(r.hi, r.lo))) return 'superko';
+  if (seenHas(c, hkey(r.hi, r.lo))) return 'superko';
   return null;
 }
 
@@ -635,11 +671,9 @@ export function play(g: Game, p: Point, ms: number): Game {
   const r = place(c.board, size, idx, colorNum(g.turn), c.hi, c.lo);
   if (typeof r === 'string') throw new Error(`Illegal move ${p}: ${r}`);
   const key = hkey(r.hi, r.lo);
-  if (c.seen.has(key)) throw new Error(`Illegal move ${p}: superko`);
-  const seen = new Set(c.seen);
-  seen.add(key);
+  if (seenHas(c, key)) throw new Error(`Illegal move ${p}: superko`);
   const prisoners = { ...c.prisoners, [g.turn]: c.prisoners[g.turn] + r.captured };
-  const next: Core = { board: r.board, hi: r.hi, lo: r.lo, seen, prisoners, ko: r.ko, run: 0, entries: c.entries };
+  const next: Core = { board: r.board, hi: r.hi, lo: r.lo, ...seenWith(c, key), prisoners, ko: r.ko, run: 0, entries: c.entries };
   const plies = Object.freeze([...g.plies.slice(0, g.cursor), Object.freeze({ m: p, ms: cleanMs(ms) })]);
   return make(g.settings, g.setup, plies, plies.length, next, { passes: 0 });
 }
@@ -688,6 +722,13 @@ export function reopen(g: Game): Game {
 }
 
 /**
+ * The most plies a game record may hold (stones and passes). Real games stay far below it (a long
+ * 19×19 game has about 300); it bounds what a link, a stored record or a room log can make the
+ * device replay.
+ */
+export const MAX_PLIES = 2000;
+
+/**
  * Plays `plies` (or bare points, 0 ms each) from a new game. A ply that follows a double pass
  * resumes scoring first, so logs replay without storing resumes. Throws on an illegal ply.
  */
@@ -705,19 +746,23 @@ export function replay(settings: Settings, plies: readonly (Ply | Point)[]): Gam
  * Rebuilds a game from stored fields (`SavedGame`, `GameLog` plus its settings):
  * decodes `moves`, replays them with `ms`, then restores the scoring phase:
  * - a record that ends in scoring and stores `scoring` gets those marks;
- * - a record that ends in a double pass without `scoring` and without `result` was resumed;
+ * - a record that ends in a double pass without `scoring` was resumed, unless its `result` is a
+ *   score (`toSavedGame` stores `scoring` whenever the game has it, so a resignation or time-out
+ *   during scoring keeps its marks; one right after Resume has none);
  * - `result` ends the game (keeping the scoring marks of a scored game).
- * With `lenient`, a malformed or illegal ply stops the replay there instead of throwing
- * (for links typed or cut by hand).
+ * With `lenient`, a malformed or illegal ply, or the ply past `MAX_PLIES`, stops the replay there
+ * instead of throwing (for links typed or cut by hand).
  */
 export function fromRecord(rec: GameRecordFields, opts: { lenient?: boolean } = {}): Game {
   const settings = makeSettings(rec.size, rec.rules, rec.handicap);
   const s: Settings = rec.komi2 !== undefined && Number.isFinite(rec.komi2) ? { ...settings, komi2: rec.komi2 } : settings;
   if (!opts.lenient && !isValidMoves(rec.moves)) throw new Error('Malformed move encoding');
-  const points = decodeMoves(rec.moves);
+  const points = decodeMoves(typeof rec.moves === 'string' ? rec.moves.slice(0, 2 * MAX_PLIES + 2) : rec.moves);
+  if (!opts.lenient && points.length > MAX_PLIES) throw new Error(`More than ${MAX_PLIES} plies`);
+  const n = Math.min(points.length, MAX_PLIES);
   const ms = rec.ms ?? [];
   let g = newGame(s);
-  for (let i = 0; i < points.length; i++) {
+  for (let i = 0; i < n; i++) {
     try {
       if (g.scoring) g = resume(g);
       g = play(g, points[i], Number.isFinite(ms[i]) ? ms[i] : 0);
@@ -728,7 +773,7 @@ export function fromRecord(rec: GameRecordFields, opts: { lenient?: boolean } = 
   }
   if (g.scoring) {
     if (rec.scoring) g = setScoring(g, rec.scoring);
-    else if (!rec.result) g = resume(g);
+    else if (!rec.result || rec.result.by !== 'score') g = resume(g);
   }
   if (rec.result) g = end(g, rec.result);
   return g;

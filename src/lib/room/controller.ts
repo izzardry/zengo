@@ -268,6 +268,18 @@ export function timeLeft(api: ZigoApi, game: Game, tc: NonNullable<TimeControl>,
   return budgetMs(api.clocks(game, tc)[game.turn], tc) - turnMs;
 }
 
+/** setTimeout's largest delay: browsers fire a longer one at once. */
+export const MAX_TIMER_MS = 2_147_483_647;
+
+/**
+ * Delay of the flag timer: the time left (plus `graceMs` for the opponent's flag), between 0 and
+ * `MAX_TIMER_MS`. A clamped timer finds the flag still up and arms again.
+ */
+export function flagDelay(left: number, mine: boolean, graceMs: number): number {
+  const ms = mine ? left : left + graceMs;
+  return Number.isNaN(ms) ? 0 : Math.min(MAX_TIMER_MS, Math.max(0, ms));
+}
+
 /** Rules-core settings of log settings (default komi). */
 function newSettings(s: LogSettings) {
   return makeSettings(s.size, s.rules, s.handicap);
@@ -1911,7 +1923,7 @@ class Controller implements RoomControllerApi {
     const mine = this.myTurn();
     if (!mine && !this.live) return;
     const left = timeLeft(this.api, game, tc, this.elapsed());
-    const delay = Math.max(0, mine ? left : left + this.graceMs);
+    const delay = flagDelay(left, mine, this.graceMs);
     this.flagTimer = this.timers.setTimeout(() => {
       this.flagTimer = null;
       if (!this.flagCheck()) this.armFlagTimer();

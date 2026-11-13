@@ -8,6 +8,7 @@ import {
   finishedShareUrl,
   formatEnd,
   gameParams,
+  MAX_MOVES_LENGTH,
   parseEnd,
   parseUrl,
   roomShareUrl,
@@ -63,6 +64,17 @@ describe('parseUrl', () => {
 
   it('keeps an empty move list (a game at its start)', () => {
     expect(parseUrl('s=A&p=1&m=').moves).toBe('');
+  });
+
+  it('reads only c, l and r as the mode, never inherited object keys', () => {
+    expect(parseUrl('o=C').mode).toBe('computer');
+    for (const o of ['constructor', '__proto__', 'toString', 'hasOwnProperty', 'valueOf']) expect(parseUrl(`p=1&o=${o}`)).toEqual({ playing: true });
+  });
+
+  it('drops a move list longer than MAX_MOVES_LENGTH', () => {
+    expect(MAX_MOVES_LENGTH).toBe(4000);
+    expect(parseUrl(`m=${'tt'.repeat(2000)}`).moves).toHaveLength(4000);
+    expect(parseUrl(`s=A&p=1&m=${'tt'.repeat(20_000)}`)).toEqual({ code: 'A', playing: true });
   });
 });
 

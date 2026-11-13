@@ -37,7 +37,7 @@ import type {
   ZigoApi,
 } from './types';
 import { PROTOCOL_VERSION } from './types';
-import zigo, { isPoint, isValidMoves, makeSettings, normalizeHandicap, parseTc, PASS, pointToIndex } from './zigo';
+import zigo, { isPoint, isValidMoves, makeSettings, MAX_PLIES, normalizeHandicap, parseTc, PASS, pointToIndex } from './zigo';
 import scoringApi from './scoring';
 
 /* ---------------------------------------------------------------------------------------------- */
@@ -270,10 +270,11 @@ function readScoring(raw: unknown, size: number): Scoring | string {
  * `api` (an illegal ply, positional superko included, aborts the sync).
  *
  * Rejects: wrong shapes, `n < 1`, a negative epoch, an unknown seat, an unreadable time control,
- * a size other than 9/13/19, unknown rules, a handicap Zigo does not offer on that size, a point off
- * the board, an illegal ply, a scoring state without two consecutive passes at the end (or with dead
- * points that are not stones), an end whose `by` differs from its result's, a scored end that both
- * seats did not accept, and a scored end whose result is not the count of the marked dead stones.
+ * a size other than 9/13/19, unknown rules, a handicap Zigo does not offer on that size, more than
+ * `MAX_PLIES` plies, a point off the board, an illegal ply, a scoring state without two consecutive
+ * passes at the end (or with dead points that are not stones), an end whose `by` differs from its
+ * result's, a scored end that both seats did not accept, and a scored end whose result is not the
+ * count of the marked dead stones.
  *
  * A ply that follows a double pass resumes scoring first (as `ZigoApi.replay`). A log that ends in a
  * double pass without `scoring` was resumed; with `scoring` it is in (or was ended in) scoring.
@@ -296,6 +297,7 @@ export function validateLog(raw: unknown, api: ZigoApi = zigo): ValidLog | Inval
   const sz = size as Size;
   if (!isCount(handicap) || normalizeHandicap(sz, handicap) !== handicap) return bad('bad handicap');
   if (!Array.isArray(plies)) return bad('bad plies');
+  if (plies.length > MAX_PLIES) return bad('too many plies');
   let ending: LogEnd | undefined;
   if (end !== undefined && end !== null) {
     if (typeof end !== 'object') return bad('bad end');

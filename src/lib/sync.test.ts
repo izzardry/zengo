@@ -1,5 +1,5 @@
 import type { GameLog, HeadMsg, LogsMsg, Message, SavedGame, Scoring, Seat } from './types';
-import zigo from './zigo';
+import zigo, { MAX_PLIES } from './zigo';
 import {
   acceptLog,
   acceptMarking,
@@ -290,6 +290,8 @@ describe('validateLog', () => {
     ['handicap 1', { ...base, handicap: 1 }],
     ['handicap 6 on 9×9', { ...base, handicap: 6 }],
     ['plies not a list', { ...base, plies: {} }],
+    ['more than MAX_PLIES plies', { ...base, plies: P(Array<string>(MAX_PLIES + 1).fill('tt')) }],
+    ['an absurd time control', { ...base, tc: '40000+0' }],
     ['ply not an object', { ...base, plies: ['cc'] }],
     ['not two SGF letters', { ...base, plies: [{ m: 'D4', ms: 0 }] }],
     ['a point off a 9×9 board', { ...base, plies: [{ m: 'kk', ms: 0 }] }],
@@ -318,6 +320,10 @@ describe('validateLog', () => {
     ['acceptances not a pair', passedScoring({ ...S(1), accepted: [0] })],
   ])('rejects %s', (_label, raw) => {
     expect(validateLog(raw).ok).toBe(false);
+  });
+
+  it('accepts MAX_PLIES plies', () => {
+    expect(ok({ ...base, plies: P(Array<string>(MAX_PLIES).fill('tt')) }).game.plies).toHaveLength(MAX_PLIES);
   });
 
   it('accepts a log and returns a fresh normalized copy with the game', () => {

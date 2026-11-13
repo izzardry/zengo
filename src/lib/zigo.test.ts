@@ -19,10 +19,12 @@ import zigo, {
   isPoint,
   isValidMoves,
   makeSettings,
+  MAX_PLIES,
   maxHandicap,
   normalizeHandicap,
   parseTc,
   pointToIndex,
+  TC_LIMITS,
   starPoints,
   toTc,
 } from './zigo';
@@ -414,6 +416,22 @@ describe('ko and positional superko', () => {
     expect(illegalReason(goto(goto(g, 2), 5), 'bg')).toBe('superko');
   });
 
+  it('keeps each position to its own history when the line branches', () => {
+    const g4 = playAll(fromDiagram(TRIPLE_KO), ['cc', 'hc', 'cg', 'bc']);
+    const g5 = play(g4, 'gc', 1);
+    // The earlier position does not see the position its child created.
+    expect(illegalReason(g4, 'gc')).toBeNull();
+    const again = play(g4, 'gc', 2);
+    expect(diagram(again)).toEqual(diagram(g5));
+    expect(illegalReason(again, 'bg')).toBe('superko');
+    expect(illegalReason(g5, 'bg')).toBe('superko');
+    // A branch elsewhere neither inherits the other branch's positions nor changes them.
+    const alt = play(g4, 'ee', 1);
+    expect(illegalReason(alt, 'ff')).toBeNull();
+    expect(illegalReason(play(g5, 'ee', 1), 'bg')).toBeNull();
+    expect(illegalReason(g5, 'bg')).toBe('superko');
+  });
+
   it('counts the start position in the history; passes do not lift superko', () => {
     // W takes a ko, both pass, play resumes: B's retake would recreate the start position.
     const start = fromDiagram(['.........', '.xo......', 'x.xo.....', '.xo......', ...Array(5).fill('.........')], 'W');
@@ -643,6 +661,29 @@ describe('fromRecord', () => {
     expect(resigned.end?.result.by).toBe('resign');
   });
 
+  it('treats a double pass without marks as resumed unless the result is a score', () => {
+    // Time ran out (or a player resigned) right after Resume: the stored record has no marks.
+    for (const by of ['time', 'resign'] as const) {
+      const g = fromRecord({ size: 9, rules: 'area', handicap: 0, moves: 'ccggtttt', result: { winner: 'W', by } });
+      expect(g.scoring).toBeUndefined();
+      expect(g.passes).toBe(0);
+      expect(g.end?.result).toEqual({ winner: 'W', by });
+    }
+    // The live game it was saved from shows the same.
+    const live = end(resume(pass(pass(playAll(newGame(makeSettings(9, 'area', 0)), ['cc', 'gg']), 1), 1)), { winner: 'W', by: 'time' });
+    expect(live.scoring).toBeUndefined();
+    // A scored record keeps the scoring state even when its marks are missing.
+    const scored = fromRecord({ size: 9, rules: 'area', handicap: 0, moves: 'ccggtttt', result: { winner: 'W', by: 'score', margin: 1 } });
+    expect(scored.scoring?.round).toBe(1);
+  });
+
+  it('replays at most MAX_PLIES plies', () => {
+    const rec = (n: number) => ({ size: 9 as const, rules: 'area' as const, handicap: 0, moves: 'tt'.repeat(n) });
+    expect(fromRecord(rec(MAX_PLIES)).cursor).toBe(MAX_PLIES);
+    expect(() => fromRecord(rec(MAX_PLIES + 1))).toThrow(/plies/);
+    expect(fromRecord(rec(20_000), { lenient: true }).cursor).toBe(MAX_PLIES);
+  });
+
   it('validates the replay: throws on illegal plies unless lenient', () => {
     expect(() => fromRecord({ size: 9, rules: 'area', handicap: 0, moves: 'eeee' })).toThrow(/occupied/);
     expect(() => fromRecord({ size: 9, rules: 'area', handicap: 0, moves: 'eex' })).toThrow(/Malformed/);
@@ -703,6 +744,15 @@ describe('time controls', () => {
     expect(formatTc(null)).toBeNull();
     expect(toTc('5+7')).toEqual(parseTc('5+7'));
     expect(toTc(undefined)).toBeNull();
+  });
+
+  it('refuses clocks above the limits, so the flag timer stays in range', () => {
+    expect(TC_LIMITS.baseMs + TC_LIMITS.periods * TC_LIMITS.periodMs).toBeLessThan(2 ** 31 - 1);
+    expect(parseTc('600+600')).toEqual({ kind: 'fischer', baseMs: 36_000_000, incMs: 600_000 });
+    expect(parseTc('600m60x3600')).toEqual({ kind: 'byoyomi', baseMs: 36_000_000, periods: 60, periodMs: 3_600_000 });
+    for (const bad of ['40000+0', '601+0', '5+601', '601m5x30', '20m61x30', '20m5x3601', `${'9'.repeat(400)}+0`, `5+${'9'.repeat(400)}`]) {
+      expect(parseTc(bad)).toBeNull();
+    }
   });
 });
 
