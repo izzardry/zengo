@@ -256,6 +256,7 @@ async function run(job: Job): Promise<void> {
     const out = await execute(job, ctl);
     post({ type: 'result', id: job.id, result: out.result }, out.transfer);
   } catch (e) {
+    console.error(`Zigo engine worker (${active}): ${job.type} failed`, e);
     post({ type: 'error', id: job.id, message: describe(e) });
   } finally {
     current = null;

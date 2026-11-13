@@ -6,6 +6,7 @@ import { readEngineBackend, store, writeEngineBackend } from '@/lib/storage';
 import { EngineDriver, type WorkerLike } from './driver';
 
 export function createBrowserEngine(): EngineDriver {
+  console.info(`Zigo engine: build ${typeof __GIT_HASH__ === 'string' ? __GIT_HASH__ : 'dev'}.`);
   return new EngineDriver({
     createWorker: () =>
       new Worker(new URL('../../workers/engine.worker.ts', import.meta.url), { type: 'module', name: 'zigo-engine' }) as unknown as WorkerLike,

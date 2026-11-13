@@ -440,7 +440,10 @@ export class EngineDriver implements EngineHandle {
         const net = this.loadIds.get(m.id);
         if (net) {
           this.loadIds.delete(m.id);
-          if (m.type === 'error') this.onLoadError(net, new EngineUnavailableError(m.message));
+          if (m.type === 'error') {
+            console.error(`Zigo engine: loading the ${net} net failed: ${m.message}`);
+            this.onLoadError(net, new EngineUnavailableError(m.message));
+          }
           return;
         }
         const job = this.running;
@@ -448,7 +451,10 @@ export class EngineDriver implements EngineHandle {
         this.running = null;
         clearTimeout(this.watchdog);
         if (m.type === 'result') job.settle({ status: 'done', result: m.result });
-        else job.settle({ status: 'failed', error: new EngineUnavailableError(m.message) });
+        else {
+          console.error(`Zigo engine: ${job.kind} failed in the worker: ${m.message}`);
+          job.settle({ status: 'failed', error: new EngineUnavailableError(m.message) });
+        }
         this.pump();
         return;
       }

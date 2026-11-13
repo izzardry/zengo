@@ -274,7 +274,8 @@ export default function Index() {
 
   /* ---- engine trouble: one calm toast with Try again (DESIGN 10.1) ---- */
   const engineFailed = useCallback(
-    (retry?: () => void) => {
+    (source: string, error: unknown, retry?: () => void) => {
+      console.error(`Zigo engine: ${source} failed:`, error instanceof Error ? `${error.name}: ${error.message}` : error);
       toast(t(isOnline() ? 'engine.failed' : 'engine.failedOffline'), {
         id: 'engine-failed',
         action: retry ? { label: t('engine.retry'), onClick: retry } : undefined,
@@ -295,7 +296,7 @@ export default function Index() {
     tc: session?.tc ?? null,
     onMove: (p, ms) => void (isPass(p) ? gsRef.current.pass(ms) : gsRef.current.play(p, ms)),
     onResign: (result) => void gsRef.current.finish(result),
-    onFail: () => engineFailed(() => computerRetry.current()),
+    onFail: (err) => engineFailed('computer move', err, () => computerRetry.current()),
     elapsed: clock.elapsed,
     sessionKey: sessionId,
   });
@@ -320,7 +321,7 @@ export default function Index() {
     enabled: hintEnabled,
     available: engine.state === 'ready' || (engine.state !== 'failed' && stage1Cached),
     onAssisted: gs.markAssisted,
-    onFail: () => engineFailed(),
+    onFail: (err) => engineFailed('hint', err),
     onUnavailable: () => toast(t('assist.previewNeedsEngine'), { id: 'preview-engine' }),
     sessionKey: sessionId,
   });
@@ -400,7 +401,7 @@ export default function Index() {
 
   /* ---- Start: a computer game waits for the engine (spinner with progress, DESIGN 10.1, 14) ---- */
   const handleStartRef = useRef<() => Promise<void>>(async () => undefined);
-  const engineStart = useEngineStart(engine, { onFail: () => engineFailed(() => void handleStartRef.current()) });
+  const engineStart = useEngineStart(engine, { onFail: (err) => engineFailed('engine start', err, () => void handleStartRef.current()) });
   const { cancel: cancelEngineStart, prepare: prepareEngine } = engineStart;
   useEffect(() => {
     if (!isStart) cancelEngineStart();
