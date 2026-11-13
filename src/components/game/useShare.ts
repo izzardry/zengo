@@ -1,5 +1,6 @@
 /**
  * Share actions with the right texts and confirmation toasts (DESIGN 13.2, 13.3, Ztyle 09 system toasts).
+ * A failed copy is a plain toast: Ztyle 09 allows no icon but the check of toast.success.
  */
 import { useCallback } from 'react';
 import { toast } from 'sonner';
@@ -28,8 +29,8 @@ export function useShare(nav?: ShareNavigator): ShareApi {
             ? t('game.shareText.win', { level: level ?? '' })
             : t('game.shareText.solo');
       const outcome = await shareOrCopy({ title: BRAND.shareTitle, text, url }, nav);
-      if (outcome === 'copied') toast.success(t('linkCopiedClipboard'));
-      else if (outcome === 'failed') toast.error(t('game.copyFailed'));
+      if (outcome === 'copied') toast.success(t('linkCopied'));
+      else if (outcome === 'failed') toast(t('game.copyFailed'));
       return outcome;
     },
     [t, nav],
@@ -39,7 +40,7 @@ export function useShare(nav?: ShareNavigator): ShareApi {
     async (sgf: string) => {
       const ok = await copyText(sgf, nav);
       if (ok) toast.success(t('game.sgfCopied'));
-      else toast.error(t('game.copyFailed'));
+      else toast(t('game.copyFailed'));
       return ok;
     },
     [t, nav],

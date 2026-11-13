@@ -6,7 +6,9 @@
  * Content (DESIGN 14.2 plus the Ztyle template): back + saved, the game code, how to place a
  * stone (tap; on 13×13 and 19×19 tap the ghost stone again; type `D4` on pointer devices), the
  * scoring step (after two passes, tap dead groups and Accept), the toolbar (shield, bulb
- * tap/hold, flag tap pass / hold resign), tap the background to hide the UI. Portrait: 3 rows;
+ * tap/hold, flag tap pass / hold resign), tap the background to hide the UI. Against the computer
+ * the toolbar bubble also says that levels 10–12 play stronger on faster devices (DESIGN 10.2).
+ * Portrait: 3 rows;
  * mobile landscape: 3 columns. Touch devices get the gesture texts, pointer devices click/type.
  *
  * Ported from Zudoku `TutorialOverlay.tsx`; fixes: dismiss runs once (Zudoku fired on both
@@ -235,6 +237,11 @@ export function TutorialOverlay({ onDismiss, mode = 'computer', size, isLandscap
       <Row icon={<ShieldCheck />} text={t('platform.tutorial.helpers')} small={landscape} />
       {showHint && <Row icon={<Lightbulb />} text={t('platform.tutorial.hint')} small={landscape} />}
       <Row icon={<Flag />} text={t('platform.tutorial.flag')} small={landscape} />
+      {mode === 'computer' && (
+        <p className="text-muted-foreground text-[10px] pt-0.5" data-testid="tutorial-levels">
+          {t('platform.tutorial.levels')}
+        </p>
+      )}
     </div>
   );
   const hide = (

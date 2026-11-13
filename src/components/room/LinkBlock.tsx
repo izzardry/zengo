@@ -57,12 +57,12 @@ export function LinkBlock({ link, shareText, qr = true, nav, className }: LinkBl
 
   const copy = async () => {
     if (await copyText(link, n)) toast.success(t('linkCopied'));
-    else toast.error(t('game.copyFailed'));
+    else toast(t('game.copyFailed'));
   };
   const share = async () => {
     const outcome = await shareOrCopy({ title: BRAND.shareTitle, text: shareText, url: link }, n);
-    if (outcome === 'copied') toast.success(t('linkCopiedClipboard'));
-    else if (outcome === 'failed') toast.error(t('game.copyFailed'));
+    if (outcome === 'copied') toast.success(t('linkCopied'));
+    else if (outcome === 'failed') toast(t('game.copyFailed'));
   };
 
   return (

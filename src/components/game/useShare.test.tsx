@@ -7,7 +7,7 @@ import type { Language } from '@/lib/types';
 import type { ShareNavigator } from './share';
 import { useShare } from './useShare';
 
-const toastMock = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+const toastMock = vi.hoisted(() => Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }));
 vi.mock('sonner', () => ({ toast: toastMock }));
 
 const wrapper =
@@ -19,6 +19,7 @@ const wrapper =
   );
 
 beforeEach(() => {
+  toastMock.mockReset();
   toastMock.success.mockReset();
   toastMock.error.mockReset();
 });
@@ -55,10 +56,10 @@ describe('useShare', () => {
     });
     expect(outcome).toBe('copied');
     expect(writeText).toHaveBeenCalledWith('https://zigo/#/?s=ABC');
-    expect(toastMock.success).toHaveBeenCalledWith('Link copied to clipboard!');
+    expect(toastMock.success).toHaveBeenCalledWith('Link copied!');
   });
 
-  it('copies SGF with a toast, or reports failure', async () => {
+  it('copies SGF with a toast, or reports failure in a plain toast without an icon (Ztyle 09)', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     const { result } = renderHook(() => useShare({ clipboard: { writeText } }), { wrapper: wrapper('de') });
     await act(() => result.current.copySgf('(;FF[4]GM[1]SZ[9];B[ee])'));
@@ -74,7 +75,8 @@ describe('useShare', () => {
         ok = await result.current.copySgf('x');
       });
       expect(ok).toBe(false);
-      expect(toastMock.error).toHaveBeenCalledWith('Kopieren fehlgeschlagen');
+      expect(toastMock).toHaveBeenCalledWith('Kopieren fehlgeschlagen');
+      expect(toastMock.error).not.toHaveBeenCalled();
     } finally {
       document.execCommand = original;
     }
@@ -86,5 +88,25 @@ describe('useShare', () => {
     await act(() => result.current.shareLink('u', 'solo'));
     expect(toastMock.success).not.toHaveBeenCalled();
     expect(toastMock.error).not.toHaveBeenCalled();
+    expect(toastMock).not.toHaveBeenCalled();
+  });
+
+  it('reports a failed share fallback in a plain toast without an icon (Ztyle 09)', async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error('denied'));
+    const original = document.execCommand;
+    document.execCommand = vi.fn().mockReturnValue(false);
+    try {
+      const { result } = renderHook(() => useShare({ clipboard: { writeText } }), { wrapper: wrapper() });
+      let outcome: string | undefined;
+      await act(async () => {
+        outcome = await result.current.shareLink('u', 'solo');
+      });
+      expect(outcome).toBe('failed');
+      expect(toastMock).toHaveBeenCalledWith('Could not copy');
+      expect(toastMock.error).not.toHaveBeenCalled();
+      expect(toastMock.success).not.toHaveBeenCalled();
+    } finally {
+      document.execCommand = original;
+    }
   });
 });

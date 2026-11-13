@@ -63,6 +63,23 @@ describe('TutorialOverlay', () => {
     expect(screen.getByRole('dialog')).toHaveTextContent('Tap: pass · Hold: resign');
   });
 
+  it('says against the computer that levels 10–12 depend on the device (DESIGN 10.2)', () => {
+    const { unmount } = renderWithI18n(<TutorialOverlay onDismiss={() => {}} mode="computer" isTouch />);
+    expect(screen.getByRole('dialog')).toHaveTextContent('Levels 10–12 play stronger on faster devices');
+    unmount();
+    const landscape = renderWithI18n(<TutorialOverlay onDismiss={() => {}} isLandscape isTouch />);
+    expect(screen.getByRole('dialog')).toHaveTextContent('Levels 10–12 play stronger on faster devices');
+    landscape.unmount();
+    const de = renderWithI18n(<TutorialOverlay onDismiss={() => {}} isTouch />, 'de');
+    expect(screen.getByRole('dialog')).toHaveTextContent('Level 10–12 spielen auf schnelleren Geräten stärker');
+    de.unmount();
+    for (const mode of ['local', 'room'] as const) {
+      const r = renderWithI18n(<TutorialOverlay onDismiss={() => {}} mode={mode} isTouch />);
+      expect(screen.queryByTestId('tutorial-levels')).toBeNull();
+      r.unmount();
+    }
+  });
+
   it('has a landscape arrangement with the same content', () => {
     renderWithI18n(<TutorialOverlay onDismiss={() => {}} isLandscape isTouch />);
     expect(screen.getByRole('dialog')).toHaveTextContent('Helpers on or off');

@@ -276,7 +276,7 @@ for (const vp of VIEWPORTS) {
       await playMoves(page, ['D4', 'K10', 'K4']);
 
       await toolbar(page).getByRole('button', { name: 'Share game' }).click();
-      await expect(page.getByText('Link copied to clipboard!')).toBeVisible();
+      await expect(page.getByText('Link copied!')).toBeVisible();
       const url = await page.evaluate(() => navigator.clipboard.readText());
       expect(url).toMatch(/[?&]n=13(&|$)/);
       expect(url).toMatch(/[?&]m=[a-t]+(&|$)/);

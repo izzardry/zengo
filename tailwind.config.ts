@@ -7,4 +7,7 @@ import ztyle from "./src/ztyle/tailwind.preset";
 export default {
   presets: [{ ...ztyle, darkMode: "class" }],
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
+  // `overline` is Ztyle's type role (src/ztyle/ztyle.css). Tailwind's text-decoration utility of
+  // the same name would also match it and draw a line above the start screen's opponent kind.
+  blocklist: ["overline"],
 } satisfies Config;
