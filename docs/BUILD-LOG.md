@@ -47,12 +47,12 @@ _(Written at the end of the run.)_
 
 ### Final phase · Audit, polish, publish
 
-- [ ] 1 · Design audit
-- [ ] 2 · Ztyle audit
-- [ ] 3 · Code review
-- [ ] 4 · Visual pass
-- [ ] 5 · Fix confirmed findings, re-run all e2e suites and the full gate
-- [ ] 6 · Docs
+- [x] 1 · Design audit
+- [x] 2 · Ztyle audit
+- [x] 3 · Code review
+- [x] 4 · Visual pass
+- [x] 5 · Fix confirmed findings, re-run all e2e suites and the full gate
+- [x] 6 · Docs
 - [ ] 7 · Publish and live smoke test
 
 ## Decisions
@@ -339,6 +339,20 @@ _(One line each: where the design was silent, what was chosen and why.)_
 - Gate 3 fix (e2e timing under load (m1/m2 suites)): The m1 share-URL test and both m1 screenshot tests get test.setTimeout(120_000): since Gate 2, their passTwice waits for the engine (up to 60 s) and then the proposal (up to 7 s), which the Gate 1 default of 60 s did not allow for. m2's engine tests already use 120-240 s.
 - Gate 3 fix (e2e timing under load (m1/m2 suites)): The m2 byo-yomi test opens the link with Black's first move only (C3) and waits for the computer's reply, so Black's main time starts after the engine has loaded. Engine loading time no longer counts against the `main > 50_000` check, which is unchanged. The rest of the test (quietPoint, 4 plies, ·3/·2, Out of time, W+T) is unchanged; only the white stone is now the computer's choice instead of G7.
 
+**Final phase**
+- Orchestrator: PLAN's "`/code-review high` on the whole branch" runs as three high-effort review agents inside the final workflow (rules/sync/room, engine/assistance, UI/hooks), because the skill reviews a diff and the whole repo is new; each finding is checked by a skeptic like the audit findings.
+- Orchestrator: final workflow `wf_f5761ffc-978`: 5 design auditors (DESIGN 4–6, 7–8, 9, 10–11, 12–14), a Ztyle auditor, 3 code reviewers and a visual pass, each followed by a skeptic; then triage into fix clusters, fixes and the README in parallel, and the full gate with up to three fix rounds.
+- Audit result: 29 findings confirmed, 15 rejected by the skeptics. Rejected because the design, Ztyle or Zhess already settles them, or they were logged earlier: crosshair weight (DESIGN 5.3 gives none), hint numbers when the best move is a pass (the pass toast shows again), room takeback in scoring cutting both passes (as in Zhess), level 9 playing the top policy move after the opening (Web KaTrain's policy bot; levels are starting values), stage 2 re-download after eviction, 36 px setting pills (Ztyle asks 44 px for the toolbar only), the hint busy label, toast over the strip at 320×568, the invite sheet on short screens (it scrolls), faint 8 px desktop coordinates (DESIGN 5.4), 19×19 coordinates touching the frame at 320 px, the 🎉 emoji (DESIGN 8.5), no clock in the far strip during scoring, the dimmed prisoner glyph (DESIGN 4: 50 % strip), floating chrome over history cards (as in Zhess).
+- Fix (game chrome, `161eecf`): solo scoring keeps Accept disabled and shows "Finding dead stones…" until the engine's proposal arrives; Index.test's face-to-face test now waits for the far Accept to be enabled (it clicked during the proposal, which was the bug). In the landscape rail the stopped clock is left out during scoring to fit the height; the rail strip's details wrap in a row. Rail centering uses auto margins, because older Safari drops `safe`. The far Accept gets a 44 px hit area that ends where the grid begins.
+- Fix (engine loading, `b75bdfb`): Start waits for the page's running stage download instead of fetching the net again; the pill shows max(0.99, engine progress) after the download while the net is built; stage 2 starts when stage 1's download ends. A search that needs the large net waits for it under the loading timer, not the 40 s search watchdog, and searches stay in call order. driver.test's level-12 case now loads stage 2 first; what it checks is unchanged.
+- Fix (rules and links, `eb88e4e`): MAX_PLIES = 2000 for `m`, fromRecord and room logs (a long 19×19 game is about 300). Live play is not capped. The superko map is shared along a game line (2000-ply replay 57 ms). Time controls above 600 min, 600 s increment, 60 periods or 3600 s periods are refused (far above the dial's range), and the room flag timer is clamped to setTimeout's limit. URL mode lookups check own properties only.
+- Fix (room review, `065618e`): the review is tied to the room's game number; a rematch or a takeback to or before the reviewed position returns to the live game.
+- Fix (board feedback, `86064c0`): the atari pulse plays when a group enters atari, compared per colour with that colour's previous turn. Mouse hover on an illegal point is drawn hollow with an x at the hover's strength (0.67 of the ghost's mark).
+- Fix (copy and style, `4772283`): the help names device speed for levels 10–12, only in computer games, inside the toolbar bubble. German says "Level" throughout. "Link copied!" everywhere. Copy failures use plain toasts. Tailwind's `overline` utility is blocklisted so Ztyle's `.overline` type role draws no line.
+- Fix (assets, `1528141`): the Apache-2.0 licence ships next to the TF.js WASM binaries. scripts/screenshots.mjs can open games in scoring.
+- Docs (`c26fe97`): README rewritten in Zhess's layout: features, scripts and flags, structure, how scoring, rooms and the engine work, licence and credits. It says the rank line has no table yet.
+- Gate fix round 1 (`b0cb55d`): at 844×390 the room's "Could not reach the connection service." toast broke text mid-word and covered the whole right rail. Toast text now breaks only between words, and an action moves under the text when the text would get narrower than 8rem (all toasts). Toasts beside the landscape board are compact (text-xs, py-2 px-3). While toasts show, the Toaster publishes their stack height as `--zigo-rail-toasts`, and the right rail (toolbar or scoring bar) moves up above them, never above Help. The rail was moved, not the toast, because the free corner at 844×390 (223×89 px) cannot hold a message with an action in every language.
+
 ## Deviations
 
 _(Where a design decision could not be built as stated: what was built instead, and why.)_
@@ -381,6 +395,7 @@ _(Where a design decision could not be built as stated: what was built instead, 
 - Gate 3 fix (start-screen toast placement): I changed src/components/ui/toasterPlacement.ts and src/components/start/StartFooter.tsx, and added src/components/start/startToastRoom.ts and its test file, instead of the suggested toastSlot.ts, RoomToasts.tsx and StartChrome.tsx. The offset is decided in toasterPlacement and the footer is the element that has to be measured. RoomToasts and toastSlot were not involved.
 - Gate 3 fix (e2e timing under load (m1/m2 suites)): The byo-yomi test's prepared position now has one move instead of two (C3 instead of C3, G7). That does not contradict DESIGN.md. It changes when Black's clock starts relative to engine loading, and no assertion changed.
 - Gate 3 fix (e2e timing under load (m1/m2 suites)): Nothing was verified with Playwright: Chromium cannot launch from this session (launchd 'Reentrancy avoided', bootstrap_check_in error 141).
+- Final gate fix: toasts beside the landscape board use text-xs and py-2 px-3 instead of Ztyle 05's text-sm and py-3 px-4, so a toast with an action fits in the rail column. Ztyle's right-center rail moves up while a toast shows and returns to center without one.
 
 ## Open items
 
@@ -396,7 +411,9 @@ _(Features switched off in `src/lib/flags.ts`, and anything left unfinished.)_
 - M3: the room e2e tests run under Playwright's exclusive lock (one at a time after the parallel tests): in parallel with the engine suites at a machine load average of 150–210 the manual exchange stalled. The root cause (CPU starvation vs concurrent WebRTC) was not established; Zhess's identical transport passed fully parallel. Worth a look if rooms ever feel slow to connect on a busy phone.
 - M3: remaining toast overlaps on screens without free space: at 320×568 a wrapped request toast covers the board's bottom edge; at 768×1024 a two-line request toast touches the board frame by 1 px; at 844×390 a wrapped request toast touches the rail toolbar by 5 px; at 667×375 the rail toast overlaps the board by about 10 px. After scrolling to history, start-screen toasts fall back to the in-game offset.
 - M3: the own pending Accept in a room shows a pressed "Accepted" button with a waiting note instead of Ztyle 18's pulsing button (ScoringBar has no pulse option).
-- Build warning: the main chunk is 794 kB (196 kB gzip), over Vite's 500 kB warning.
+- Build warning: the main chunk is 805 kB (253 kB gzip), over Vite's 500 kB warning.
+- Final: where the landscape rail cannot move further up (it stops below Help), a four-line German toast at 667×375 reaches 5 px into the toolbar's bottom padding and a three-line French toast at 740×360 2 px; the buttons stay clear. In landscape room scoring the toast can cover the lower part of the waiting note ("Scoring continues when your opponent is back") by up to about 33 px at 667×375. At 320×568 the failure toast still covers the board's bottom row (now 100 px tall).
+- Final: if Start is tapped within about 1 s of a first launch (before the page's own stage-1 download leaves its 1 s delay), stage 1 is still fetched twice and the pill reads "START 0%" while the status line climbs. The tutorial sits in front of Start on a first launch, so this is hard to hit. Fix: start the page's download at once when Start is tapped during its delay.
 
 ## Measured speeds
 
@@ -438,3 +455,7 @@ All on this Mac (Apple silicon). **No phone was measured.** One network evaluati
 - Round 2: failed. The full parallel e2e (7 workers, load average 150–210) failed 3 must-pass room tests (manual exchange stalled) and 4 m1/m2 tests (timeouts, a byo-yomi read 8 ms short); with `--workers=1` all room tests passed. Then the macOS login session broke (`launchctl` 141 "Reentrancy avoided"; Chromium could not launch at all), so later runs were not counted. Fixes: room tests under Playwright's exclusive lock (`8cfcc5c`), 4 workers and 120 s for engine-waiting m1 tests, byo-yomi main time starting after the computer's reply (`7da422d`), start-screen toasts kept off the footer pills (`ffe7fb8`). Environment: fixed by restarting the session.
 - Round 3 and the orchestrator's own re-run: `npm run lint` clean, `npm run typecheck` clean, `npm test` 80 files / 2010 tests passed, `npm run build` ok (33 precache entries), chess grep 0 hits, `caffeinate -i npx playwright test` 46/46 passed (smoke 5, m1 22, m2 13, m3 6: manual path, resume, recovery, offline pass, BroadcastChannel hand-over, broker path). **The public PeerJS broker path ran and passed.** The must-pass room tests run over real WebRTC with the broker blocked (manual path), including a scored game with a toggled group and a resume. Verifier read 96 screenshots of its own; no fault. Nothing switched off by flag.
 
+
+**Final gate (2026-11-13): passed in round 2.** Workflow `wf_f5761ffc-978`, 32 agents: 10 finders, 10 skeptics, triage, 6 fix clusters, the README, 2 verifier runs and 1 gate-fix agent.
+- Round 1: lint, typecheck, unit tests (2050), build, grep and e2e (51/51) all passed. The gate still failed on one visual fault. At 844×390 the room's broker-failure toast broke its text mid-word and covered the whole right rail, hiding pass, resign, Resume and Accept. Fixed in `b0cb55d`.
+- Round 2 and the orchestrator's own re-run: `npm run lint` clean, `npm run typecheck` clean, `npm test` 81 files / 2054 tests passed, `npm run build` ok (33 precache entries; the only warning is the known chunk size), chess grep 0 hits, `caffeinate -i npx playwright test` 55/55 passed (smoke 5, chrome 9, m1 22, m2 13, m3 6, including the broker path). The verifier read 30 new screenshots at 390×844, 844×390 and 1280×800, in light and dark, and found no regression. The visual pass's 130 screenshots at five sizes are in `docs/screenshots/final/`. Nothing is switched off by flag.
