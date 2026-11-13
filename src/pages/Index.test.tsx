@@ -294,6 +294,8 @@ describe('Index stage', () => {
     // The far player's Accept sits in the rotated far strip.
     const farAccept = screen.getByRole('button', { name: 'Accept the count for White' });
     expect(farAccept.closest('.rotate-180')).not.toBeNull();
+    // Both Accepts wait for the engine's dead-stone proposal (DESIGN 8.4 step 1).
+    await waitFor(() => expect(farAccept).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: 'Accept the count for Black' }));
     expect(stage()).toHaveAttribute('data-phase', 'scoring');
     fireEvent.click(farAccept);
@@ -449,3 +451,78 @@ describe('Index stage against the computer (milestone 2)', () => {
   });
 });
 
+
+describe('Index stage: final-phase fixes', () => {
+  it('against the computer the pass toast outlives the reply, and Undo goes back to before the pass (DESIGN 6.2)', async () => {
+    await startComputer();
+    place('E5');
+    await waitFor(() => expect(cellName('A9')).toMatch(/^white stone, A9/), { timeout: 3000 });
+    fireEvent.click(flag());
+    // The computer answers the pass with a stone (FakeEngine: the next free point from the top left).
+    await waitFor(() => expect(cellName('B9')).toMatch(/^white stone, B9/), { timeout: 3000 });
+    const status = screen.getAllByRole('status').find((el) => el.textContent?.includes('You passed'));
+    expect(status).toBeDefined();
+    fireEvent.click(within(status!).getByRole('button', { name: 'Undo' }));
+    // The pass and the reply are gone; Black is to move again.
+    expect(cellName('B9')).toMatch(/^empty, B9/);
+    expect(cellName('A9')).toMatch(/^white stone, A9/);
+    expect(screen.queryByText('You passed')).toBeNull();
+    expect(flag()).toBeEnabled();
+  });
+
+  it('solo scoring waits for the engine’s dead-stone proposal: both buttons locked with a note (DESIGN 8.4)', async () => {
+    const e = useEngine();
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => (release = r));
+    const evaluate = e.evaluate;
+    // The proposal (100 visits) waits for the gate; other evaluations answer at once.
+    Object.defineProperty(e, 'evaluate', {
+      value: (...args: Parameters<typeof evaluate>) => (args[1].visits === 100 ? gate.then(() => evaluate(...args)) : evaluate(...args)),
+    });
+    localStorage.setItem('zigo:seating', JSON.stringify('face'));
+    renderStage();
+    startTwoPlayers();
+    place('E5');
+    fireEvent.click(flag());
+    fireEvent.click(flag());
+    expect(stage()).toHaveAttribute('data-phase', 'scoring');
+    const near = screen.getByRole('button', { name: 'Accept the count for Black' });
+    const far = screen.getByRole('button', { name: 'Accept the count for White' });
+    await waitFor(() => expect(screen.getByTestId('scoring-bar')).toHaveTextContent('Finding dead stones…'));
+    expect(near).toBeDisabled();
+    expect(far).toBeDisabled();
+    expect(within(screen.getByRole('group', { name: 'Scoring' })).getByRole('button', { name: 'Resume' })).toBeDisabled();
+    // A tap on the locked Accept does not end the game with every stone alive.
+    fireEvent.click(near);
+    fireEvent.click(far);
+    expect(stage()).toHaveAttribute('data-phase', 'scoring');
+
+    await act(async () => release());
+    await waitFor(() => expect(near).toBeEnabled());
+    expect(far).toBeEnabled();
+    expect(screen.getByTestId('scoring-bar')).not.toHaveTextContent('Finding dead stones…');
+  });
+
+  it('the hidden language switcher leaves the Tab order with its aria-hidden wrapper', () => {
+    renderStage();
+    expect(screen.getByRole('button', { name: /^Change language/ })).not.toHaveAttribute('tabindex');
+    startTwoPlayers();
+    expect(screen.getByRole('button', { name: /^Change language/, hidden: true })).toHaveAttribute('tabindex', '-1');
+  });
+
+  it('a Start waiting for the engine is cancelled when the selection changes meanwhile', async () => {
+    useEngine({ loadMs: 300 });
+    renderStage();
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    expect(await screen.findByRole('progressbar', { name: /%/ })).toBeInTheDocument();
+    // The player switches to two players while the computer loads: the old Start does not run.
+    selectOpponent('Two players');
+    await act(() => new Promise((r) => setTimeout(r, 500)));
+    expect(stage()).toHaveAttribute('data-phase', 'start');
+    expect(screen.queryByRole('progressbar', { name: /%/ })).toBeNull();
+    // A new tap starts what is selected now.
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
+    expect(stage()).toHaveAttribute('data-phase', 'playing');
+    expect(screen.getByRole('group', { name: 'Game info' })).toHaveTextContent(/Players\s*2/i);
+  });
+});

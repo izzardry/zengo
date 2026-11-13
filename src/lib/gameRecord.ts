@@ -411,6 +411,17 @@ function truncate(g: Game, n: number): Game {
  * no such pass.
  */
 export function applyUndoPass(s: GameSession, now: number): GameSession | null {
+  const i = undoPassIndex(s);
+  if (i === null) return null;
+  return changed(s, truncate(s.game, i), now, { review: null });
+}
+
+/**
+ * The ply index of the pass the 5-second undo toast would take back (see `applyUndoPass`), or null
+ * if there is none. Against the computer it stays the same while the computer replies after the
+ * pass, so the toast can follow that pass rather than the cursor.
+ */
+export function undoPassIndex(s: GameSession): number | null {
   if (s.mode === 'room' || s.review !== null) return null;
   const g = s.game;
   // Only an ending the pass caused: a round-2 double pass is scored at once. An Accept is final.
@@ -420,7 +431,7 @@ export function applyUndoPass(s: GameSession, now: number): GameSession | null {
     while (i >= 0 && turnAt(g, i) !== s.color) i--;
   }
   if (i < 0 || !isPass(g.plies[i].m)) return null;
-  return changed(s, truncate(g, i), now, { review: null });
+  return i;
 }
 
 /**

@@ -9,9 +9,11 @@ import { cn } from '@/lib/utils';
 
 export interface LanguageSwitcherProps {
   className?: string;
+  /** -1 while the switcher is hidden (e.g. inside an aria-hidden wrapper), so Tab skips it. */
+  tabIndex?: number;
 }
 
-export function LanguageSwitcher({ className }: LanguageSwitcherProps) {
+export function LanguageSwitcher({ className, tabIndex }: LanguageSwitcherProps) {
   const { language, setLanguage, t } = useI18n();
   const current = LANGUAGES.find((l) => l.code === language) ?? LANGUAGES[0];
 
@@ -20,6 +22,7 @@ export function LanguageSwitcher({ className }: LanguageSwitcherProps) {
       <DropdownMenuTrigger asChild>
         <button
           type="button"
+          tabIndex={tabIndex}
           className={cn('fab text-lg leading-none select-none', className)}
           aria-label={`${t('changeLanguage')}: ${current.label}`}
         >

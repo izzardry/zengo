@@ -17,6 +17,7 @@ import {
   applyTouch,
   applyUndo,
   applyUndoPass,
+  undoPassIndex,
   computerToMove,
   continueSpec,
   createSession,
@@ -374,6 +375,21 @@ describe('the pass undo toast (DESIGN 6.2)', () => {
     expect(u.game.turn).toBe('B');
     // The player's latest move is a stone: nothing to take back.
     expect(applyUndoPass(playS(session({ mode: 'computer', color: 'B' }), ['ee', 'tt', 'cc']), 4)).toBeNull();
+  });
+
+  it('undoPassIndex names the pass the toast takes back, also after the computer answered', () => {
+    let s = playS(session({ mode: 'computer', color: 'B' }), ['ee', 'cc']);
+    expect(undoPassIndex(s)).toBeNull();
+    s = applyPass(s, 1, 2)!;
+    expect(undoPassIndex(s)).toBe(2);
+    // The computer's reply (a stone, or a pass that opens scoring) keeps the same pass.
+    expect(undoPassIndex(applyMove(s, 'gg', 1, 3)!)).toBe(2);
+    expect(undoPassIndex(applyPass(s, 1, 3)!)).toBe(2);
+    // Pass-and-play: only the last ply.
+    let l = playS(session(), ['ee']);
+    l = applyPass(l, 1, 2)!;
+    expect(undoPassIndex(l)).toBe(1);
+    expect(undoPassIndex(applyMove(l, 'cc', 1, 3)!)).toBeNull();
   });
 
   it('lifts a round-2 ending the pass caused, but never an Accept', () => {

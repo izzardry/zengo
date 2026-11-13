@@ -71,6 +71,9 @@ export default defineTable({
     'game.acceptFor': 'Accept the count for {side}',
     'game.acceptedFor': '{side} accepted the count',
     'game.scoringPaused': 'Scoring continues when your opponent is back',
+    // While the engine's dead-stone proposal runs (DESIGN 8.4 steps 1 and 5): both buttons wait.
+    'game.scoring.proposing': 'Finding dead stones…',
+    'game.scoring.counting': 'Counting…',
 
     // Game-over overlay (DESIGN 8.5)
     'game.gameOver': 'Game over',
@@ -154,6 +157,8 @@ export default defineTable({
     'game.acceptFor': 'Zählung für {side} annehmen',
     'game.acceptedFor': '{side} hat die Zählung angenommen',
     'game.scoringPaused': 'Die Zählung geht weiter, wenn dein Gegner zurück ist',
+    'game.scoring.proposing': 'Suche tote Steine …',
+    'game.scoring.counting': 'Zähle …',
 
     'game.gameOver': 'Partie beendet',
     'game.title.wonBy': 'Gewonnen mit {margin} Punkten!',
@@ -235,6 +240,8 @@ export default defineTable({
     'game.acceptFor': 'Accepter le décompte pour {side}',
     'game.acceptedFor': '{side} a accepté le décompte',
     'game.scoringPaused': 'Le décompte reprendra au retour de votre adversaire',
+    'game.scoring.proposing': 'Recherche des pierres mortes…',
+    'game.scoring.counting': 'Décompte en cours…',
 
     'game.gameOver': 'Partie terminée',
     'game.title.wonBy': 'Vous avez gagné de {margin} points !',
@@ -316,6 +323,8 @@ export default defineTable({
     'game.acceptFor': 'Aceptar el recuento por {side}',
     'game.acceptedFor': '{side} aceptó el recuento',
     'game.scoringPaused': 'El recuento sigue cuando tu rival vuelva',
+    'game.scoring.proposing': 'Buscando piedras muertas…',
+    'game.scoring.counting': 'Contando…',
 
     'game.gameOver': 'Fin de la partida',
     'game.title.wonBy': '¡Has ganado por {margin} puntos!',

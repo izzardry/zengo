@@ -108,6 +108,30 @@ describe('RoomScoringBar', () => {
     rerender(<RoomScoringBar scoring={view({ theirs: true })} onAccept={() => {}} onResume={() => {}} />);
     expect(screen.getByRole('status')).toHaveTextContent('Dein Gegner hat diese Zählung angenommen');
   });
+
+  it('carries the takeback request, which also works during scoring (DESIGN 9.4), with its pending state', async () => {
+    const onTakeback = vi.fn();
+    const bar = (scoring: RoomScoringView, pending = false, disabled = false) => (
+      <RoomScoringBar scoring={scoring} onAccept={() => {}} onResume={() => {}} takeback={{ onClick: onTakeback, pending, disabled }} />
+    );
+    const { rerender } = renderRoom(bar(view()));
+    const ask = screen.getByRole('button', { name: 'Ask for a takeback' });
+    expect(ask).toHaveAttribute('data-slot', 'undo');
+    await userEvent.click(ask);
+    expect(onTakeback).toHaveBeenCalledTimes(1);
+
+    // Asked: the button says so and waits.
+    rerender(bar(view(), true));
+    const pending = screen.getByRole('button', { name: 'Takeback requested' });
+    expect(pending).toBeDisabled();
+    expect(pending).toHaveAttribute('data-pending', 'true');
+
+    // Nothing to take back, or the opponent away (a request needs the opponent).
+    rerender(bar(view(), false, true));
+    expect(screen.getByRole('button', { name: 'Ask for a takeback' })).toBeDisabled();
+    rerender(bar(view({ paused: true, canAccept: false, canResume: false })));
+    expect(screen.getByRole('button', { name: 'Ask for a takeback' })).toBeDisabled();
+  });
 });
 
 /* ---------------------------------------------------------------------------------------------- */

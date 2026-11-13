@@ -89,13 +89,13 @@ import { useTutorial } from '@/hooks/useTutorial';
 import { useZigoEngine } from '@/hooks/useZigoEngine';
 import { withSpokenLabels } from '@/lib/clock';
 import { flags } from '@/lib/flags';
-import { DEFAULT_LEVEL, opponentOf } from '@/lib/gameRecord';
+import { DEFAULT_LEVEL, opponentOf, undoPassIndex } from '@/lib/gameRecord';
 import { useI18n } from '@/lib/i18n';
 import { needsLargeNet } from '@/lib/levels';
 import { createDeadStoneProposer } from '@/lib/proposal';
 import scoringApi from '@/lib/scoring';
 import { bankTurn, bankedTurnMs } from '@/lib/turnBank';
-import type { Color, Game, IllegalReason, LockReason, Point, SavedGame } from '@/lib/types';
+import type { Color, Game, IllegalReason, LockReason, Opponent, Point, SavedGame } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { formatTc, isPass, parseTc } from '@/lib/zigo';
 import {
@@ -129,6 +129,15 @@ function roomResignable(rs: { seat: 0 | 1 | null; locked: LockReason | null } | 
 }
 
 const isOnline = () => typeof navigator === 'undefined' || navigator.onLine !== false;
+
+/**
+ * What the Start pill would start: the code, the opponent (mode and level) and the stored game it
+ * resumes or reviews. Start compares it before and after waiting for the engine.
+ */
+function startSelection(code: string, opponent: Opponent, saved: SavedGame | null): string {
+  const target = saved ? opponentOf(saved) : opponent;
+  return [code, target.mode, target.mode === 'computer' ? target.level : '', saved?.id ?? ''].join('|');
+}
 
 function isTypingTarget(t: EventTarget | null): boolean {
   if (!(t instanceof HTMLElement)) return false;
@@ -396,10 +405,17 @@ export default function Index() {
   useEffect(() => {
     if (!isStart) cancelEngineStart();
   }, [isStart, cancelEngineStart]);
+  // A new selection while Start waits for the engine (another code, ROOM, another level) cancels
+  // that Start: the tap was for the old selection.
+  const selection = startSelection(gs.code, gs.opponent, gs.startPill.saved);
+  useEffect(() => {
+    cancelEngineStart();
+  }, [selection, cancelEngineStart]);
 
   const handleStart = useCallback(async () => {
     const pill = gs.startPill;
     const target = pill.saved ? opponentOf(pill.saved) : gs.opponent;
+    const tapped = startSelection(gs.code, gs.opponent, pill.saved);
     // Rooms (milestone 3): a stored game can still be reviewed.
     if (pill.label !== 'review' && !PLAYABLE_MODES[target.mode]) {
       comingSoon();
@@ -410,15 +426,17 @@ export default function Index() {
       const off = engineOfflineRef.current;
       if (engineStartBlocked(target.level, isOnline(), off.stage1, off.stage2, engineRef.current.nets)) return;
       if (!(await prepareEngine(target.level))) return;
-      // The player went elsewhere meanwhile (a history card, a link).
+      // The player went elsewhere meanwhile (a history card, a link), or changed the selection.
       if (phaseRef.current !== 'start') return;
+      const now = gsRef.current;
+      if (startSelection(now.code, now.opponent, now.startPill.saved) !== tapped) return;
     }
     if (!begin(gsRef.current.start)) {
       comingSoon();
       return;
     }
     if (pill.label === 'start') startTutorial();
-  }, [gs.startPill, gs.opponent, prepareEngine, begin, comingSoon, startTutorial]);
+  }, [gs.startPill, gs.opponent, gs.code, prepareEngine, begin, comingSoon, startTutorial]);
   handleStartRef.current = handleStart;
 
   const handleOpen = useCallback(
@@ -710,31 +728,38 @@ export default function Index() {
   const acceptFor = useCallback((side?: Color) => void gsRef.current.scoring.accept(side), []);
   const roomScoring = room?.scoring ?? null;
   // In a room: this seat's Accept with its pending state, the opponent's acceptance, the proposal
-  // under way and `Scoring continues when your opponent is back` (DESIGN 9.3, 9.5).
+  // under way and `Scoring continues when your opponent is back` (DESIGN 9.3, 9.5). The bar takes
+  // the toolbar's place, so it carries the takeback request too, with its pending state (DESIGN
+  // 9.4: takeback also works during scoring).
+  const takebackPending = roomMode && rs?.requests.outgoing === 'takeback';
   const scoringBar = roomMode ? (
     scoringNow && roomScoring ? (
       <RoomScoringBar
         scoring={roomScoring}
         onAccept={() => void gsRef.current.room?.accept()}
         onResume={() => void gsRef.current.room?.resume()}
+        takeback={{ onClick: () => void gsRef.current.undo(), pending: takebackPending, disabled: !gs.canUndo }}
         visible={chromeVisible}
         landscape={landscape}
       />
     ) : undefined
   ) : scoringNow ? (
+    // While the engine's dead-stone proposal runs (DESIGN 8.4 steps 1 and 5), Accept would end the
+    // game with every stone alive: both buttons wait, with `Finding dead stones…` or `Counting…`.
     <ScoringBar
       onResume={() => void gsRef.current.scoring.resume()}
       onAccept={() => acceptFor(faceToFace ? near : undefined)}
       accepted={faceToFace ? sc.acceptedBy[near] : false}
       side={faceToFace ? near : undefined}
-      disabled={!sc.editable}
+      disabled={!sc.editable || sc.pending}
+      note={sc.pending ? t(sc.round === 2 ? 'game.scoring.counting' : 'game.scoring.proposing') : undefined}
       visible={chromeVisible}
       landscape={landscape}
     />
   ) : undefined;
   const farAccept =
     scoringNow && faceToFace ? (
-      <ScoringAccept variant="compact" side={far} accepted={sc.acceptedBy[far]} onAccept={() => acceptFor(far)} />
+      <ScoringAccept variant="compact" side={far} accepted={sc.acceptedBy[far]} onAccept={() => acceptFor(far)} disabled={sc.pending} />
     ) : undefined;
 
   // A timed room while disconnected: both strips say `Paused` (DESIGN 9.7).
@@ -792,6 +817,8 @@ export default function Index() {
         visible={chromeVisible}
         landscape={landscape}
         placement={landscape ? 'inline' : 'fixed'}
+        // In the rail a little tighter, so strips, pill and score fit a 375 px high phone.
+        className={landscape ? 'gap-2 py-2.5' : undefined}
       />
     ) : null;
 
@@ -824,6 +851,7 @@ export default function Index() {
     [phase, previewOwnership],
   );
   const startRank = shownOpponent?.mode === 'computer' ? rankLabel(shownOpponent.level) : null;
+  const langShown = isStart && !scrolled;
 
   return (
     <>
@@ -871,7 +899,8 @@ export default function Index() {
             overlayVisible={isStart}
           >
             <div className="relative" onPointerDown={onSwipeDown} onPointerUp={onSwipeUp} onPointerCancel={() => (swipe.current = null)}>
-              {!isStart && !landscape && <div className="absolute inset-x-0 bottom-full mb-1 px-1">{strip(far, faceToFace, 'row')}</div>}
+              {/* Above the board's frame, so the far Accept's 44 px hit area reaches into the 4 px gap and frame padding. */}
+              {!isStart && !landscape && <div className="absolute inset-x-0 bottom-full z-10 mb-1 px-1">{strip(far, faceToFace, 'row')}</div>}
               <GoBoard
                 {...boardProps}
                 helpers={helpers}
@@ -903,11 +932,13 @@ export default function Index() {
           <>
             {landscape ? (
               <div
-                // Left rail (DESIGN 4): centered in the height below the Back button.
+                // Left rail (DESIGN 4): centered in the height below the Back button. The auto
+                // margins center it safely: content taller than the rail runs out at the bottom,
+                // never up under the Back button (`justify-center` would split the overflow).
                 className={cn(
                   'pointer-events-none fixed z-chrome left-[max(1rem,env(safe-area-inset-left))]',
                   'top-[calc(max(1.5rem,env(safe-area-inset-top))+3.25rem)] bottom-[max(1rem,env(safe-area-inset-bottom))]',
-                  'flex flex-col items-center justify-center gap-3 [&>*]:pointer-events-auto',
+                  'flex flex-col items-center gap-2 [&>*]:pointer-events-auto [&>:first-child]:mt-auto [&>:last-child]:mb-auto',
                 )}
               >
                 {/* Face to face, the far player's strip and clock are drawn rotated here too (DESIGN 5.2). */}
@@ -935,7 +966,7 @@ export default function Index() {
               onHelp={forceShowTutorial}
               onHelpHold={flags.donationPrompt ? () => triggerDonation() : undefined}
               canUndo={phase === 'review' ? gs.canStepBack : gs.canUndo}
-              undoPending={roomMode && rs?.requests.outgoing === 'takeback'}
+              undoPending={takebackPending}
               canRedo={phase === 'review' ? gs.canStepForward : gs.canRedo}
               onUndo={phase === 'review' ? () => gs.step(-1) : () => void gs.undo()}
               onRedo={phase === 'review' ? () => gs.step(1) : () => void gs.redo()}
@@ -1032,7 +1063,9 @@ export default function Index() {
         {session && passToast && (
           <PassUndoToast
             key={passToast.key}
-            open={!resigned && gs.canUndoPass && session.game.cursor === passToast.cursor}
+            // Open while that pass can still be taken back: in pass-and-play while it is the last
+            // ply, against the computer also after the computer's reply (DESIGN 6.2).
+            open={!resigned && undoPassIndex(session) === passToast.cursor - 1}
             who={passToast.who}
             onUndo={handleUndoPass}
             onExpire={() => setPassToast(null)}
@@ -1069,15 +1102,16 @@ export default function Index() {
           onVersionTap={() => void checkForUpdate()}
         />
 
+        {/* Hidden (in a game, or the start screen scrolled): out of the Tab order too, as the version stamp. */}
         <div
           className={cn(
             'fixed z-chrome top-[max(1.5rem,env(safe-area-inset-top))] right-[max(1rem,env(safe-area-inset-right))]',
             'transition-all duration-500 ease-out',
-            isStart && !scrolled ? 'scale-100 opacity-100' : 'pointer-events-none scale-90 opacity-0',
+            langShown ? 'scale-100 opacity-100' : 'pointer-events-none scale-90 opacity-0',
           )}
-          aria-hidden={isStart && !scrolled ? undefined : true}
+          aria-hidden={langShown ? undefined : true}
         >
-          <LanguageSwitcher />
+          <LanguageSwitcher tabIndex={langShown ? undefined : -1} />
         </div>
 
         {/* ---- below the fold: history, support, credits ---- */}

@@ -46,6 +46,26 @@ describe('ScoringBar (DESIGN 8.4)', () => {
     expect(onFar).toHaveBeenCalledTimes(1);
   });
 
+  it('the compact Accept keeps its 32 px look but reaches a 44 px hit area (DESIGN 14.1)', () => {
+    renderWithI18n(<ScoringAccept onAccept={vi.fn()} side="W" variant="compact" />);
+    const far = screen.getByRole('button', { name: 'Accept the count for White' });
+    // 32 px (min-h-8, a 2 px border) plus an invisible layer 8 px (2) beyond the padding box: 44 px.
+    expect(far.className).toContain('min-h-8');
+    expect(far.className).toContain('relative');
+    expect(far.className).toContain('after:-inset-y-2');
+    expect(far.className).toContain('after:absolute');
+  });
+
+  it('an optional Undo slot (room takeback) sits before Resume', () => {
+    const onClick = vi.fn();
+    renderWithI18n(<ScoringBar {...props({ takeback: { onClick } })} />);
+    const group = screen.getByRole('group', { name: 'Scoring' });
+    const buttons = within(group).getAllByRole('button');
+    expect(buttons.map((b) => b.getAttribute('data-slot') ?? b.getAttribute('data-action'))).toEqual(['undo', 'resume', 'accept']);
+    fireEvent.click(buttons[0]);
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
   it('room: a note slot above the bar, and both buttons can be locked', () => {
     const p = props({ disabled: true, note: 'Scoring continues when your opponent is back' });
     renderWithI18n(<ScoringBar {...p} />);

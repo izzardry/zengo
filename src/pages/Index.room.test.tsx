@@ -334,6 +334,30 @@ describe('Index stage in a room', () => {
     expect(engine.calls.some((c) => c.method === 'evaluate')).toBe(true);
   }, 20_000);
 
+  it('in scoring the bar carries the takeback request with its pending state (DESIGN 9.4)', async () => {
+    const other = await createAndJoin('RMG0TB');
+    place('E5');
+    await waitFor(() => expect(other.snapshot.game.cursor).toBe(1));
+    act(() => void other.move(pt('C3')));
+    await waitFor(() => expect(cellName('C3')).toMatch(/^white stone/));
+    await bothPass(other);
+    await waitFor(() => expect(within(scoringBar()).getByRole('button', { name: /^Accept/ })).toBeEnabled());
+
+    // The toolbar is gone, its Undo is in the scoring bar: it asks, then shows the request waiting.
+    expect(screen.queryByRole('toolbar')).toBeNull();
+    fireEvent.click(within(scoringBar()).getByRole('button', { name: 'Ask for a takeback' }));
+    await waitFor(() => expect(other.snapshot.requests.incoming).toBe('takeback'));
+    const pending = within(scoringBar()).getByRole('button', { name: 'Takeback requested' });
+    expect(pending).toBeDisabled();
+    expect(pending).toHaveAttribute('data-pending', 'true');
+    act(() => {
+      expect(other.reply('takeback', true)).toBe(true);
+    });
+    // The takeback leaves scoring: play goes on.
+    await waitFor(() => expect(stage()).toHaveAttribute('data-phase', 'playing'));
+    expect(cellName('C3')).toMatch(/^white stone/);
+  }, 20_000);
+
   it('Resume plays on; the next double pass is scored at once from seat 0’s proposal (DESIGN 8.4, 9.5)', async () => {
     const other = await createAndJoin('RMG003');
     place('E5');

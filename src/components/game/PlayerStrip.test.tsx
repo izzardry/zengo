@@ -132,6 +132,23 @@ describe('PlayerStrip', () => {
     expect(strip().firstElementChild).toHaveAttribute('data-part', 'clock');
   });
 
+  it('rail layout keeps prisoners and komi on one row, so the short landscape rail fits', () => {
+    renderWithI18n(<PlayerStrip {...props({ color: 'W', layout: 'rail', prisoners: 1, komi2: 15, clock: { text: '1:00' } })} />);
+    const details = part('details')!;
+    expect(details.className).not.toContain('flex-col');
+    expect(details.className).toContain('flex-wrap');
+    expect(details).toContainElement(part('prisoners'));
+    expect(details).toContainElement(part('komi'));
+  });
+
+  it('rail scoring: one line per side and no stopped clock (DESIGN 8.4)', () => {
+    renderWithI18n(<PlayerStrip {...props({ layout: 'rail', score: TERRITORY, clock: { text: '1:00' } })} />);
+    const sides = [...document.querySelectorAll('[data-part="score-side"]')].map((el) => el.textContent);
+    expect(sides).toEqual(['B 12 + 3', 'W 10 + 1 + 6.5']);
+    expect(part('score')).toHaveTextContent(/Count: Black/);
+    expect(screen.queryByRole('timer')).toBeNull();
+  });
+
   describe('scoring (DESIGN 8.4)', () => {
     it('area: the running score line replaces prisoners, komi and badge; both strips at full opacity', () => {
       renderWithI18n(<PlayerStrip {...props({ prisoners: 2, komi2: 15, passed: true, active: false, score: AREA })} />);

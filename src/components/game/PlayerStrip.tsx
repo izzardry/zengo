@@ -52,7 +52,11 @@ export interface PlayerStripProps {
   rotated?: boolean;
   /** False while the UI is hidden: prisoners, komi and badge fade out, the clock stays (DESIGN 4). */
   details?: boolean;
-  /** `row` (default): a line along the board edge. `rail`: a compact column for the landscape rail. */
+  /**
+   * `row` (default): a line along the board edge. `rail`: a compact column for the landscape rail
+   * (clock over one row of prisoners and komi; in scoring the score line, one line per side, and no
+   * clock, since clocks stop).
+   */
   layout?: 'row' | 'rail';
   className?: string;
 }
@@ -84,9 +88,19 @@ export function PlayerStrip({
   const rail = layout === 'rail';
   const scoring = !!score;
 
+  // The landscape rail is narrow: one line per side (`B 45` / `W 36 + 7.5`), each unbroken.
+  const line = score ? scoreLine(score) : '';
   const info = scoring ? (
-    <span data-part="score" className={cn('font-mono text-xs tabular-nums whitespace-nowrap', rail && 'whitespace-normal text-center')}>
-      <span aria-hidden="true">{scoreLine(score)}</span>
+    <span data-part="score" className={cn('font-mono text-xs tabular-nums whitespace-nowrap', rail && 'flex flex-col items-center')}>
+      {rail ? (
+        line.split(' · ').map((half, i) => (
+          <span key={i} aria-hidden="true" data-part="score-side">
+            {half}
+          </span>
+        ))
+      ) : (
+        <span aria-hidden="true">{line}</span>
+      )}
       <span className="sr-only">
         {t('game.count', { black: t('black'), white: t('white'), b: scoreTotals(score).B, w: scoreTotals(score).W })}
       </span>
@@ -123,7 +137,8 @@ export function PlayerStrip({
       data-part="details"
       className={cn(
         'flex items-center gap-2 min-w-0 transition-opacity duration-chrome ease-out',
-        rail && 'flex-col gap-1 justify-center max-w-[6rem]',
+        // Rail: prisoners, komi and badge share rows (one row usually), so the column stays short.
+        rail && 'flex-wrap gap-x-2 gap-y-1 justify-center max-w-[8rem]',
         details ? 'opacity-100' : 'opacity-0',
       )}
       aria-hidden={details ? undefined : true}
@@ -170,11 +185,13 @@ export function PlayerStrip({
     ) : (
       timer
     );
+  // Clocks stop during scoring (DESIGN 8.4): in the short landscape rail the stopped clock gives
+  // way to the score line, so the rail fits below the Back button.
   const end = action ? (
     <span data-part="action" className="shrink-0">
       {action}
     </span>
-  ) : (
+  ) : rail && scoring ? null : (
     time
   );
 
@@ -185,7 +202,7 @@ export function PlayerStrip({
       data-scoring={scoring ? 'true' : undefined}
       className={cn(
         'flex items-center select-none transition-opacity duration-chrome ease-out',
-        rail ? 'flex-col gap-1.5 text-center' : 'w-full justify-between gap-2 min-h-7',
+        rail ? 'flex-col gap-1 text-center' : 'w-full justify-between gap-2 min-h-7',
         active || scoring ? 'opacity-100' : 'opacity-50',
         rotated && 'rotate-180',
         className,
