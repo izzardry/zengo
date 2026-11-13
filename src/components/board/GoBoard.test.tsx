@@ -186,6 +186,29 @@ describe('GoBoard drawing', () => {
     expect(cell('bb').getAttribute('aria-label')).toBe('black stone, B8, atari');
   });
 
+  it('pulses a group once when it enters atari, not again on its owner’s later turns', () => {
+    // Black to move; the black stone at B8 has one liberty.
+    const game = fromDiagram(['.o.......', 'oxo......', '.........', ...Array(6).fill('.........')], 'B');
+    const r = renderBoard({ game });
+    const first = marks('atari-pulse');
+    expect(first.length).toBe(1);
+    r.update({ game }); // a re-render keeps the playing pulse (no remount)
+    expect(marks('atari-pulse')[0]).toBe(first[0]);
+    const away = play(game, 'ii', 0); // Black plays elsewhere; White to move
+    r.update({ game: away });
+    expect(marks('atari').length).toBe(0);
+    const back = play(away, 'hh', 0); // White too; Black to move, B8 still in atari
+    r.update({ game: back });
+    expect(marks('atari').length).toBe(1);
+    expect(marks('atari-pulse').length).toBe(0);
+    // A second black group enters atari: only its stone pulses.
+    const g2 = play(play(play(back, 'gh', 0), 'gg', 0), 'ah', 0); // B G2, W G3, B A2 (any)
+    const g3 = play(g2, 'fh', 0); // W F2: G2 has one liberty (G1)
+    r.update({ game: g3 });
+    expect([...marks('atari')].map((m) => m.getAttribute('data-point')).sort()).toEqual(['bb', 'gh']);
+    expect([...marks('atari-pulse')].map((m) => m.getAttribute('data-point'))).toEqual(['gh']);
+  });
+
   it('announces moves, captures and atari in a polite live region', () => {
     const game = fromDiagram(['.o.......', 'ox.......', '.........', ...Array(6).fill('.........')], 'W');
     const r = renderBoard({ game });
@@ -289,6 +312,26 @@ describe('GoBoard input: mouse (fine pointer)', () => {
       tap('cc');
       expect(onPlay).toHaveBeenCalledWith('cc');
     }
+  });
+
+  it('draws the hover on a suicide point hollow with × with helpers on, plain with helpers off', () => {
+    // Black to move; A9 is surrounded by White: suicide.
+    const game = fromDiagram(['.o.......', 'o........', ...Array(7).fill('.........')], 'B');
+    const r = renderBoard({ game });
+    const c = center('aa');
+    pointerMoveTo(c.x, c.y);
+    const hover = screen.getByTestId('hover');
+    expect(hover.getAttribute('data-point')).toBe('aa');
+    expect(hover.getAttribute('data-illegal')).toBe('true');
+    expect(hover.querySelector('path')).not.toBeNull(); // the ×
+    expect(marks('crosshair').length).toBe(0); // hover has no crosshairs
+    const e = center('ee');
+    pointerMoveTo(e.x, e.y);
+    expect(screen.getByTestId('hover').getAttribute('data-illegal')).toBe('false');
+    r.update({ game, helpers: false });
+    pointerMoveTo(c.x, c.y);
+    expect(screen.getByTestId('hover').getAttribute('data-point')).toBe('aa');
+    expect(screen.getByTestId('hover').getAttribute('data-illegal')).toBe('false');
   });
 
   it('never commits an illegal point; tells the reason with helpers on only', () => {

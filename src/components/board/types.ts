@@ -39,7 +39,10 @@ export interface GoBoardProps {
   readonly lastMove?: Point | null;
   /** The simple-ko point the side to move may not retake (`Game.ko`). */
   readonly ko?: Point | null;
-  /** The mover's own groups with one liberty (`zigo.atari(game, game.turn)`). */
+  /**
+   * The mover's own groups with one liberty (`zigo.atari(game, game.turn)`). Each gets a ring; a
+   * group pulses once, when it first appears in its color's list (not again while it stays in atari).
+   */
   readonly atari?: readonly (readonly Point[])[];
   /**
    * Why the side to move may not play `p` (`zigo.illegalReason`), or null when legal. Without it

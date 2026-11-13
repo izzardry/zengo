@@ -39,6 +39,55 @@ function useChangeCount(value: unknown, active: boolean): number {
   return active ? state.n : 0;
 }
 
+type AtariGroups = GoBoardProps['atari'];
+const NO_GROUPS: ReadonlySet<string> = new Set();
+const groupKey = (g: readonly Point[]) => [...g].sort().join('');
+
+/** What `useAtariPulse` remembers between renders. */
+interface AtariPulseState {
+  readonly atari: AtariGroups;
+  readonly turn: Color;
+  /** Per color, the groups (sorted stones joined) in that color's atari list when it last moved. */
+  readonly seen: Readonly<Record<Color, ReadonlySet<string>>>;
+  /** Stones of the groups that entered atari this turn. */
+  readonly pulse: ReadonlySet<Point>;
+  /** Bumped with every new pulse, so a group that enters atari again pulses again. */
+  readonly gen: number;
+}
+
+function stepAtariPulse(prev: AtariPulseState | null, atari: AtariGroups, turn: Color): AtariPulseState {
+  const before = prev?.seen[turn] ?? NO_GROUPS;
+  const keys = new Set<string>();
+  const pulse = new Set<Point>();
+  for (const g of atari ?? []) {
+    const k = groupKey(g);
+    keys.add(k);
+    if (!before.has(k)) for (const p of g) pulse.add(p);
+  }
+  // A group that left atari drops out of `seen`, so it pulses again if it re-enters.
+  const seen = { ...(prev?.seen ?? { B: NO_GROUPS, W: NO_GROUPS }), [turn]: keys };
+  const gen = prev?.gen ?? 0;
+  if (pulse.size > 0) return { atari, turn, seen, pulse, gen: gen + 1 };
+  // Nothing new: a pulse of this turn keeps playing through a re-render; a new turn starts none.
+  return { atari, turn, seen, pulse: prev && prev.turn === turn ? prev.pulse : new Set(), gen };
+}
+
+/**
+ * The stones whose group just entered atari (DESIGN 5.3: the ring pulses once "when the group
+ * enters atari"). `atari` holds only the mover's groups, so each color's list is compared with its
+ * own list the last time that color was to move: a group left in atari does not pulse again on its
+ * owner's next turn. Built with the "information from previous renders" pattern (StrictMode-safe).
+ */
+function useAtariPulse(atari: AtariGroups, turn: Color): { points: ReadonlySet<Point>; gen: number } {
+  const [state, setState] = useState(() => stepAtariPulse(null, atari, turn));
+  if (state.atari !== atari || state.turn !== turn) {
+    const next = stepAtariPulse(state, atari, turn);
+    setState(next);
+    return { points: next.pulse, gen: next.gen };
+  }
+  return { points: state.pulse, gen: state.gen };
+}
+
 export function GoBoard({
   size,
   board,
@@ -144,6 +193,7 @@ export function GoBoard({
     for (const g of atari) for (const p of g) if (isPoint(p, size) && board[pointToIndex(p, size)] !== 0) out.push(p);
     return out;
   }, [helpers, scoringOn, atari, size, board]);
+  const atariPulse = useAtariPulse(atari, turn);
 
   // Hint: the best point pulses; the top three get numbers. A new hint object replays the pulse.
   const hintKey = useChangeCount(hint, !!hint);
@@ -241,6 +291,8 @@ export function GoBoard({
   const ghostStone = ghost ? (board[idx(ghost)] ?? 0) : 0;
   const ghostReason = ghost && helpers ? (ghostStone ? 'occupied' : (illegalReason?.(ghost) ?? null)) : null;
   const hoverCell = hover && !ghost && board[idx(hover)] === 0 ? pointToCell(hover, size) : null;
+  // With helpers on, a hover on a suicide, ko or superko point is drawn like the illegal ghost (DESIGN 6.1).
+  const hoverIllegal = !!hoverCell && !!hover && helpers && !!illegalReason?.(hover);
   const last = size - 1;
 
   const onCellFocus = useCallback((p: Point) => setCursor(p), [setCursor]);
@@ -328,18 +380,22 @@ export function GoBoard({
               })}
             </g>
 
-            {hoverCell && (
-              <use
-                href={`#${defs}-${turn}`}
-                x={hoverCell.col - 0.5}
-                y={hoverCell.row - 0.5}
-                width={1}
-                height={1}
-                opacity={0.3}
-                data-testid="hover"
-                data-point={hover ?? undefined}
-              />
-            )}
+            {hoverCell &&
+              (hoverIllegal ? (
+                <IllegalStone col={hoverCell.col} row={hoverCell.row} opacity={HOVER_ILLEGAL_OPACITY} testId="hover" point={hover ?? ''} />
+              ) : (
+                <use
+                  href={`#${defs}-${turn}`}
+                  x={hoverCell.col - 0.5}
+                  y={hoverCell.row - 0.5}
+                  width={1}
+                  height={1}
+                  opacity={0.3}
+                  data-testid="hover"
+                  data-point={hover ?? undefined}
+                  data-illegal="false"
+                />
+              ))}
             {ghostCell && ghost && (
               <Ghost col={ghostCell.col} row={ghostCell.row} point={ghost} color={turn} defs={defs} illegal={!!ghostReason} occupied={ghostStone !== 0} />
             )}
@@ -347,10 +403,10 @@ export function GoBoard({
             {/* Pulse layer: above every stone, so no neighbour covers a glow. */}
             <g data-layer="pulses">
               {atariPoints.map((p) => {
-                const c = pointToCell(p, size);
+                const c = atariPulse.points.has(p) ? pointToCell(p, size) : null;
                 return c ? (
                   <circle
-                    key={p}
+                    key={`${atariPulse.gen}:${p}`}
                     className="zigo-atari-pulse"
                     cx={c.col}
                     cy={c.row}
@@ -359,6 +415,7 @@ export function GoBoard({
                     style={{ stroke: 'hsl(var(--destructive))', strokeWidth: 3 }}
                     vectorEffect={NSS}
                     data-mark="atari-pulse"
+                    data-point={p}
                   />
                 ) : null;
               })}
@@ -497,6 +554,30 @@ function KoMark({ p, size }: { p: Point; size: number }) {
   );
 }
 
+/**
+ * Strength of the illegal mark under a mouse hover: the illegal ghost's mark scaled like the
+ * stones (hover 30 % against the ghost's 45 %).
+ */
+const HOVER_ILLEGAL_OPACITY = 0.3 / 0.45;
+
+/** The illegal mark of the ghost and the hover: a hollow stone with a small × (helpers on). */
+function IllegalStone({ col, row, opacity, testId, point }: { col: number; row: number; opacity?: number; testId: string; point: Point }) {
+  const d = 0.14;
+  return (
+    <g
+      data-testid={testId}
+      data-point={point}
+      data-illegal="true"
+      opacity={opacity}
+      style={{ stroke: 'hsl(var(--foreground) / .7)', strokeWidth: 1.5 }}
+      fill="none"
+    >
+      <circle cx={col} cy={row} r={STONE_R - 0.03} vectorEffect={NSS} style={{ fill: 'hsl(var(--card) / .6)' }} />
+      <path d={`M${col - d} ${row - d}L${col + d} ${row + d}M${col + d} ${row - d}L${col - d} ${row + d}`} vectorEffect={NSS} />
+    </g>
+  );
+}
+
 /** The ghost stone at 45 %; hollow with a small × on an illegal point (helpers on). */
 function Ghost({
   col,
@@ -515,15 +596,7 @@ function Ghost({
   illegal: boolean;
   occupied: boolean;
 }) {
-  if (illegal) {
-    const d = 0.14;
-    return (
-      <g data-testid="ghost" data-point={point} data-illegal="true" style={{ stroke: 'hsl(var(--foreground) / .7)', strokeWidth: 1.5 }} fill="none">
-        <circle cx={col} cy={row} r={STONE_R - 0.03} vectorEffect={NSS} style={{ fill: 'hsl(var(--card) / .6)' }} />
-        <path d={`M${col - d} ${row - d}L${col + d} ${row + d}M${col + d} ${row - d}L${col - d} ${row + d}`} vectorEffect={NSS} />
-      </g>
-    );
-  }
+  if (illegal) return <IllegalStone col={col} row={row} testId="ghost" point={point} />;
   // With helpers off, an occupied point shows only the crosshairs (the tap is ignored without comment).
   if (occupied) return <g data-testid="ghost" data-point={point} data-illegal="false" />;
   return (
