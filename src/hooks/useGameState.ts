@@ -192,8 +192,10 @@ interface RoomOpen {
   readonly code: string;
   /** Start with ROOM: the settings to create the room with if this device has none. Null for links and history. */
   readonly create: RoomCreateSettings | null;
-  /** Review cursor (move list jump, stepping), or null while live. */
+  /** Review cursor (move list jump, stepping), or null while live. Always before the live position. */
   readonly review: number | null;
+  /** The room's game number the review was taken in: a rematch ends the review. */
+  readonly reviewN: number;
   /** `now()` when the room was opened. */
   readonly openedAt: number;
 }
@@ -286,7 +288,7 @@ function applyUrl(prev: State, url: UrlParams, ctx: Ctx): State {
     // The room already open here (a manual-signalling `x` / `y` arriving in this tab): keep it.
     if (prev.room && prev.room.code === code) return prev;
     if (!url.code) return { ...base, opponent: { mode: 'room' } };
-    return { ...base, opponent: { mode: 'room' }, room: { code, create: null, review: null, openedAt: ctx.now() } };
+    return { ...base, opponent: { mode: 'room' }, room: { code, create: null, review: null, reviewN: 0, openedAt: ctx.now() } };
   }
 
   if (!isGameLink) {
@@ -386,9 +388,18 @@ function placeholderGame(open: RoomOpen): Game {
 }
 
 /**
+ * The review cursor of an open room as it stands now, for the room's game `n` at live `cursor`:
+ * null (live) once another game of the room started (a rematch) or a takeback cut the game to or
+ * before the reviewed position, so the player is never left reviewing a game that moved on.
+ */
+function roomReviewOf(open: RoomOpen, n: number, cursor: number): number | null {
+  const r = open.review;
+  return r === null || open.reviewN !== n || r >= cursor ? null : Math.max(0, r);
+}
+
+/**
  * The stage's session for an open room, read from the controller's snapshot (PLAN 7: the
- * controller owns the game). Not saved by this hook. `review` is clamped to the game as it stands
- * now (a takeback may have cut it); reaching the live position means live.
+ * controller owns the game). Not saved by this hook. `review` follows `roomReviewOf`.
  */
 function roomSessionOf(open: RoomOpen, rs: RoomState | null, fallback: Game): GameSession {
   const game = rs?.game ?? fallback;
@@ -406,7 +417,7 @@ function roomSessionOf(open: RoomOpen, rs: RoomState | null, fallback: Game): Ga
     lastPlayedAt: open.openedAt,
     touched: true,
     openedAt: open.openedAt,
-    review: open.review === null ? null : Math.max(0, Math.min(open.review, game.cursor)),
+    review: roomReviewOf(open, n, game.cursor),
     room: { n, epoch: rs?.epoch ?? 0 },
   };
 }
@@ -564,7 +575,10 @@ export interface UseGameState {
   /* ---- review ---- */
   /** Review cursor, or null while live. */
   reviewCursor: number | null;
-  /** Enters review at `cursor` (default: the current position). Leaving it on an unfinished game: `exitReview`. */
+  /**
+   * Enters review at `cursor` (default: the current position). Leaving it on an unfinished game: `exitReview`.
+   * In a room the live position stays live (the room's game moves on; reviews end with it).
+   */
   enterReview(cursor?: number): void;
   /** Back to the live position of an unfinished game. No-op for finished games (they stay in review). */
   exitReview(): void;
@@ -943,7 +957,7 @@ export function useGameState(options: UseGameStateOptions = {}): UseGameState {
       const { rooms, store: s, now: n } = ctxRef.current;
       if (rooms && opensRoom(saved, s)) {
         // Resuming a room game reconnects to its room (the controller loads it from the store).
-        commit({ ...st, code: saved.code, session: null, roomInvite: null, room: { code: saved.code, create: null, review: null, openedAt: n() } });
+        commit({ ...st, code: saved.code, session: null, roomInvite: null, room: { code: saved.code, create: null, review: null, reviewN: 0, openedAt: n() } });
         return true;
       }
       if (saved.mode === 'room' && !isFinished(saved)) {
@@ -967,7 +981,7 @@ export function useGameState(options: UseGameStateOptions = {}): UseGameState {
       // Creating and joining are the same action (DESIGN 9.2): the controller finds out which.
       const create: RoomStartSettings = { tc: st.tc, color: st.colorChoice, size: st.size, rules: st.rules, handicap: st.handicap };
       if (ctxRef.current.rooms) {
-        commit({ ...st, code, session: null, roomInvite: null, room: { code, create, review: null, openedAt: n() } });
+        commit({ ...st, code, session: null, roomInvite: null, room: { code, create, review: null, reviewN: 0, openedAt: n() } });
         return true;
       }
       const onRoom = optsRef.current.onRoom;
@@ -1024,19 +1038,26 @@ export function useGameState(options: UseGameStateOptions = {}): UseGameState {
     commit({ ...st, code: st.session.code, session: null });
   }, [commit]);
 
+  /** Room mode: the review cursor as it stands now (`roomReviewOf` against the controller's game). */
+  const roomReview = useCallback((open: RoomOpen): number | null => {
+    const rs = roomStateRef.current;
+    const game = rs?.game ?? roomFallbackRef.current ?? placeholderGame(open);
+    return roomReviewOf(open, rs?.n ?? 0, game.cursor);
+  }, []);
+
   /* ---- playing ---- */
   const play = useCallback(
     (p: Point, ms?: number) => {
       const st = ref.current;
-      if (st.room) return st.room.review === null && roomRef.current.move(p, ms);
+      if (st.room) return roomReview(st.room) === null && roomRef.current.move(p, ms);
       return update((s, at) => applyMove(s, p, ms ?? turnElapsed(), at));
     },
-    [update, turnElapsed],
+    [update, turnElapsed, roomReview],
   );
   const pass = useCallback(
     (ms?: number) => {
       const st = ref.current;
-      if (st.room) return st.room.review === null && roomRef.current.pass(ms);
+      if (st.room) return roomReview(st.room) === null && roomRef.current.pass(ms);
       return update((s, at) => {
         const next = applyPass(s, ms ?? turnElapsed(), at);
         // Round 2 without a proposer: scored at once with every stone alive (DESIGN 8.4 step 5).
@@ -1046,14 +1067,14 @@ export function useGameState(options: UseGameStateOptions = {}): UseGameState {
         return next;
       });
     },
-    [update, turnElapsed],
+    [update, turnElapsed, roomReview],
   );
   const undo = useCallback(() => {
     // In a room, undo is a takeback request (DESIGN 4.2, 9.4).
     const st = ref.current;
-    if (st.room) return st.room.review === null && roomRef.current.ask('takeback');
+    if (st.room) return roomReview(st.room) === null && roomRef.current.ask('takeback');
     return update((s, at) => applyUndo(s, at));
-  }, [update]);
+  }, [update, roomReview]);
   const redo = useCallback(() => update((s, at) => applyRedo(s, at)), [update]);
   const undoPass = useCallback(() => update((s, at) => applyUndoPass(s, at)), [update]);
   const resign = useCallback(() => {
@@ -1088,15 +1109,19 @@ export function useGameState(options: UseGameStateOptions = {}): UseGameState {
   );
 
   /* ---- review ---- */
-  /** Room mode: sets the review cursor; reaching the live position means live. */
+  /** Room mode: sets the review cursor of the room's current game; reaching the live position means live. */
   const roomGoto = useCallback(
-    (cursor: (review: number | null, max: number) => number, keepAtMax = false) => {
+    (cursor: (review: number | null, max: number) => number) => {
       const st = ref.current;
       if (!st.room) return;
-      const max = roomStateRef.current?.game.cursor ?? 0;
-      const c = Math.max(0, Math.min(max, Math.floor(cursor(st.room.review, max))));
-      const review = c === max && !keepAtMax ? null : c;
-      if (review !== st.room.review) commit({ ...st, room: { ...st.room, review } });
+      const rs = roomStateRef.current;
+      const max = rs?.game.cursor ?? 0;
+      const n = rs?.n ?? 0;
+      const c = Math.max(0, Math.min(max, Math.floor(cursor(roomReviewOf(st.room, n, max), max))));
+      const review = c === max ? null : c;
+      if (review !== st.room.review || (review !== null && n !== st.room.reviewN)) {
+        commit({ ...st, room: { ...st.room, review, reviewN: n } });
+      }
     },
     [commit],
   );
@@ -1122,7 +1147,7 @@ export function useGameState(options: UseGameStateOptions = {}): UseGameState {
   const enterReview = useCallback(
     (cursor?: number) => {
       if (ref.current.room) {
-        roomGoto((r, max) => cursor ?? r ?? max, true);
+        roomGoto((r, max) => cursor ?? r ?? max);
         return;
       }
       update((s) => {
@@ -1196,6 +1221,15 @@ export function useGameState(options: UseGameStateOptions = {}): UseGameState {
     [roomOpen, roomFallback, roomGame, roomColor, roomN, roomEpoch, roomTc],
   );
   const session = roomSession ?? state.session;
+  // A rematch or a takeback that ended the room's review also drops the stored cursor, so the
+  // game growing past it again (moves after the takeback) never brings the old review back.
+  const roomReviewEnded = !!roomOpen && roomOpen.review !== null && roomSession?.review === null;
+  useEffect(() => {
+    const st = ref.current;
+    if (roomReviewEnded && st.room && st.room.review !== null && roomReview(st.room) === null) {
+      commit({ ...st, room: { ...st.room, review: null } });
+    }
+  }, [roomReviewEnded, roomReview, commit]);
   const view = useMemo(() => (session ? viewOf(session) : null), [session]);
   const roomScoringNow = !!roomSession && !!roomSession.game.scoring && !roomSession.game.end;
   const scoringNow = isScoring(session) || roomScoringNow;

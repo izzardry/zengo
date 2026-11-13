@@ -2,6 +2,8 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { createElement, type ReactNode } from 'react';
 import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createFakeController, type FakeController } from '@/components/room/testUtils';
+import type { RoomControllerOptions } from '@/lib/room';
 import { createStore, memoryStorage } from '@/lib/storage';
 import type { Game, Point, SavedGame, Store } from '@/lib/types';
 import { parseUrl } from '@/lib/url';
@@ -1007,5 +1009,97 @@ describe('rooms (milestone 3: the `rooms` option)', () => {
     expect(result.current.gs.session?.mode).toBe('computer');
     expect(result.current.gs.session?.game.cursor).toBe(1);
     expect(store.rooms().map((r) => r.code)).toEqual(['RMH003']);
+  });
+});
+
+describe('room review against the room game moving on', () => {
+  /** An invite link opens room RMR001 on a fake controller; `c()` is the controller now in use. */
+  function roomSetup() {
+    const made: FakeController[] = [];
+    const r = setup('/?s=RMR001&o=r', seq(0.1), {
+      rooms: true,
+      room: {
+        broker: null,
+        manualEnabled: false,
+        locks: null,
+        turnStorage: null,
+        window: null,
+        document: null,
+        createController: (o: RoomControllerOptions) => {
+          const fake = createFakeController(o);
+          made.push(fake);
+          return fake;
+        },
+      },
+    });
+    expect(r.result.current.gs.room).not.toBeNull();
+    return { ...r, c: () => made[made.length - 1] };
+  }
+
+  function gameOf(moves: string[]) {
+    let g = zigo.newGame(makeSettings(9));
+    for (const m of moves) g = zigo.play(g, m, 0);
+    return g;
+  }
+
+  const live = { seat: 0, color: 'B', live: true, phase: 'live', presence: 'connected' } as const;
+
+  it('a rematch ends the review of the finished game: the new game is live and playable', () => {
+    const { result, c } = roomSetup();
+    const over = zigo.end(gameOf(['cc', 'gg', 'cg']), { winner: 'B', by: 'resign' });
+    act(() => c().set({ ...live, game: over, n: 1, canMove: false, myTurn: false }));
+    expect(result.current.gs.isOver).toBe(true);
+    act(() => result.current.gs.goto(1));
+    expect(result.current.gs.phase).toBe('review');
+    // Game 2 starts with this device to move.
+    act(() => c().set({ game: zigo.newGame(makeSettings(9)), n: 2, canMove: true, myTurn: true }));
+    expect(result.current.gs.phase).toBe('playing');
+    expect(result.current.gs.reviewCursor).toBeNull();
+    expect(result.current.gs.isPlayerTurn).toBe(true);
+    act(() => {
+      expect(result.current.gs.play('dd')).toBe(true);
+    });
+    expect(c().move).toHaveBeenCalledWith('dd', undefined);
+    // Game 2 reaching the old review's cursor does not bring that review back.
+    act(() => c().set({ game: gameOf(['dd', 'ff']), canMove: true, myTurn: true }));
+    expect(result.current.gs.phase).toBe('playing');
+  });
+
+  it('a takeback to the reviewed position ends the review; one that stops short keeps it', () => {
+    const { result, c } = roomSetup();
+    act(() => c().set({ ...live, game: gameOf(['cc', 'gg', 'cg', 'gc']), n: 1, epoch: 0, canMove: true, myTurn: true }));
+    act(() => result.current.gs.goto(1));
+    expect(result.current.gs.reviewCursor).toBe(1);
+    // A takeback of one ply leaves the review where it was.
+    act(() => c().set({ game: gameOf(['cc', 'gg', 'cg']), epoch: 1, canMove: false, myTurn: false }));
+    expect(result.current.gs.phase).toBe('review');
+    expect(result.current.gs.reviewCursor).toBe(1);
+    expect(result.current.gs.canStepForward).toBe(true);
+    // A takeback down to the reviewed position: live again, this device to move.
+    act(() => c().set({ game: gameOf(['cc']), epoch: 2, canMove: true, myTurn: true }));
+    expect(result.current.gs.phase).toBe('playing');
+    expect(result.current.gs.reviewCursor).toBeNull();
+    expect(result.current.gs.isPlayerTurn).toBe(true);
+    act(() => {
+      expect(result.current.gs.pass()).toBe(true);
+    });
+    // Play going on past the old cursor stays live.
+    act(() => c().set({ game: gameOf(['cc', 'gg', 'cg']), canMove: true, myTurn: true }));
+    expect(result.current.gs.phase).toBe('playing');
+    expect(result.current.gs.reviewCursor).toBeNull();
+  });
+
+  it('entering review at the live position of a room stays live; an earlier cursor reviews', () => {
+    const { result, c } = roomSetup();
+    act(() => c().set({ ...live, game: gameOf(['cc', 'gg']), n: 1, canMove: true, myTurn: true }));
+    act(() => result.current.gs.enterReview());
+    expect(result.current.gs.phase).toBe('playing');
+    act(() => result.current.gs.enterReview(1));
+    expect(result.current.gs.reviewCursor).toBe(1);
+    act(() => {
+      expect(result.current.gs.undo()).toBe(false);
+    });
+    act(() => result.current.gs.exitReview());
+    expect(result.current.gs.phase).toBe('playing');
   });
 });
