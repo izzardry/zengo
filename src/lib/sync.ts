@@ -6,7 +6,10 @@
  *   per connection: first with the other side's `head`, then with any `logs` it sends. Every adopted
  *   log is validated by replaying it from the start through `ZigoApi` (positional superko included).
  * - Live-play helpers on a `GameLog`: applying a received ply (a point or `tt` for a pass),
- *   takeback, rematch, and the scoring phase (mark, accept, resume, the scored end).
+ *   takeback, rematch, and the scoring phase (mark, accept, resume, the scored end), including the
+ *   handlers of the live `mark`, `accept`, `resume` and round-2 `end` messages. Crossing scoring
+ *   messages settle by the same rule 6 as the reconcile (`settleScoring`), so live play and a later
+ *   reconcile always agree. Dead stones are always data: nothing here asks an engine.
  * - Room score across games (a win adds 2 half points ×2; Go has no draws).
  * - Seat key: generation, nonces and the HMAC-SHA-256 proof through WebCrypto.
  * - Conversion between `GameLog` and the stored `SavedGame`.
@@ -269,8 +272,8 @@ function readScoring(raw: unknown, size: number): Scoring | string {
  * Rejects: wrong shapes, `n < 1`, a negative epoch, an unknown seat, an unreadable time control,
  * a size other than 9/13/19, unknown rules, a handicap Zigo does not offer on that size, a point off
  * the board, an illegal ply, a scoring state without two consecutive passes at the end (or with dead
- * points that are not stones), an end whose `by` differs from its result's, and a scored end whose
- * result is not the count of the marked dead stones.
+ * points that are not stones), an end whose `by` differs from its result's, a scored end that both
+ * seats did not accept, and a scored end whose result is not the count of the marked dead stones.
  *
  * A ply that follows a double pass resumes scoring first (as `ZigoApi.replay`). A log that ends in a
  * double pass without `scoring` was resumed; with `scoring` it is in (or was ended in) scoring.
@@ -339,6 +342,11 @@ export function validateLog(raw: unknown, api: ZigoApi = zigo): ValidLog | Inval
   if (ending) {
     if (ending.by === 'score') {
       if (!g.scoring) return bad('scored end without scoring');
+      // DESIGN 9.5: a game ends by score only when both seats accepted the same marking (round 2
+      // stores seat 0's proposal as accepted by both).
+      if (g.scoring.rev < 1 || g.scoring.accepted[0] !== g.scoring.rev || g.scoring.accepted[1] !== g.scoring.rev) {
+        return bad('scored end without both acceptances');
+      }
       if (!sameResult(ending.result, scoredResult(g, g.scoring.dead))) return bad('score does not match the marking');
     }
     g = api.end(g, ending.result);
@@ -377,9 +385,13 @@ function playable(log: GameLog, api: ZigoApi): Game {
 /* Comparing two copies of one game (rules 2–6)                                                     */
 /* ---------------------------------------------------------------------------------------------- */
 
-/** Which copy of a game wins, and whether they were a true fork (rule 4). */
+/**
+ * Which copy of a game wins, and whether they were a true fork (rule 4). `merged`: neither copy
+ * as it is, but a settled state built from both (rule 6: crossing acceptances, or crossing toggles
+ * of the same rev); both devices build the identical log.
+ */
 export interface Comparison {
-  winner: 'local' | 'remote' | 'same';
+  winner: 'local' | 'remote' | 'same' | 'merged';
   /** Rule 4 decided it: seat 0's copy won over a contradicting one. */
   fork: boolean;
   /**
@@ -387,48 +399,77 @@ export interface Comparison {
    * are identical.
    */
   rule: 0 | 2 | 3 | 4 | 5 | 6;
+  /** The settled log (`winner: 'merged'` only). */
+  merged?: GameLog;
+}
+
+function sameDead(a: Scoring, b: Scoring): boolean {
+  return a.dead.length === b.dead.length && a.dead.every((p, i) => p === b.dead[i]);
 }
 
 /**
- * Orders two scoring states of the same plies (rule 6, DESIGN 9.2): 1 when `a` wins, -1 when `b`
- * wins, 0 when they are equal, null when they contradict each other (a fork: seat 0's copy wins).
+ * Settles two scoring states of the same plies and the same end (rule 6, DESIGN 9.2). `s0` is seat
+ * 0's copy, `s1` seat 1's; `open` is true while the game is not over. Returns the state both devices
+ * keep: one of the two inputs (the same object), `undefined` (resumed), or a new merged state.
+ * A pure function of the two copies, so both devices reach the same answer in any order.
  *
  * - A resumed copy (no scoring after the double pass) wins over a copy still scoring: a resume is
  *   the only way out of scoring, so it came later.
  * - The higher `rev` wins.
- * - Equal `rev` with a different dead set contradicts (DESIGN 9.2: seat 0's copy wins).
- * - Equal marks: the copy whose acceptances include the other's wins (an `accept` that was lost on
- *   the way); acceptances that each lack the other's contradict.
+ * - Equal `rev` with a different dead set (two toggles that crossed on the wire): seat 0's dead set
+ *   wins (DESIGN 9.2). While the game is open it is kept at `rev + 1` with both acceptances cleared,
+ *   so an `accept` that either side sent for the contested `rev` is stale everywhere and can never
+ *   end the game on a marking its sender did not see. After the end, seat 0's copy is kept as it is.
+ * - Equal marks: the acceptances merge (each seat's higher one). An `accept` that reached one side
+ *   only, and two accepts of the same rev that crossed, both converge to the union.
  */
-export function compareScoring(a: Scoring | undefined, b: Scoring | undefined): 1 | -1 | 0 | null {
-  if (!a && !b) return 0;
-  if (!a) return 1;
-  if (!b) return -1;
-  if (a.rev !== b.rev) return a.rev > b.rev ? 1 : -1;
-  if (a.dead.length !== b.dead.length || a.dead.some((p, i) => p !== b.dead[i])) return null;
-  const aHas = a.accepted[0] >= b.accepted[0] && a.accepted[1] >= b.accepted[1];
-  const bHas = b.accepted[0] >= a.accepted[0] && b.accepted[1] >= a.accepted[1];
-  if (aHas && bHas) return 0;
-  if (aHas) return 1;
-  if (bHas) return -1;
-  return null;
+export function settleScoring(s0: Scoring | undefined, s1: Scoring | undefined, open: boolean): Scoring | undefined {
+  if (!s0 || !s1) return undefined;
+  if (s0.rev !== s1.rev) return s0.rev > s1.rev ? s0 : s1;
+  if (!sameDead(s0, s1)) {
+    if (!open) return s0;
+    return { round: s0.round, rev: s0.rev + 1, dead: [...s0.dead], accepted: [0, 0] };
+  }
+  const a0 = Math.max(s0.accepted[0], s1.accepted[0]);
+  const a1 = Math.max(s0.accepted[1], s1.accepted[1]);
+  if (a0 === s0.accepted[0] && a1 === s0.accepted[1]) return s0;
+  if (a0 === s1.accepted[0] && a1 === s1.accepted[1]) return s1;
+  return { round: s0.round, rev: s0.rev, dead: [...s0.dead], accepted: [a0, a1] };
+}
+
+/**
+ * A copy of `log` with the settled scoring state; an open game whose marking both seats accepted
+ * ends by score at once (DESIGN 9.5: each device counts the shared dead stones).
+ */
+function withScoring(log: GameLog, s: Scoring, api: ZigoApi): GameLog {
+  const out: GameLog = { ...log, plies: log.plies.map((p) => ({ m: p.m, ms: p.ms })), scoring: plainScoring(s) };
+  if (log.end) {
+    out.end = { result: { ...log.end.result }, by: log.end.by };
+    return out;
+  }
+  if (bothAccepted(out)) {
+    const end = scoreEnd(out, api);
+    if (end) return endLog(out, end);
+  }
+  return out;
 }
 
 /**
  * Compares two copies of the same game `n`. Antisymmetric: the other device, comparing the same two
- * copies from its side with its own seat, reaches the mirrored verdict.
+ * copies from its side with its own seat, reaches the mirrored verdict (and an identical `merged`).
  *
  * 2. The higher epoch wins.
  * 3. If one ply list is a prefix of the other, the longer wins.
  * 4. Equal length with different content, or any other contradiction: seat 0's copy wins.
  * 5. Of two identical ply lists, the finished copy wins.
- * 6. Of two identical ply lists with the same end, the scoring state decides (`compareScoring`).
+ * 6. Of two identical ply lists with the same end, the scoring state decides (`settleScoring`).
+ *    Rule 6 never reports a fork: crossing toggles and crossing accepts happen in normal play.
  *
  * Where the design is silent (as in the original room design): a finished copy also beats a longer unfinished copy that
  * continues it (an offline resignation crossing an offline move), and two finished copies of
  * different length or with different ends are a fork (rule 4).
  */
-export function compareLogs(local: GameLog, remote: GameLog, localSeat: Seat): Comparison {
+export function compareLogs(local: GameLog, remote: GameLog, localSeat: Seat, api: ZigoApi = zigo): Comparison {
   const fork = (): Comparison => ({ winner: localSeat === 0 ? 'local' : 'remote', fork: true, rule: 4 });
   if (local.epoch !== remote.epoch) {
     return { winner: local.epoch > remote.epoch ? 'local' : 'remote', fork: false, rule: 2 };
@@ -448,9 +489,12 @@ export function compareLogs(local: GameLog, remote: GameLog, localSeat: Seat): C
   if (p === lp.length && p === rp.length) {
     if (sameEnd(local.end, remote.end)) {
       if (sameScoring(local.scoring, remote.scoring)) return { winner: 'same', fork: false, rule: 0 };
-      const s = compareScoring(local.scoring, remote.scoring);
-      if (s === null || s === 0) return fork();
-      return { winner: s > 0 ? 'local' : 'remote', fork: false, rule: 6 };
+      const [s0, s1] = localSeat === 0 ? [local.scoring, remote.scoring] : [remote.scoring, local.scoring];
+      const s = settleScoring(s0, s1, !local.end);
+      if (s === undefined) return { winner: local.scoring ? 'remote' : 'local', fork: false, rule: 6 };
+      if (s === local.scoring) return { winner: 'local', fork: false, rule: 6 };
+      if (s === remote.scoring) return { winner: 'remote', fork: false, rule: 6 };
+      return { winner: 'merged', fork: false, rule: 6, merged: withScoring(local, s, api) };
     }
     if (local.end && remote.end) return fork();
     return { winner: local.end ? 'local' : 'remote', fork: false, rule: 5 };
@@ -476,7 +520,8 @@ export function compareLogs(local: GameLog, remote: GameLog, localSeat: Seat): C
  * - `in-sync`: nothing to do.
  * - `ahead`: this device's copy wins; `send` holds the logs to send.
  * - `behind`: the other copy wins. After a `head`: wait for its `logs` (seat 1 may still have
- *   `send` set, see below). After `logs`: store `adopt`.
+ *   `send` set, see below). After `logs`: store `adopt`. When rule 6 settled the scoring state
+ *   from both copies (`Comparison.merged`), the settled log is in `adopt` and in `send`.
  * - `fork`: after a `head` only. The copies differ in a way the head cannot settle (a contradiction,
  *   or the same plies with another scoring state); both devices send their logs (`send`) and the
  *   `logs` step settles it.
@@ -608,12 +653,18 @@ function reconcileLogs(local: readonly GameLog[], remoteRaw: readonly GameLog[],
 
   for (const r of theirs) {
     const l = mine.get(r.n);
-    let c: { winner: Comparison['winner']; fork: boolean; rule: NonNullable<SyncResult['rule']> };
+    let c: { winner: Comparison['winner']; fork: boolean; rule: NonNullable<SyncResult['rule']>; merged?: GameLog };
     if (!l) c = { winner: 'remote', fork: false, rule: 1 };
-    else c = compareLogs(l, r, localSeat);
+    else c = compareLogs(l, r, localSeat, api);
     if (c.fork) forked = true;
     if (c.winner === 'remote') adopt.push(r);
     else if (c.winner === 'local' && l) send.push(l);
+    else if (c.winner === 'merged' && c.merged) {
+      // Both devices build the same settled log; this one also sends it, so the other side has it
+      // even if it never received this device's copy.
+      adopt.push(c.merged);
+      send.push(c.merged);
+    }
     if (r === remoteCur && localCur && r.n === localCur.n) {
       rule = c.rule;
       curWinner = c.winner;
@@ -636,7 +687,7 @@ function reconcileLogs(local: readonly GameLog[], remoteRaw: readonly GameLog[],
   const result: SyncResult = { status: 'in-sync', forked, rule };
   if (adopt.length) result.adopt = sortLogs(adopt);
   if (send.length) result.send = sortLogs(send);
-  if (curWinner === 'remote') result.status = 'behind';
+  if (curWinner === 'remote' || curWinner === 'merged') result.status = 'behind';
   else if (curWinner === 'local') result.status = 'ahead';
   else if (adopt.length) result.status = 'behind';
   else if (send.length) result.status = 'ahead';
@@ -825,6 +876,139 @@ export function roundTwoEnd(log: GameLog, dead: readonly Point[], api: ZigoApi =
   const done: GameLog = { ...marked, scoring: { ...(marked.scoring as Scoring), accepted: [marked.scoring!.rev, marked.scoring!.rev] } };
   const end = scoreEnd(done, api);
   return end ? endLog(done, end) : null;
+}
+
+/**
+ * A new log with `seat`'s acceptance of the current marking; when both seats have now accepted the
+ * same rev, the game ends by score from the shared dead stones (DESIGN 9.5). Null when not scoring,
+ * in round 2 (no marking round) or before a proposal (rev 0).
+ */
+export function acceptMarking(log: GameLog, seat: Seat, api: ZigoApi = zigo): GameLog | null {
+  if (!isScoring(log) || log.scoring.round === 2 || log.scoring.rev < 1) return null;
+  const next = acceptLog(log, seat);
+  if (!next) return null;
+  if (!bothAccepted(next)) return next;
+  const end = scoreEnd(next, api);
+  return end ? endLog(next, end) : null;
+}
+
+/**
+ * Outcome of a live scoring message (`mark`, `accept`, `resume`) against the local copy:
+ * - `applied`: store `log`.
+ * - `settled`: two toggles of the same rev crossed (rule 6): store `log` (seat 0's dead stones at
+ *   `rev + 1`, acceptances cleared) and send it as a `mark`.
+ * - `duplicate`: nothing new; change nothing.
+ * - `older`: the message is behind this copy (a toggle crossed it): send this copy's current marking
+ *   as a `mark`, so the other side catches up. Nothing else changes.
+ * - `stale`: another (older) game or epoch, a finished game, or a malformed message: ignore it.
+ * - `reconcile`: the copies differ in a way the message cannot settle (a newer game or epoch, a
+ *   newer rev that only an accept names, scoring that one side left or never reached): send `head`.
+ */
+export type ScoringOutcome =
+  | { kind: 'applied'; log: GameLog }
+  | { kind: 'settled'; log: GameLog }
+  | { kind: 'duplicate' }
+  | { kind: 'older' }
+  | { kind: 'stale' }
+  | { kind: 'reconcile' };
+
+const isInt = (x: unknown): x is number => typeof x === 'number' && Number.isInteger(x);
+
+/** Stale, newer or same game and epoch. `epoch` undefined: compare the game number only. */
+function placeMsg(log: GameLog, n: unknown, epoch?: unknown): 'stale' | 'reconcile' | 'same' {
+  if (!isInt(n) || (epoch !== undefined && !isInt(epoch))) return 'stale';
+  if (n < log.n) return 'stale';
+  if (n > log.n) return 'reconcile';
+  if (epoch === undefined) return 'same';
+  const e = epoch as number;
+  if (e < log.epoch) return 'stale';
+  if (e > log.epoch) return 'reconcile';
+  return 'same';
+}
+
+/** The sorted, de-duplicated stones of a received dead list (anything else is dropped). */
+function deadStones(log: GameLog, dead: readonly unknown[], api: ZigoApi): Point[] {
+  const g = playable(log, api);
+  const pts = dead.filter((p): p is Point => typeof p === 'string' && isPoint(p, log.size));
+  return [...new Set(pts)].filter((p) => g.board[pointToIndex(p, log.size)] !== 0).sort();
+}
+
+/**
+ * Applies a live `mark {n, epoch, rev, dead}` from the other seat (DESIGN 9.5). A newer rev
+ * replaces the marking and clears both acceptances. The same rev with other dead stones is the
+ * crossing-toggles case of rule 6 and settles exactly as `reconcile` would: seat 0's dead stones at
+ * `rev + 1`. An older rev answers with this copy's marking. Never consults an engine: the dead
+ * stones are data.
+ */
+export function applyMarkMsg(
+  log: GameLog,
+  msg: { n: unknown; epoch: unknown; rev: unknown; dead: unknown },
+  localSeat: Seat,
+  api: ZigoApi = zigo,
+): ScoringOutcome {
+  const at = placeMsg(log, msg.n, msg.epoch);
+  if (at !== 'same') return { kind: at };
+  if (!isCount(msg.rev) || msg.rev < 1 || !Array.isArray(msg.dead)) return { kind: 'stale' };
+  if (log.end) return { kind: 'stale' };
+  if (!log.scoring || log.scoring.round === 2) return { kind: 'reconcile' };
+  const s = log.scoring;
+  if (msg.rev < s.rev) return { kind: 'older' };
+  const dead = deadStones(log, msg.dead, api);
+  if (msg.rev > s.rev) {
+    const next = markLog(log, dead, msg.rev, api);
+    return next ? { kind: 'applied', log: next } : { kind: 'stale' };
+  }
+  const theirs: Scoring = { round: s.round, rev: msg.rev, dead, accepted: [0, 0] };
+  if (sameDead(s, theirs)) return { kind: 'duplicate' };
+  const settled = localSeat === 0 ? settleScoring(s, theirs, true) : settleScoring(theirs, s, true);
+  const next = settled ? markLog(log, settled.dead, settled.rev, api) : null;
+  return next ? { kind: 'settled', log: next } : { kind: 'stale' };
+}
+
+/**
+ * Applies a live `accept {n, rev}` from the other seat (`fromSeat`). An accept of the current rev
+ * is recorded, and ends the game by score when this seat had accepted it too. An accept of an older
+ * rev is stale (a toggle crossed it and cleared it on both sides); one of a newer rev means this
+ * copy missed a marking: reconcile.
+ */
+export function applyAcceptMsg(log: GameLog, msg: { n: unknown; rev: unknown }, fromSeat: Seat, api: ZigoApi = zigo): ScoringOutcome {
+  const at = placeMsg(log, msg.n);
+  if (at !== 'same') return { kind: at };
+  if (!isCount(msg.rev) || msg.rev < 1 || log.end) return { kind: 'stale' };
+  if (!log.scoring || log.scoring.round === 2) return { kind: 'reconcile' };
+  if (msg.rev < log.scoring.rev) return { kind: 'stale' };
+  if (msg.rev > log.scoring.rev) return { kind: 'reconcile' };
+  if (log.scoring.accepted[fromSeat] === msg.rev) return { kind: 'duplicate' };
+  const next = acceptMarking(log, fromSeat, api);
+  return next ? { kind: 'applied', log: next } : { kind: 'stale' };
+}
+
+/**
+ * Applies a live `resume {n, epoch}`: scoring is dropped and play continues. A copy that already
+ * left scoring (or never reached it) has nothing to do; a finished copy ignores it.
+ */
+export function applyResumeMsg(log: GameLog, msg: { n: unknown; epoch: unknown }): ScoringOutcome {
+  const at = placeMsg(log, msg.n, msg.epoch);
+  if (at !== 'same') return { kind: at };
+  if (log.end) return { kind: 'stale' };
+  if (!log.scoring) return { kind: 'duplicate' };
+  const next = resumeLog(log);
+  return next ? { kind: 'applied', log: next } : { kind: 'stale' };
+}
+
+/**
+ * Seat 1's side of the round-2 end (DESIGN 9.5): seat 0 scored the game from its proposal and sent
+ * `end {n, result, by: 'score', dead}`. The dead stones are taken as data (this device's own engine
+ * is never asked) and the claimed result must equal their count. Null when the log is not in
+ * round-2 scoring or the result does not match (then reconcile).
+ */
+export function applyScoredEnd(log: GameLog, dead: readonly unknown[], claimed: unknown, api: ZigoApi = zigo): GameLog | null {
+  if (!Array.isArray(dead) || !isScoring(log) || log.scoring.round !== 2) return null;
+  const want = readResult(claimed);
+  if (!want || want.by !== 'score') return null;
+  const next = roundTwoEnd(log, deadStones(log, dead, api), api);
+  if (!next?.end || !sameResult(next.end.result, want)) return null;
+  return next;
 }
 
 /* ---------------------------------------------------------------------------------------------- */

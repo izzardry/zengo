@@ -2,14 +2,18 @@ import type { GameLog, HeadMsg, LogsMsg, Message, SavedGame, Scoring, Seat } fro
 import zigo from './zigo';
 import {
   acceptLog,
+  acceptMarking,
   appendPly,
+  applyAcceptMsg,
+  applyMarkMsg,
   applyMoveMsg,
+  applyResumeMsg,
+  applyScoredEnd,
   bothAccepted,
   colorOf,
   colorOfPly,
   commonPrefix,
   compareLogs,
-  compareScoring,
   currentLog,
   endLog,
   fromBase64Url,
@@ -19,6 +23,7 @@ import {
   hashLog,
   hashString,
   headPliesHash,
+  isScoring,
   isValidKey,
   logToGame,
   logToSaved,
@@ -27,6 +32,7 @@ import {
   markLog,
   mergeLogs,
   newLog,
+  otherSeat,
   pliesHash,
   proofMessage,
   proveSeat,
@@ -43,6 +49,7 @@ import {
   scoreView,
   seatOf,
   seatToMove,
+  settleScoring,
   sortLogs,
   takebackLog,
   toBase64Url,
@@ -300,6 +307,9 @@ describe('validateLog', () => {
     ['a scored end without scoring', { ...base, plies: P(PASSED), end: { result: { winner: 'W', by: 'score', margin: 15 }, by: 'score' } }],
     ['a scored end with another margin', passedScoring(S(1, [], [1, 1]), { result: { winner: 'W', by: 'score', margin: 13 }, by: 'score' })],
     ['a scored end with the wrong winner', passedScoring(S(1, ['gg'], [1, 1]), { result: { winner: 'W', by: 'score', margin: 15 }, by: 'score' })],
+    ['a scored end that seat 1 did not accept', passedScoring(S(1, [], [1, 0]), { result: { winner: 'W', by: 'score', margin: 15 }, by: 'score' })],
+    ['a scored end accepted for an older rev', passedScoring(S(2, [], [1, 2]), { result: { winner: 'W', by: 'score', margin: 15 }, by: 'score' })],
+    ['a scored end of nothing proposed (rev 0)', passedScoring(S(0), { result: { winner: 'W', by: 'score', margin: 15 }, by: 'score' })],
     ['scoring without two passes', { ...base, plies: P(LINE_B), scoring: S(0) }],
     ['scoring with an empty dead point', passedScoring(S(1, ['ee']))],
     ['scoring with a bad round', passedScoring({ ...S(1), round: 3 })],
@@ -384,9 +394,13 @@ describe('compareLogs (rules 2–6)', () => {
     a: GameLog;
     b: GameLog;
     /** Winner when `a` belongs to seat 0 and `b` to seat 1. */
-    win: 'a' | 'b' | 'same';
+    win: 'a' | 'b' | 'same' | 'merged';
     fork: boolean;
     no: 0 | 2 | 3 | 4 | 5 | 6;
+    /** The settled log both sides build (`win: 'merged'`). */
+    merged?: GameLog;
+    /** Seat 0's copy wins without a fork (rule 6, equal rev with different dead stones). */
+    seat0?: true;
   }[] = [
     { rule: 'identical', a: L(LINE_A), b: L(LINE_A), win: 'same', fork: false, no: 0 },
     { rule: 'identical, both finished alike', a: L(LINE_B, { end: B_ON_TIME }), b: L(LINE_B, { end: B_ON_TIME }), win: 'same', fork: false, no: 0 },
@@ -409,25 +423,93 @@ describe('compareLogs (rules 2–6)', () => {
     { rule: '4: different time control', a: L(LINE_B, { tc: '5+0' }), b: L(LINE_B, { tc: '3+2' }), win: 'a', fork: true, no: 4 },
     { rule: '4: different size', a: L(LINE_B), b: L(LINE_B, { settings: { size: 13 } }), win: 'a', fork: true, no: 4 },
     { rule: '4: different rules', a: L(LINE_B), b: L(LINE_B, { settings: { rules: 'territory' } }), win: 'a', fork: true, no: 4 },
-    { rule: '4: same rev, different dead stones', a: L(PASSED, { scoring: S(2, ['gg']) }), b: L(PASSED, { scoring: S(2, ['cc']) }), win: 'a', fork: true, no: 4 },
-    { rule: '4: crossing acceptances', a: L(PASSED, { scoring: S(1, [], [1, 0]) }), b: L(PASSED, { scoring: S(1, [], [0, 1]) }), win: 'a', fork: true, no: 4 },
     { rule: '5: finished beats unfinished, same length', a: L(LINE_B), b: L(LINE_B, { end: B_RESIGNS }), win: 'b', fork: false, no: 5 },
     { rule: '5: finished beats a longer unfinished continuation', a: L(LINE_B.slice(0, 2), { end: B_ON_TIME }), b: L(LINE_B), win: 'a', fork: false, no: 5 },
     { rule: '5: a scored end beats the open scoring', a: L(PASSED, { scoring: S(3, ['gg']) }), b: scored(1), win: 'b', fork: false, no: 5 },
     { rule: '6: the higher rev wins', a: L(PASSED, { scoring: S(1) }), b: L(PASSED, { scoring: S(2, ['gg']) }), win: 'b', fork: false, no: 6 },
     { rule: '6: a resume beats the scoring it left', a: L(PASSED), b: L(PASSED, { scoring: S(4, ['gg'], [4, 0]) }), win: 'a', fork: false, no: 6 },
     { rule: '6: an acceptance that reached one side only', a: L(PASSED, { scoring: S(1, ['gg'], [1, 1]) }), b: L(PASSED, { scoring: S(1, ['gg'], [1, 0]) }), win: 'a', fork: false, no: 6 },
+    { rule: "6: seat 1's acceptance reached seat 1 only", a: L(PASSED, { scoring: S(2, ['gg'], [0, 0]) }), b: L(PASSED, { scoring: S(2, ['gg'], [0, 2]) }), win: 'b', fork: false, no: 6 },
+    { rule: '6: a resume beats a later toggle of the scoring it left', a: L(PASSED, { scoring: S(5, ['cc']) }), b: L(PASSED), win: 'b', fork: false, no: 6 },
+    { rule: '6: a resume beats the scoring it left, both resigned after', a: L(PASSED, { end: W_RESIGNS }), b: L(PASSED, { scoring: S(2, ['gg']), end: W_RESIGNS }), win: 'a', fork: false, no: 6 },
+    { rule: '6: the higher rev wins after the same resignation', a: L(PASSED, { scoring: S(3, ['gg']), end: B_RESIGNS }), b: L(PASSED, { scoring: S(2, ['cc']), end: B_RESIGNS }), win: 'a', fork: false, no: 6 },
+    {
+      // DESIGN 9.2: seat 0's dead stones win; kept at rev + 1 so accepts of the contested rev are void.
+      rule: '6: same rev, different dead stones (crossing toggles)',
+      a: L(PASSED, { scoring: S(2, ['gg'], [2, 0]) }),
+      b: L(PASSED, { scoring: S(2, ['cc'], [0, 2]) }),
+      win: 'merged',
+      fork: false,
+      no: 6,
+      merged: L(PASSED, { scoring: S(3, ['gg']) }),
+    },
+    {
+      // The determinism rule: a seat-1 device whose engine proposes other dead stones never decides.
+      rule: "6: seat 1's own proposal differs from seat 0's at rev 1",
+      a: L(PASSED, { scoring: S(1, ['gg']) }),
+      b: L(PASSED, { scoring: S(1, ['cc']) }),
+      win: 'merged',
+      fork: false,
+      no: 6,
+      merged: L(PASSED, { scoring: S(2, ['gg']) }),
+    },
+    { rule: '6: same rev, different dead stones after the same resignation: seat 0 as is', a: L(PASSED, { scoring: S(2, ['gg']), end: B_RESIGNS }), b: L(PASSED, { scoring: S(2, ['cc']), end: B_RESIGNS }), win: 'a', fork: false, no: 6, seat0: true },
+    {
+      rule: '6: crossing acceptances of the same rev merge and end the game by score',
+      a: L(PASSED, { scoring: S(1, ['gg'], [1, 0]) }),
+      b: L(PASSED, { scoring: S(1, ['gg'], [0, 1]) }),
+      win: 'merged',
+      fork: false,
+      no: 6,
+      merged: scored(1, ['gg']),
+    },
+    {
+      rule: '6: crossing acceptances after the same resignation merge without a new end',
+      a: L(PASSED, { scoring: S(1, [], [1, 0]), end: W_RESIGNS }),
+      b: L(PASSED, { scoring: S(1, [], [0, 1]), end: W_RESIGNS }),
+      win: 'merged',
+      fork: false,
+      no: 6,
+      merged: L(PASSED, { scoring: S(1, [], [1, 1]), end: W_RESIGNS }),
+    },
+    { rule: '6: round 2, the same state', a: L([...PASSED, 'ee', 'tt', 'tt'], { scoring: S(0) }), b: L([...PASSED, 'ee', 'tt', 'tt'], { scoring: S(0) }), win: 'same', fork: false, no: 0 },
+    { rule: '5: round 2, seat 0 scored it, seat 1 still waits', a: roundTwoEnd(L([...PASSED, 'ee', 'tt', 'tt'], { scoring: S(0) }), ['gg'])!, b: L([...PASSED, 'ee', 'tt', 'tt'], { scoring: S(0) }), win: 'a', fork: false, no: 5 },
+    {
+      rule: "4: round 2, seat 1 ended it from its own engine's proposal: seat 0's end wins",
+      a: roundTwoEnd(L([...PASSED, 'ee', 'tt', 'tt'], { scoring: S(0) }), ['gg'])!,
+      b: roundTwoEnd(L([...PASSED, 'ee', 'tt', 'tt'], { scoring: S(0) }), [])!,
+      win: 'a',
+      fork: true,
+      no: 4,
+    },
+    { rule: '5: a scored end beats a resumed copy', a: L(PASSED), b: scored(1, ['gg']), win: 'b', fork: false, no: 5 },
   ];
 
-  it.each(rows)('$rule', ({ a, b, win, fork, no }) => {
+  it.each(rows)('$rule', ({ a, b, win, fork, no, merged, seat0 }) => {
     // From seat 0 (a) and from seat 1 (b): the verdicts mirror each other.
     const fromA = compareLogs(a, b, 0);
     const fromB = compareLogs(b, a, 1);
-    const map = { a: 'local', b: 'remote', same: 'same' } as const;
-    const mirror = { a: 'remote', b: 'local', same: 'same' } as const;
+    const map = { a: 'local', b: 'remote', same: 'same', merged: 'merged' } as const;
+    const mirror = { a: 'remote', b: 'local', same: 'same', merged: 'merged' } as const;
+    if (win === 'merged') {
+      // Both devices build the identical settled log, and it is a valid log.
+      expect(fromA).toEqual({ winner: 'merged', fork: false, rule: no, merged });
+      expect(fromB).toEqual({ winner: 'merged', fork: false, rule: no, merged });
+      expect(validateLog(wire(fromA.merged)).ok).toBe(true);
+      // The settled log wins against either original: settling is idempotent.
+      expect(compareLogs(fromA.merged!, a, 0).winner).toBe('local');
+      expect(compareLogs(fromA.merged!, b, 1).winner).toBe('local');
+      expect(compareLogs(a, fromA.merged!, 0).winner).toBe('remote');
+      expect(compareLogs(b, fromA.merged!, 1).winner).toBe('remote');
+      return;
+    }
     expect(fromA).toEqual({ winner: map[win], fork, rule: no });
     expect(fromB).toEqual({ winner: mirror[win], fork, rule: no });
-    if (!fork) {
+    if (seat0) {
+      // Seat 0's copy wins whoever holds which copy, quietly.
+      expect(compareLogs(a, b, 1)).toEqual({ winner: 'remote', fork: false, rule: no });
+      expect(compareLogs(b, a, 0)).toEqual({ winner: 'local', fork: false, rule: no });
+    } else if (!fork) {
       // Without a fork the seats do not matter.
       expect(compareLogs(a, b, 1).winner).toBe(map[win]);
     } else {
@@ -443,15 +525,35 @@ describe('compareLogs (rules 2–6)', () => {
     expect(commonPrefix(L(LINE_B).plies, L(LINE_B, { ms: [1000, 1001, 9, 9] }).plies)).toBe(2);
   });
 
-  it('compareScoring orders resumed, rev, dead stones and acceptances', () => {
-    expect(compareScoring(undefined, undefined)).toBe(0);
-    expect(compareScoring(undefined, S(1))).toBe(1);
-    expect(compareScoring(S(1), undefined)).toBe(-1);
-    expect(compareScoring(S(2), S(1, ['gg']))).toBe(1);
-    expect(compareScoring(S(2, ['cc']), S(2, ['gg']))).toBeNull();
-    expect(compareScoring(S(2, ['gg'], [2, 2]), S(2, ['gg'], [2, 0]))).toBe(1);
-    expect(compareScoring(S(2, ['gg'], [0, 2]), S(2, ['gg'], [2, 0]))).toBeNull();
-    expect(compareScoring(S(2, ['gg'], [2, 0]), S(2, ['gg'], [2, 0]))).toBe(0);
+  describe('settleScoring (rule 6): seat 0, seat 1 → kept', () => {
+    const s0a = S(2, ['gg'], [2, 0]);
+    const s1a = S(2, ['gg'], [0, 2]);
+    const rows: { name: string; s0: Scoring | undefined; s1: Scoring | undefined; open: boolean; want: 's0' | 's1' | Scoring | undefined }[] = [
+      { name: 'both resumed', s0: undefined, s1: undefined, open: true, want: undefined },
+      { name: 'seat 0 resumed', s0: undefined, s1: S(3, ['gg'], [3, 0]), open: true, want: undefined },
+      { name: 'seat 1 resumed', s0: S(1), s1: undefined, open: true, want: undefined },
+      { name: 'higher rev on seat 0', s0: S(3, ['cc']), s1: S(2, ['gg'], [2, 2]), open: true, want: 's0' },
+      { name: 'higher rev on seat 1', s0: S(1, [], [1, 1]), s1: S(2, ['gg']), open: true, want: 's1' },
+      { name: 'same rev, other dead, open: seat 0 at rev + 1, accepts cleared', s0: S(2, ['gg'], [2, 0]), s1: S(2, ['cc'], [0, 2]), open: true, want: S(3, ['gg']) },
+      { name: 'same rev, other dead, round 2 keeps the round', s0: S(1, ['gg'], [0, 0], 2), s1: S(1, ['cc'], [0, 0], 2), open: true, want: S(2, ['gg'], [0, 0], 2) },
+      { name: 'same rev, other dead, finished: seat 0 as is', s0: S(2, ['gg'], [2, 0]), s1: S(2, ['cc']), open: false, want: 's0' },
+      { name: 'same marking, seat 0 has more acceptances', s0: S(2, ['gg'], [2, 2]), s1: S(2, ['gg'], [2, 0]), open: true, want: 's0' },
+      { name: 'same marking, seat 1 has more acceptances', s0: S(2, ['gg'], [0, 0]), s1: S(2, ['gg'], [2, 0]), open: true, want: 's1' },
+      { name: 'same marking, crossing acceptances merge', s0: s0a, s1: s1a, open: true, want: S(2, ['gg'], [2, 2]) },
+      { name: 'same marking, crossing acceptances merge after the end too', s0: s0a, s1: s1a, open: false, want: S(2, ['gg'], [2, 2]) },
+    ];
+    it.each(rows)('$name', ({ s0, s1, open, want }) => {
+      const got = settleScoring(s0, s1, open);
+      if (want === 's0') expect(got).toBe(s0);
+      else if (want === 's1') expect(got).toBe(s1);
+      else expect(got).toEqual(want);
+      // A pure function: the result does not depend on who computes it, and settling again keeps it.
+      expect(settleScoring(s0, s1, open)).toEqual(got);
+      if (got) {
+        expect(settleScoring(got, s1, open)).toEqual(got);
+        expect(settleScoring(s0, got, open)).toEqual(got);
+      }
+    });
   });
 });
 
@@ -708,10 +810,10 @@ describe('two devices reconcile', () => {
     },
     { name: 'rule 4: seat 1 finished shorter, seat 0 longer different', a: [log(1, LINE_A)], b: [log(1, LINE_B.slice(0, 2), { end: B_RESIGNS })], expect: [log(1, LINE_A)], fork: true },
     {
-      name: 'rule 4: equal rev, different dead stones (DESIGN 9.2: seat 0 wins)',
-      a: [log(1, PASSED, { scoring: S(2, ['gg']) })],
-      b: [log(1, PASSED, { scoring: S(2, ['cc']) })],
-      expect: [log(1, PASSED, { scoring: S(2, ['gg']) })],
+      name: 'rule 4: round 2 ended on both seats from different proposals (seat 0 wins)',
+      a: [roundTwoEnd(log(1, [...PASSED, 'ee', 'tt', 'tt'], { scoring: S(0) }), ['gg'])!],
+      b: [roundTwoEnd(log(1, [...PASSED, 'ee', 'tt', 'tt'], { scoring: S(0) }), [])!],
+      expect: [roundTwoEnd(log(1, [...PASSED, 'ee', 'tt', 'tt'], { scoring: S(0) }), ['gg'])!],
       fork: true,
     },
     // Rule 5.
@@ -735,6 +837,45 @@ describe('two devices reconcile', () => {
     { name: 'rule 6: a toggle made offline by seat 0 wins', a: [log(1, PASSED, { scoring: S(3, ['gg']) })], b: [log(1, PASSED, { scoring: S(2) })], expect: [log(1, PASSED, { scoring: S(3, ['gg']) })] },
     { name: 'rule 6: a resume wins over the scoring it left', a: [log(1, PASSED, { scoring: S(1, [], [1, 0]) })], b: [log(1, PASSED)], expect: [log(1, PASSED)] },
     { name: 'rule 6: a lost acceptance arrives', a: [log(1, PASSED, { scoring: S(1, [], [1, 0]) })], b: [log(1, PASSED, { scoring: S(1, [], [1, 1]) })], expect: [log(1, PASSED, { scoring: S(1, [], [1, 1]) })] },
+    {
+      // DESIGN 9.2: seat 0's copy wins, as a normal resolution (crossing toggles happen in normal play).
+      name: 'rule 6: equal rev, different dead stones: seat 0 wins at rev + 1, no toast',
+      a: [log(1, PASSED, { scoring: S(2, ['gg']) })],
+      b: [log(1, PASSED, { scoring: S(2, ['cc']) })],
+      expect: [log(1, PASSED, { scoring: S(3, ['gg']) })],
+    },
+    {
+      name: 'rule 6: crossing toggles that were each accepted at home: both acceptances void',
+      a: [log(1, PASSED, { scoring: S(2, ['gg'], [2, 0]) })],
+      b: [log(1, PASSED, { scoring: S(2, ['cc'], [0, 2]) })],
+      expect: [log(1, PASSED, { scoring: S(3, ['gg']) })],
+    },
+    {
+      name: "rule 6: seat 1's device proposed other dead stones than seat 0's: seat 0's proposal holds",
+      a: [log(1, PASSED, { scoring: S(1, ['gg']) })],
+      b: [log(1, PASSED, { scoring: S(1, ['cc']) })],
+      expect: [log(1, PASSED, { scoring: S(2, ['gg']) })],
+    },
+    {
+      name: 'rule 6: crossing accepts of the same rev converge to both accepted and the scored end',
+      a: [log(1, PASSED, { scoring: S(1, ['gg'], [1, 0]) })],
+      b: [log(1, PASSED, { scoring: S(1, ['gg'], [0, 1]) })],
+      expect: [scored(1, ['gg'])],
+    },
+    {
+      name: 'rule 6: crossing accepts in an older game of a room settle too',
+      a: [log(1, PASSED, { scoring: S(1, [], [1, 0]), end: W_RESIGNS }), log(2, ['cc'])],
+      b: [log(1, PASSED, { scoring: S(1, [], [0, 1]), end: W_RESIGNS }), log(2, ['cc', 'gg'])],
+      expect: [log(1, PASSED, { scoring: S(1, [], [1, 1]), end: W_RESIGNS }), log(2, ['cc', 'gg'])],
+    },
+    { name: 'rule 6: a resume beats a later offline toggle', a: [log(1, PASSED)], b: [log(1, PASSED, { scoring: S(4, ['gg']) })], expect: [log(1, PASSED)] },
+    { name: 'rule 3: play after a resume beats the scoring copy', a: [log(1, PASSED, { scoring: S(2, ['gg'], [2, 0]) })], b: [log(1, [...PASSED, 'ee'])], expect: [log(1, [...PASSED, 'ee'])] },
+    {
+      name: 'rule 5: the round-2 end from seat 0 reaches seat 1, whatever seat 1 would propose',
+      a: [roundTwoEnd(log(1, [...PASSED, 'ee', 'tt', 'tt'], { scoring: S(0) }), ['gg'])!],
+      b: [log(1, [...PASSED, 'ee', 'tt', 'tt'], { scoring: S(0) })],
+      expect: [roundTwoEnd(log(1, [...PASSED, 'ee', 'tt', 'tt'], { scoring: S(0) }), ['gg'])!],
+    },
   ];
 
   for (const c of cases) {
@@ -799,6 +940,7 @@ describe('two devices reconcile', () => {
     };
     let forks = 0;
     let scoringRules = 0;
+    let merges = 0;
     for (let t = 0; t < 300; t++) {
       const n = 1 + Math.floor(rng() * 3);
       const shared = Array.from({ length: n - 1 }, (_, i) => finished(i + 1));
@@ -807,14 +949,15 @@ describe('two devices reconcile', () => {
       const b = [...shared, make(n)];
       const r = simulate({ seat: 0, logs: a }, { seat: 1, logs: b }, t);
       expect(r.a.logs).toEqual(r.b.logs);
-      // The survivor is one of the two copies, and it is the winner by compareLogs.
+      // The survivor is the winner by compareLogs: one of the two copies, or the settled log.
       const c = compareLogs(a[n - 1], b[n - 1], 0);
-      const winner = c.winner === 'remote' ? b[n - 1] : a[n - 1];
+      const winner = c.winner === 'merged' ? c.merged : c.winner === 'remote' ? b[n - 1] : a[n - 1];
       expect(currentLog(r.a.logs)).toEqual(winner);
       expect(r.a.toasts).toBe(r.b.toasts);
       expect(r.a.toasts).toBe(c.fork ? 1 : 0);
       forks += r.a.toasts;
       if (c.rule === 6) scoringRules++;
+      if (c.winner === 'merged') merges++;
       expect(r.a.errors + r.b.errors).toBe(0);
       expect(r.messages).toBeLessThanOrEqual(6);
       const again = simulate({ seat: 0, logs: r.a.logs }, { seat: 1, logs: r.b.logs }, t);
@@ -822,6 +965,7 @@ describe('two devices reconcile', () => {
     }
     expect(forks).toBeGreaterThan(10); // the generator does produce forks
     expect(scoringRules).toBeGreaterThan(0); // and scoring differences
+    expect(merges).toBeGreaterThan(0); // and settled scoring states
   });
 });
 
@@ -998,7 +1142,9 @@ describe('scoring on a log', () => {
     const dead = markLog(open(), ['gg'])!;
     const end = scoreEnd(dead)!;
     expect(end.result.winner).toBe('B');
-    expect(validateLog(endLog(dead, end)).ok).toBe(true);
+    // DESIGN 9.5: the game ends by score only once both seats accepted the marking.
+    expect(validateLog(endLog(dead, end)).ok).toBe(false);
+    expect(validateLog(endLog(acceptLog(acceptLog(dead, 0)!, 1)!, end)).ok).toBe(true);
     expect(scoreEnd(log(1, LINE_B))).toBeNull();
   });
 
@@ -1027,6 +1173,217 @@ describe('scoring on a log', () => {
     expect(validateLog(a).ok).toBe(true);
     expect(roundTwoEnd(open(), [])).toBeNull(); // round 1 needs a marking round
     expect(roundTwoEnd(round2, [])!.end?.result.winner).toBe('W'); // every stone alive
+  });
+});
+
+/* ---------------------------------------------------------------------------------------------- */
+/* Live scoring messages (DESIGN 9.5, 9.6)                                                          */
+/* ---------------------------------------------------------------------------------------------- */
+
+describe('live scoring messages', () => {
+  const R2 = [...PASSED, 'ee', 'tt', 'tt'];
+  const at = (scoring: Scoring, o: LogOpts = {}) => log(1, PASSED, { ...o, scoring });
+
+  describe('applyMarkMsg', () => {
+    const M = (rev: unknown, dead: unknown, n: unknown = 1, epoch: unknown = 0) => ({ n, epoch, rev, dead });
+    const rows: { name: string; local: GameLog; msg: ReturnType<typeof M>; seat: Seat; kind: string; scoring?: Scoring }[] = [
+      { name: 'an older game is stale', local: log(2, PASSED, { scoring: S(1) }), msg: M(2, ['gg'], 1), seat: 0, kind: 'stale' },
+      { name: 'an older epoch is stale', local: at(S(1), { epoch: 1 }), msg: M(2, ['gg'], 1, 0), seat: 0, kind: 'stale' },
+      { name: 'a newer game asks for a reconcile', local: at(S(1)), msg: M(2, ['gg'], 2), seat: 0, kind: 'reconcile' },
+      { name: 'a newer epoch asks for a reconcile', local: at(S(1)), msg: M(2, ['gg'], 1, 1), seat: 1, kind: 'reconcile' },
+      { name: 'a finished game ignores it', local: scored(1), msg: M(2, ['gg']), seat: 0, kind: 'stale' },
+      { name: 'a resumed copy asks for a reconcile', local: log(1, PASSED), msg: M(2, ['gg']), seat: 1, kind: 'reconcile' },
+      { name: 'a copy before the double pass asks for a reconcile', local: log(1, PASSED.slice(0, 3)), msg: M(1, []), seat: 1, kind: 'reconcile' },
+      { name: 'round 2 has no marks: reconcile', local: log(1, R2, { scoring: S(0) }), msg: M(1, ['gg']), seat: 1, kind: 'reconcile' },
+      { name: 'rev 0 is malformed', local: at(S(1)), msg: M(0, []), seat: 0, kind: 'stale' },
+      { name: 'a fractional rev is malformed', local: at(S(1)), msg: M(1.5, []), seat: 0, kind: 'stale' },
+      { name: 'dead not a list is malformed', local: at(S(1)), msg: M(2, 'gg'), seat: 0, kind: 'stale' },
+      { name: 'a newer rev replaces the marking and clears both acceptances', local: at(S(2, [], [2, 2])), msg: M(3, ['gg']), seat: 0, kind: 'applied', scoring: S(3, ['gg']) },
+      { name: 'a newer rev may skip revs', local: at(S(1)), msg: M(5, ['cc']), seat: 1, kind: 'applied', scoring: S(5, ['cc']) },
+      { name: 'a newer rev keeps only stones', local: at(S(1)), msg: M(2, ['gg', 'ee', 'kk', 7, 'gg', 'cc']), seat: 1, kind: 'applied', scoring: S(2, ['cc', 'gg']) },
+      { name: 'an older rev: answer with this copy', local: at(S(3, ['gg'])), msg: M(2, ['cc']), seat: 0, kind: 'older' },
+      { name: 'the same marking is a duplicate', local: at(S(2, ['cc', 'gg'], [2, 0])), msg: M(2, ['gg', 'cc', 'gg']), seat: 1, kind: 'duplicate' },
+      { name: 'crossing toggles on seat 0: its own dead stones at rev + 1', local: at(S(2, ['gg'], [2, 0])), msg: M(2, ['cc']), seat: 0, kind: 'settled', scoring: S(3, ['gg']) },
+      { name: "crossing toggles on seat 1: seat 0's dead stones at rev + 1", local: at(S(2, ['cc'], [0, 2])), msg: M(2, ['gg']), seat: 1, kind: 'settled', scoring: S(3, ['gg']) },
+      { name: "seat 1's own proposal differs: seat 0's rev 1 proposal holds", local: at(S(1, ['cc'])), msg: M(1, ['gg']), seat: 1, kind: 'settled', scoring: S(2, ['gg']) },
+      { name: "seat 0 keeps its proposal against seat 1's rev 1", local: at(S(1, ['gg'])), msg: M(1, ['cc']), seat: 0, kind: 'settled', scoring: S(2, ['gg']) },
+    ];
+    it.each(rows)('$name', ({ local, msg, seat, kind, scoring }) => {
+      const out = applyMarkMsg(local, msg, seat);
+      expect(out.kind).toBe(kind);
+      if ('log' in out) {
+        expect(out.log.scoring).toEqual(scoring);
+        expect(validateLog(wire(out.log)).ok).toBe(true);
+      }
+    });
+
+    it('settles crossing toggles exactly as the reconcile does', () => {
+      const a = at(S(2, ['gg'], [2, 0]));
+      const b = at(S(2, ['cc'], [0, 2]));
+      const live0 = applyMarkMsg(a, { n: 1, epoch: 0, rev: 2, dead: ['cc'] }, 0);
+      const live1 = applyMarkMsg(b, { n: 1, epoch: 0, rev: 2, dead: ['gg'] }, 1);
+      const merged = compareLogs(a, b, 0).merged;
+      expect(live0).toEqual({ kind: 'settled', log: merged });
+      expect(live1).toEqual({ kind: 'settled', log: merged });
+    });
+  });
+
+  describe('applyAcceptMsg', () => {
+    const A = (rev: unknown, n: unknown = 1) => ({ n, rev });
+    const rows: { name: string; local: GameLog; msg: ReturnType<typeof A>; from: Seat; kind: string; want?: GameLog }[] = [
+      { name: 'an older game is stale', local: log(2, PASSED, { scoring: S(1) }), msg: A(1, 1), from: 1, kind: 'stale' },
+      { name: 'a newer game asks for a reconcile', local: at(S(1)), msg: A(1, 2), from: 1, kind: 'reconcile' },
+      { name: 'a finished game ignores it', local: scored(1), msg: A(1), from: 1, kind: 'stale' },
+      { name: 'a resumed copy asks for a reconcile', local: log(1, PASSED), msg: A(1), from: 0, kind: 'reconcile' },
+      { name: 'round 2 has no acceptances: reconcile', local: log(1, R2, { scoring: S(0) }), msg: A(1), from: 0, kind: 'reconcile' },
+      { name: 'rev 0 is nothing to accept', local: at(S(0)), msg: A(0), from: 1, kind: 'stale' },
+      { name: 'an older rev was cleared by a toggle', local: at(S(3, ['gg'])), msg: A(2), from: 1, kind: 'stale' },
+      { name: 'the contested rev of crossing toggles is void after settling', local: at(S(3, ['gg'])), msg: A(2), from: 0, kind: 'stale' },
+      { name: 'a newer rev means a missed marking: reconcile', local: at(S(1, ['gg'])), msg: A(2), from: 1, kind: 'reconcile' },
+      { name: 'an acceptance already recorded is a duplicate', local: at(S(2, ['gg'], [0, 2])), msg: A(2), from: 1, kind: 'duplicate' },
+      { name: "seat 1's acceptance is recorded", local: at(S(2, ['gg'])), msg: A(2), from: 1, kind: 'applied', want: at(S(2, ['gg'], [0, 2])) },
+      { name: "seat 0's acceptance is recorded", local: at(S(2, ['gg'])), msg: A(2), from: 0, kind: 'applied', want: at(S(2, ['gg'], [2, 0])) },
+      { name: 'the second acceptance ends the game by score', local: at(S(1, ['gg'], [1, 0])), msg: A(1), from: 1, kind: 'applied', want: scored(1, ['gg']) },
+      { name: 'the second acceptance ends it on seat 1 too', local: at(S(1, [], [0, 1])), msg: A(1), from: 0, kind: 'applied', want: scored(1, []) },
+    ];
+    it.each(rows)('$name', ({ local, msg, from, kind, want }) => {
+      const out = applyAcceptMsg(local, msg, from);
+      expect(out.kind).toBe(kind);
+      if ('log' in out) expect(out.log).toEqual(want);
+    });
+  });
+
+  describe('applyResumeMsg', () => {
+    const rows: { name: string; local: GameLog; msg: { n: unknown; epoch: unknown }; kind: string; want?: GameLog }[] = [
+      { name: 'an older game is stale', local: log(2, PASSED, { scoring: S(1) }), msg: { n: 1, epoch: 0 }, kind: 'stale' },
+      { name: 'an older epoch is stale', local: at(S(1), { epoch: 2 }), msg: { n: 1, epoch: 1 }, kind: 'stale' },
+      { name: 'a newer epoch asks for a reconcile', local: at(S(1)), msg: { n: 1, epoch: 1 }, kind: 'reconcile' },
+      { name: 'a malformed epoch is stale', local: at(S(1)), msg: { n: 1, epoch: 'x' }, kind: 'stale' },
+      { name: 'a finished game ignores it', local: scored(1), msg: { n: 1, epoch: 0 }, kind: 'stale' },
+      { name: 'an already resumed copy has nothing to do', local: log(1, PASSED), msg: { n: 1, epoch: 0 }, kind: 'duplicate' },
+      { name: 'a copy in scoring leaves it', local: at(S(3, ['gg'], [3, 0])), msg: { n: 1, epoch: 0 }, kind: 'applied', want: log(1, PASSED) },
+    ];
+    it.each(rows)('$name', ({ local, msg, kind, want }) => {
+      const out = applyResumeMsg(local, msg);
+      expect(out.kind).toBe(kind);
+      if ('log' in out) expect(out.log).toEqual(want);
+    });
+  });
+
+  describe('acceptMarking', () => {
+    it('records this seat, ends at the second acceptance, and refuses where nothing can be accepted', () => {
+      expect(acceptMarking(at(S(1, ['gg'])), 0)).toEqual(at(S(1, ['gg'], [1, 0])));
+      expect(acceptMarking(at(S(1, ['gg'], [1, 0])), 1)).toEqual(scored(1, ['gg']));
+      expect(acceptMarking(at(S(0)), 0)).toBeNull(); // nothing proposed yet
+      expect(acceptMarking(log(1, R2, { scoring: S(0) }), 0)).toBeNull(); // round 2
+      expect(acceptMarking(log(1, PASSED), 0)).toBeNull(); // resumed
+      expect(acceptMarking(scored(1), 0)).toBeNull(); // over
+    });
+  });
+
+  describe("applyScoredEnd (round 2, seat 0's proposal as data)", () => {
+    const open = (): GameLog => log(1, R2, { scoring: S(0) });
+    const seat0 = (): GameLog => roundTwoEnd(open(), ['gg'])!;
+
+    it("adopts seat 0's end, whatever seat 1's own engine would propose", () => {
+      // Seat 1's engine would call every stone alive: that result differs and is never consulted.
+      const seat1Own = roundTwoEnd(open(), [])!;
+      expect(seat1Own.end!.result).not.toEqual(seat0().end!.result);
+      const got = applyScoredEnd(open(), ['gg'], seat0().end!.result);
+      expect(got).toEqual(seat0());
+      expect(validateLog(wire(got)).ok).toBe(true);
+    });
+
+    type Refusal = readonly [string, unknown, () => unknown, () => GameLog];
+    it.each<Refusal>([
+      ['a result that is not the count of the dead stones', ['gg'], () => roundTwoEnd(open(), [])!.end!.result, open],
+      ['a resignation instead of a score', ['gg'], () => ({ winner: 'B', by: 'resign' }), open],
+      ['a malformed result', ['gg'], () => 'B+3', open],
+      ['dead not a list', 'gg', () => seat0().end!.result, open],
+      ['round 1', ['gg'], () => seat0().end!.result, () => at(S(1, ['gg']))],
+      ['a resumed copy', ['gg'], () => seat0().end!.result, () => log(1, R2)],
+      ['a finished copy', ['gg'], () => seat0().end!.result, seat0],
+    ])('refuses %s', (_label, dead, result, local) => {
+      expect(applyScoredEnd(local(), dead as unknown as unknown[], result())).toBeNull();
+    });
+
+    it('keeps only stones of the dead list', () => {
+      expect(applyScoredEnd(open(), ['gg', 'dd', 'zz', 3], seat0().end!.result)).toEqual(seat0());
+    });
+  });
+
+  it('two devices toggling and accepting with crossing messages converge and never end on a marking a seat did not accept (property check)', () => {
+    type Msg = { t: 'mark'; n: number; epoch: number; rev: number; dead: string[] } | { t: 'accept'; n: number; rev: number };
+    const DEADS = [[], ['cc'], ['gg'], ['cc', 'gg']];
+    let ties = 0;
+    let ends = 0;
+    let reconciles = 0;
+    for (let t = 0; t < 400; t++) {
+      const rng = seeded(1000 + t);
+      const start = at(S(1, rng() < 0.5 ? ['gg'] : []));
+      const dev = [0, 1].map((seat) => ({ seat: seat as Seat, log: start, inbox: [] as Msg[], accepted: new Map<number, string>(), reconcile: false }));
+      const send = (from: number, m: Msg) => dev[1 - from].inbox.push(wire(m));
+      const markOf = (l: GameLog): Msg => ({ t: 'mark', n: l.n, epoch: l.epoch, rev: l.scoring!.rev, dead: [...l.scoring!.dead] });
+      for (let step = 0; step < 60; step++) {
+        const i = rng() < 0.5 ? 0 : 1;
+        const d = dev[i];
+        const r = rng();
+        if (r < 0.25 && isScoring(d.log)) {
+          // A toggle (or a re-marking) on this device.
+          const next = markLog(d.log, DEADS[Math.floor(rng() * DEADS.length)]);
+          if (next) {
+            d.log = next;
+            send(i, markOf(next));
+          }
+        } else if (r < 0.45 && isScoring(d.log) && d.log.scoring.accepted[d.seat] !== d.log.scoring.rev) {
+          d.accepted.set(d.log.scoring.rev, d.log.scoring.dead.join());
+          const next = acceptMarking(d.log, d.seat)!;
+          send(i, { t: 'accept', n: d.log.n, rev: d.log.scoring.rev });
+          d.log = next;
+        } else if (d.inbox.length) {
+          const m = d.inbox.shift()!;
+          const out = m.t === 'mark' ? applyMarkMsg(d.log, m, d.seat) : applyAcceptMsg(d.log, m, otherSeat(d.seat));
+          if (out.kind === 'applied' || out.kind === 'settled') d.log = out.log;
+          if (out.kind === 'settled') {
+            ties++;
+            send(i, markOf(out.log));
+          }
+          if (out.kind === 'older' && isScoring(d.log)) send(i, markOf(d.log));
+          if (out.kind === 'reconcile') d.reconcile = true;
+        }
+      }
+      // Deliver everything that is still on the wire (in order per direction).
+      for (let guard = 0; dev[0].inbox.length || dev[1].inbox.length; guard++) {
+        if (guard > 200) throw new Error('live messages do not settle');
+        const i = dev[0].inbox.length && (!dev[1].inbox.length || rng() < 0.5) ? 0 : 1;
+        const d = dev[i];
+        const m = d.inbox.shift()!;
+        const out = m.t === 'mark' ? applyMarkMsg(d.log, m, d.seat) : applyAcceptMsg(d.log, m, otherSeat(d.seat));
+        if (out.kind === 'applied' || out.kind === 'settled') d.log = out.log;
+        if (out.kind === 'settled') send(i, markOf(out.log));
+        if (out.kind === 'older' && isScoring(d.log)) send(i, markOf(d.log));
+        if (out.kind === 'reconcile') d.reconcile = true;
+      }
+      let [l0, l1] = [dev[0].log, dev[1].log];
+      if (dev[0].reconcile || dev[1].reconcile || hashLog(l0) !== hashLog(l1)) {
+        reconciles++;
+        const r = simulate({ seat: 0, logs: [l0] }, { seat: 1, logs: [l1] }, t);
+        expect(r.a.toasts + r.b.toasts).toBe(0); // crossing scoring messages are never a fork
+        [l0, l1] = [r.a.logs[0], r.b.logs[0]];
+      }
+      expect(l0).toEqual(l1);
+      expect(validateLog(wire(l0)).ok).toBe(true);
+      if (l0.end) {
+        ends++;
+        // Both seats accepted exactly this marking at this rev.
+        const s = l0.scoring!;
+        expect(dev[0].accepted.get(s.rev)).toBe(s.dead.join());
+        expect(dev[1].accepted.get(s.rev)).toBe(s.dead.join());
+      }
+    }
+    expect(ties).toBeGreaterThan(10);
+    expect(ends).toBeGreaterThan(10);
+    expect(reconciles).toBeLessThan(400);
   });
 });
 
