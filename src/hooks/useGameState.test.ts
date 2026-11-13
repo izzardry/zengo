@@ -1,4 +1,4 @@
-import { act, renderHook } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { createElement, type ReactNode } from 'react';
 import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -913,5 +913,99 @@ describe('rooms (extension points for milestone 3)', () => {
     });
     expect(onRoom).toHaveBeenCalledWith('RMD001', null);
     expect(r.result.current.gs.code).toBe('RMD001');
+  });
+});
+
+describe('rooms (milestone 3: the `rooms` option)', () => {
+  /** No transport at all: the room opens, loads its record and waits; nothing reaches a network. */
+  const offline = { rooms: true, room: { broker: null, manualEnabled: false, locks: null } } as const;
+
+  it('Start with ROOM opens the room with the start-screen settings; the address carries the code only', async () => {
+    const { result } = setup('/?s=RMH001&n=13&g=t&w=W&t=3%2B7', seq(0.1), offline);
+    act(() => result.current.gs.setOpponent({ mode: 'room' }));
+    act(() => {
+      expect(result.current.gs.start()).toBe(true);
+    });
+    expect(result.current.gs.phase).toBe('playing');
+    expect(result.current.gs.session?.mode).toBe('room');
+    expect(result.current.gs.room).not.toBeNull();
+    // The controller creates the room at once with the creator's settings (DESIGN 9.1).
+    await waitFor(() => expect(result.current.gs.room?.state?.seat).toBe(0));
+    await waitFor(() => expect(result.current.gs.session?.game.settings.size).toBe(13));
+    expect(result.current.gs.session?.game.settings.rules).toBe('territory');
+    expect(result.current.gs.session?.color).toBe('W');
+    expect(result.current.gs.session?.tc).toBe('3+7');
+    expect(result.current.gs.session?.id).toBe('RMH001.1');
+    expect(store.rooms().map((r) => r.code)).toEqual(['RMH001']);
+    // Room addresses carry the code only, never moves (DESIGN 13.2); Share is the invite.
+    expect(url(result)).toEqual({ code: 'RMH001', playing: true, mode: 'room' });
+    expect(result.current.gs.shareUrl()).toBe(`${BASE}#/?s=RMH001&o=r`);
+    // No solo undo, redo or pass toast in a room; Undo is a takeback request (nobody to ask yet).
+    expect(result.current.gs.undoRule).toBe('request');
+    expect(result.current.gs.canRedo).toBe(false);
+    expect(result.current.gs.canUndoPass).toBe(false);
+    expect(result.current.gs.newGame()).toBe(false);
+
+    // Back leaves the room; ROOM stays selected and the room's game shows dimmed on the start screen.
+    act(() => result.current.gs.exit());
+    expect(result.current.gs.phase).toBe('start');
+    expect(result.current.gs.room).toBeNull();
+    await waitFor(() => expect(result.current.gs.roomSaved?.id).toBe('RMH001.1'));
+    expect(result.current.gs.preview.settings.size).toBe(13);
+    // Another code shows the start screen's own settings again.
+    act(() => void result.current.gs.setCode('RMH999'));
+    expect(result.current.gs.roomSaved).toBeNull();
+  });
+
+  it('an invite link opens the room at once; a stored room game reopens it; reviewing it never leaves the room', async () => {
+    const { result } = setup('/?s=rmh002&o=r', seq(0.1), offline);
+    expect(result.current.gs.phase).toBe('playing');
+    expect(result.current.gs.room?.code).toBe('RMH002');
+    expect(result.current.gs.roomInvite).toBeNull();
+    act(() => result.current.gs.exit());
+    expect(result.current.gs.phase).toBe('start');
+
+    // A stored unfinished room game reconnects to its room (DESIGN 12.2).
+    const game = zigo.play(zigo.newGame(makeSettings(9)), 'ee', 0);
+    const rec: SavedGame = {
+      id: 'RMH003.1',
+      code: 'RMH003',
+      mode: 'room',
+      color: 'B',
+      size: 9,
+      rules: 'area',
+      handicap: 0,
+      tc: null,
+      moves: zigo.encodeMoves(game.plies),
+      ms: [0],
+      assisted: false,
+      room: { n: 1, epoch: 0 },
+      createdAt: t,
+      lastPlayedAt: t,
+    };
+    store.saveRoom({ code: 'RMH003', key: 'AAAAAAAAAAAAAAAAAAAAAA', seat: 0, createdAt: t, lastSeenAt: 0, score: [0, 0], games: ['RMH003.1'] });
+    store.saveGame(rec);
+    act(() => {
+      expect(result.current.gs.open(rec)).toBe(true);
+    });
+    expect(result.current.gs.room?.code).toBe('RMH003');
+    await waitFor(() => expect(result.current.gs.session?.game.cursor).toBe(1));
+    // Stepping back through the moves is a local review; the live position ends it.
+    act(() => result.current.gs.step(-1));
+    expect(result.current.gs.phase).toBe('review');
+    expect(result.current.gs.view?.cursor).toBe(0);
+    expect(result.current.gs.play('cc')).toBe(false);
+    act(() => result.current.gs.step(1));
+    expect(result.current.gs.phase).toBe('playing');
+    expect(result.current.gs.room).not.toBeNull();
+    // Continue from here starts a solo game against the last solo opponent (the first-run default,
+    // the computer); the room itself is untouched (DESIGN 12.3).
+    act(() => {
+      expect(result.current.gs.continueFromHere()).toBe(true);
+    });
+    expect(result.current.gs.room).toBeNull();
+    expect(result.current.gs.session?.mode).toBe('computer');
+    expect(result.current.gs.session?.game.cursor).toBe(1);
+    expect(store.rooms().map((r) => r.code)).toEqual(['RMH003']);
   });
 });

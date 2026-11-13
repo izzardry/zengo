@@ -6,7 +6,11 @@ A minimalist Go game built as a Progressive Web App, by [izzardry](https://githu
 
 Play it at **[izzardry.github.io/zigo](https://izzardry.github.io/zigo/)**.
 
-> **Work in progress.** The repository was just created from Zhess; the board, rules, computer and rooms are being replaced with Go. See [DESIGN.md](DESIGN.md) for what is being built.
+> **Work in progress.** The board, the rules and scoring, pass-and-play, the computer and rooms work; the final audit and polish are still to come. See [DESIGN.md](DESIGN.md) for what is being built.
+
+## Rooms
+
+A room is a game between two devices with no server holding the game. Pick `ROOM` on the start screen and press Start: the code is the room. The first device creates it and shows an invite link (`#/?s=CODE&o=r`) and QR code; the other device opens the link, or types the code with `ROOM` selected, and joins. The devices talk over a WebRTC data channel, found through the public PeerJS broker; when the broker cannot be reached, `Connect manually` swaps two links instead. Each device keeps the whole room, so either one can restore the other. After two passes the creator's device proposes the dead stones (or the joiner's, when the creator has no engine), both players can toggle groups, and the game ends when both accept the same marking.
 
 ## Tech Stack
 

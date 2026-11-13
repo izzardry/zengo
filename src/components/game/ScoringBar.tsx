@@ -121,7 +121,9 @@ export function ScoringBar({
       <div
         role="group"
         aria-label={t('game.scoringBar')}
-        className={cn(GLASS, 'flex items-center gap-2 rounded-full p-1.5', landscape && 'flex-col')}
+        // Landscape: a column of two equal-width buttons in a rounded card (a full pill around two
+        // stacked buttons of different widths would cut through the wider one).
+        className={cn(GLASS, 'flex gap-2 p-1.5', landscape ? 'flex-col items-stretch rounded-3xl' : 'items-center rounded-full')}
       >
         <button
           type="button"

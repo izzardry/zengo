@@ -18,8 +18,14 @@
  * territory preview, the blunder guard and the dead-stone proposal (2C). All of them share the one
  * engine of `useZigoEngine`.
  *
- * Pass-and-play and the computer play end to end. `ROOM` answers Start with a `Coming soon` toast
- * (`PLAYABLE_MODES`) until milestone 3 adds the room chrome.
+ * Rooms (DESIGN 9, milestone 3): `useGameState` runs the room (`gs.room`, `useRoom` over the room
+ * controller) and derives the session from it. This file adds the room chrome: the presence dot
+ * and the score in the info pill, the toolbar's room column (takeback request, no redo, no hint,
+ * tap pass / hold resign, Share opens the invite sheet), the room scoring bar with the opponent's
+ * toggles flashing on the board, the invite and manual-connection sheets, the request and presence
+ * toasts, the tab-guard banner, the clock in external mode with the controller's stamps, and the
+ * overlay's Rematch. The room's scoring proposal comes from this device's engine through the same
+ * `createDeadStoneProposer` as solo play; the controller sends it as data (DESIGN 9.5, PLAN 7).
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent } from 'react';
 import { toast } from 'sonner';
@@ -54,6 +60,17 @@ import {
   newAtariAnnouncements,
   plyAnnouncement,
 } from '@/components/platform';
+import {
+  InviteSheet,
+  ManualConnectSheet,
+  PresenceDot,
+  RoomBanner,
+  RoomScoringBar,
+  RoomToasts,
+  ToggleFlash,
+  shouldOfferInvite,
+  waitsAsAnchor,
+} from '@/components/room';
 import { BoardPreview, EngineStatus, StartChrome, StartPill, useScrolled } from '@/components/start';
 import { useIsMobileLandscape } from '@/hooks/use-orientation';
 import { useBlunderGuard } from '@/hooks/useBlunderGuard';
@@ -78,7 +95,7 @@ import { needsLargeNet } from '@/lib/levels';
 import { createDeadStoneProposer } from '@/lib/proposal';
 import scoringApi from '@/lib/scoring';
 import { bankTurn, bankedTurnMs } from '@/lib/turnBank';
-import type { Color, Game, IllegalReason, Point, SavedGame } from '@/lib/types';
+import type { Color, Game, IllegalReason, LockReason, Point, SavedGame } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { formatTc, isPass, parseTc } from '@/lib/zigo';
 import {
@@ -100,6 +117,17 @@ import {
 
 const NO_SCORE: readonly [number, number] = Object.freeze([0, 0] as const);
 
+/** A paused room turn before the controller has loaded. */
+const NO_TURN = Object.freeze({ turnStart: null, turnUsed: 0 });
+
+/** Board locks that also forbid resigning (resignation works offline, DESIGN 9.3). */
+const HARD_LOCKS: ReadonlySet<LockReason> = new Set<LockReason>(['other-tab', 'version', 'denied', 'no-seat']);
+
+/** Resigning is possible in this room state: seated and not hard-locked (also on the opponent's turn and offline). */
+function roomResignable(rs: { seat: 0 | 1 | null; locked: LockReason | null } | null): boolean {
+  return !!rs && rs.seat !== null && !(rs.locked && HARD_LOCKS.has(rs.locked));
+}
+
 const isOnline = () => typeof navigator === 'undefined' || navigator.onLine !== false;
 
 function isTypingTarget(t: EventTarget | null): boolean {
@@ -115,7 +143,10 @@ export default function Index() {
   engineRef.current = engine;
   // The dead-stone proposal when a game enters scoring (DESIGN 8.4), in every solo mode.
   const proposeDead = useMemo(() => (ENGINE_ON ? createDeadStoneProposer(() => engineRef.current) : undefined), []);
-  const gs = useGameState({ proposeDead });
+  // In a room the same proposer goes to the controller: seat 0's engine proposes, seat 1's only
+  // when seat 0 hands the proposal over (DESIGN 9.5). Unset without an engine.
+  const roomOptions = useMemo(() => ({ propose: proposeDead }), [proposeDead]);
+  const gs = useGameState({ proposeDead, rooms: PLAYABLE_MODES.room, room: roomOptions });
   const saved = useSavedGames();
   const { helpers, toggleHelpers } = useHelpers();
   const { seating, toggleSeating } = useSeating();
@@ -127,6 +158,10 @@ export default function Index() {
 
   const { phase, session, view } = gs;
   const isStart = phase === 'start';
+  /** The open room (room mode), and its controller snapshot. */
+  const room = gs.room;
+  const rs = room?.state ?? null;
+  const roomMode = !!room;
   const phaseRef = useRef(phase);
   phaseRef.current = phase;
   const sessionRef = useRef(session);
@@ -177,7 +212,10 @@ export default function Index() {
     const prev = prevEnd.current;
     prevEnd.current = { id: sessionId, ended };
     if (sessionId !== prev.id) {
-      setOverlay(false);
+      // A room whose current game is over opens with its overlay, where the rematch is asked for
+      // (DESIGN 8.5, 9.4). No tint: the game did not end in this session.
+      const s = sessionRef.current;
+      setOverlay(!!s && s.mode === 'room' && !!gsRef.current.room && ended);
       setEndedHere(false);
       return;
     }
@@ -209,11 +247,17 @@ export default function Index() {
   }
   // A move-list jump in a live game (review) does not stop the clock: solo clocks pause only when
   // the tab is hidden or on Back (DESIGN 11), and Back leaves the game (phase `start`).
+  // In a room the controller times the turn (DESIGN 9.7): external mode with its stamps, which use
+  // the same performance.now() clock. Its flag rule (own at zero, the opponent's 2 s past zero)
+  // is the controller's too; `timeout` hands the flag to it.
   const clock = useClock(sessionGame, session?.tc ?? null, {
     active: phase !== 'start',
     key: sessionId,
     onFlag: timeout,
     initialTurnMs: banked.current.ms,
+    external: roomMode ? (rs?.clock ?? NO_TURN) : null,
+    ownColor: roomMode ? session?.color : undefined,
+    pauseWhenHidden: !roomMode,
   });
   const clockRef = useRef(clock);
   clockRef.current = clock;
@@ -248,11 +292,12 @@ export default function Index() {
   });
   computerRetry.current = computer.retry;
 
-  // A solo game warms the engine up, so hints, the guard and the proposal answer at once: against
-  // the computer always, in pass-and-play once stage 1 is on the device (no download for a hint
-  // nobody asked for).
+  // A game warms the engine up, so hints, the guard and the proposal answer at once: against the
+  // computer always, in pass-and-play and in a room once stage 1 is on the device (no download for
+  // a hint or a proposal nobody asked for yet).
   const stage1Cached = engineOffline.stage1.status === 'ready';
-  const warm = ENGINE_ON && !!sessionGame && !sessionGame.end && (mode === 'computer' || (mode === 'local' && stage1Cached));
+  const warm =
+    ENGINE_ON && !!sessionGame && !sessionGame.end && (mode === 'computer' || ((mode === 'local' || mode === 'room') && stage1Cached));
   const engineIdle = engine.state === 'idle';
   useEffect(() => {
     if (warm && engineIdle) engineRef.current.load(1).catch(() => undefined);
@@ -327,6 +372,9 @@ export default function Index() {
   /* ---- start-screen settings (StartChrome shows a saved game's own, dimmed) ---- */
   const pillSaved = gs.startPill.saved;
   const startClock = useMemo(() => parseTc(gs.tc), [gs.tc]);
+  // ROOM with a room this device holds: the room's settings apply and show dimmed (DESIGN 4.1, 9.1).
+  const roomSaved = gs.roomSaved;
+  const roomClock = useMemo(() => (roomSaved ? parseTc(roomSaved.tc) : null), [roomSaved]);
 
   const comingSoon = useCallback(() => toast(t('comingSoon'), { id: 'coming-soon' }), [t]);
 
@@ -395,6 +443,14 @@ export default function Index() {
   }, [animate, gs, bankNow]);
 
   const handleNewGame = useCallback(() => {
+    // A room plays on in the same room: Rematch asks the opponent (DESIGN 8.5, 9.4). The overlay
+    // stays, its button showing the pending state, until game n+1 starts or the answer is No.
+    // When it cannot be asked (the opponent is away) the button is disabled with a note.
+    const r = gsRef.current.room;
+    if (r) {
+      if (r.state?.canAsk.rematch) r.ask('rematch');
+      return;
+    }
     setOverlay(false);
     gs.newGame();
   }, [gs]);
@@ -402,6 +458,11 @@ export default function Index() {
   const handleResign = useCallback(() => {
     const s = sessionRef.current;
     if (!s) return;
+    // In a room resignation is final: no undo toast (DESIGN 8.3).
+    if (gsRef.current.room) {
+      if (gsRef.current.resign()) setPassToast(null);
+      return;
+    }
     const who: 'you' | Color = s.mode === 'local' ? s.game.turn : 'you';
     if (gsRef.current.resign()) {
       setPassToast(null);
@@ -436,6 +497,8 @@ export default function Index() {
     if (!s) return;
     const who: 'you' | Color = s.mode === 'local' ? s.game.turn : 'you';
     if (!gsRef.current.pass(clockRef.current.elapsed())) return;
+    // In a room a pass is taken back by a takeback request, not by the toast (DESIGN 9.4).
+    if (s.mode === 'room') return;
     const cursor = s.game.cursor + 1;
     setPassToast((prev) => ({ who, cursor, key: (prev?.key ?? 0) + 1 }));
   }, []);
@@ -461,6 +524,7 @@ export default function Index() {
   const handleShare = useCallback(() => {
     const s = sessionRef.current;
     const url = gsRef.current.shareUrl();
+    if (s?.mode === 'room') return void shareLink(url, 'room');
     const end = s?.game.end;
     const won = !!end && s?.mode === 'computer' && outcomeFor(end.result, s.mode, s.color) === 'win';
     void shareLink(url, won ? 'win' : 'solo', s?.level);
@@ -474,6 +538,65 @@ export default function Index() {
   const handleContinue = useCallback(() => {
     if (!begin(gs.continueFromHere)) comingSoon();
   }, [begin, gs, comingSoon]);
+
+  /* ---- rooms: invite sheet and manual connection (DESIGN 9) ---- */
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [manualOpen, setManualOpen] = useState(false);
+  const roomCode = room?.code ?? null;
+  const roomLive = !!rs?.live;
+  // A new room (or none) starts with both sheets closed.
+  const invited = useRef<string | null>(null);
+  useEffect(() => {
+    setInviteOpen(false);
+    setManualOpen(false);
+    if (!roomCode) invited.current = null;
+  }, [roomCode]);
+  // The creator's room shows the invite sheet by itself while nobody has joined (DESIGN 9), once;
+  // after the first-game tutorial, so the two overlays do not stack.
+  const offerInvite = shouldOfferInvite(rs) && room?.tab === 'owner' && !showTutorial;
+  useEffect(() => {
+    if (!offerInvite || !roomCode || invited.current === roomCode) return;
+    invited.current = roomCode;
+    setInviteOpen(true);
+  }, [offerInvite, roomCode]);
+  // The opponent is here: the sheets have done their job.
+  useEffect(() => {
+    if (!roomLive) return;
+    setInviteOpen(false);
+    setManualOpen(false);
+  }, [roomLive]);
+
+  /** `Connect manually` (invite sheet, failure toast): this device sends the offer (DESIGN 9). */
+  const connectManually = useCallback(() => {
+    const r = gsRef.current.room;
+    if (!r) return;
+    r.openManual();
+    setInviteOpen(false);
+    setManualOpen(true);
+  }, []);
+  const manual = room?.manual;
+  const manualStep = manual?.step ?? 'idle';
+  // This device answers an offer link (`x`) and the exchange is still running.
+  const manualGuestActive = manual?.role === 'guest' && manualStep !== 'idle' && manualStep !== 'connected';
+  // An offer link (`x`) or an answer link (`y`) opened here shows its step without a tap.
+  const manualAuto = manualGuestActive || manualStep === 'handover';
+  // The sheets are modal: they step aside once the manual channel is open and while a request
+  // waits for an answer, so its toast (e.g. Allow for a rejoin) can be reached.
+  const requestWaiting = !!rs?.requests.incoming;
+  const manualShown = !!room && (manualOpen || manualAuto) && !roomLive && manualStep !== 'connected' && !requestWaiting;
+  const inviteShown = inviteOpen && !manualShown && !requestWaiting;
+  // The failure toast (with its own `Connect manually`) steps aside while a sheet that shows the
+  // cause or the step is open, and never shows to the guest of a manual exchange (an `x` link).
+  const failureQuiet = inviteShown || manualShown || manualGuestActive;
+  // Done once its channel is open: a later loss starts from `Connect manually` again, not this sheet.
+  useEffect(() => {
+    if (manualStep === 'connected') setManualOpen(false);
+  }, [manualStep]);
+  const onManualOpenChange = useCallback((open: boolean) => {
+    if (open) return;
+    setManualOpen(false);
+    gsRef.current.room?.closeManual();
+  }, []);
 
   /* ---- keyboard: Z / Shift+Z undo and redo; ← / → step in review (DESIGN 6.1, 12.3) ---- */
   useEffect(() => {
@@ -585,7 +708,20 @@ export default function Index() {
 
   /* ---- scoring bar (DESIGN 8.4): one Accept side by side, one per player face to face ---- */
   const acceptFor = useCallback((side?: Color) => void gsRef.current.scoring.accept(side), []);
-  const scoringBar = scoringNow ? (
+  const roomScoring = room?.scoring ?? null;
+  // In a room: this seat's Accept with its pending state, the opponent's acceptance, the proposal
+  // under way and `Scoring continues when your opponent is back` (DESIGN 9.3, 9.5).
+  const scoringBar = roomMode ? (
+    scoringNow && roomScoring ? (
+      <RoomScoringBar
+        scoring={roomScoring}
+        onAccept={() => void gsRef.current.room?.accept()}
+        onResume={() => void gsRef.current.room?.resume()}
+        visible={chromeVisible}
+        landscape={landscape}
+      />
+    ) : undefined
+  ) : scoringNow ? (
     <ScoringBar
       onResume={() => void gsRef.current.scoring.resume()}
       onAccept={() => acceptFor(faceToFace ? near : undefined)}
@@ -601,6 +737,11 @@ export default function Index() {
       <ScoringAccept variant="compact" side={far} accepted={sc.acceptedBy[far]} onAccept={() => acceptFor(far)} />
     ) : undefined;
 
+  // A timed room while disconnected: both strips say `Paused` (DESIGN 9.7).
+  const pausedNote =
+    roomMode && !!rs?.clock.paused && !!session?.tc && !view?.end && !view?.scoring && phase === 'playing' ? t('room.paused') : undefined;
+  // The opponent's strip dims while they are disconnected (DESIGN 9).
+  const opponentAway = roomMode && rs?.presence !== 'connected';
   const strip = (color: Color, rotated: boolean, layout: 'row' | 'rail') =>
     session && view ? (
       <PlayerStrip
@@ -608,8 +749,8 @@ export default function Index() {
         prisoners={view.prisoners[color]}
         komi2={view.settings.komi2}
         passed={passed[color]}
-        clock={faces[color]}
-        active={!view.end && view.turn === color}
+        clock={pausedNote ? { ...faces[color], note: pausedNote } : faces[color]}
+        active={!view.end && view.turn === color && !(opponentAway && color !== session.color)}
         score={sc.active && sc.score ? sc.score : undefined}
         action={color === far ? farAccept : undefined}
         rotated={rotated}
@@ -618,17 +759,21 @@ export default function Index() {
       />
     ) : null;
 
-  // A room game reviewed from history reads the room score from the stored room record (DESIGN 9).
-  const reviewedRoom = session?.mode === 'room' ? saved.rooms.find((r) => r.code === session.code) : undefined;
-  const roomScore: readonly [number, number] = reviewedRoom
-    ? [reviewedRoom.score[reviewedRoom.seat] / 2, reviewedRoom.score[reviewedRoom.seat === 0 ? 1 : 0] / 2]
-    : NO_SCORE;
+  // The room score from this device's point of view (DESIGN 9.4); a room game reviewed from
+  // history reads it from the stored room record.
+  const reviewedRoom = !room && session?.mode === 'room' ? saved.rooms.find((r) => r.code === session.code) : undefined;
+  const roomScore: readonly [number, number] = room
+    ? room.score
+    : reviewedRoom
+      ? [reviewedRoom.score[reviewedRoom.seat] / 2, reviewedRoom.score[reviewedRoom.seat === 0 ? 1 : 0] / 2]
+      : NO_SCORE;
   const infoOpponent: InfoOpponent =
     mode === 'computer' ? { kind: 'computer', level: session?.level ?? 5 } : mode === 'room' ? { kind: 'room', score: roomScore } : { kind: 'local' };
   const info =
     session && view ? (
       <InfoPill
         code={session.code}
+        presence={room ? <PresenceDot presence={rs?.presence ?? 'connecting'} onClick={() => setInviteOpen(true)} /> : undefined}
         opponent={infoOpponent}
         moves={moves}
         size={view.settings.size}
@@ -653,6 +798,14 @@ export default function Index() {
   const end = session?.game.end;
   const tint = end && endedHere && session ? tintFor(end.result, session.mode, session.color) : null;
   const flagLive = phase === 'playing' && live && gs.isPlayerTurn;
+  // In a room the flag works whenever this device may resign (also on the opponent's turn and
+  // offline, DESIGN 8.3, 9.3); its tap passes on this device's turn only.
+  const roomFlagLive = roomMode && phase === 'playing' && live && room?.tab === 'owner' && roomResignable(rs);
+  // A room whose current game is over: Rematch lives on the overlay, and the toolbar's flag slot
+  // brings the overlay back after it was dismissed, pulsing while this device's request waits.
+  const roomOver = roomMode && !!end && phase === 'playing';
+  const rematchPending = roomMode && rs?.requests.outgoing === 'rematch';
+  const rematchBlocked = roomMode && !rematchPending && !rs?.canAsk.rematch;
 
   /* ---- hint bulb in the toolbar: tap best / top three, hold 1 s territory (DESIGN 4.2, 7.3) ---- */
   const hintControls =
@@ -688,6 +841,13 @@ export default function Index() {
           data-engine={engine.state}
           data-computer={computer.thinking ? 'thinking' : undefined}
           data-size={boardGame.settings.size}
+          data-room-phase={rs?.phase}
+          data-room-presence={rs?.presence}
+          data-room-failure={rs?.failureKind ?? undefined}
+          data-room-cause={room?.manualCause ?? undefined}
+          data-room-tab={room?.tab}
+          data-room-via={room?.via ?? undefined}
+          data-room-seat={rs?.seat ?? undefined}
           className={cn(
             'flex h-[100dvh] min-h-[320px] items-center justify-center',
             landscape
@@ -731,6 +891,8 @@ export default function Index() {
                 announce={false}
                 boardSize={boardSize}
               />
+              {/* The opponent's toggles flash once on this board (DESIGN 9.5). */}
+              {roomMode && !isStart && view && <ToggleFlash size={view.settings.size} toggle={room?.lastToggle ?? null} />}
               {!isStart && !landscape && <div className="absolute inset-x-0 top-full mt-1 px-1">{strip(near, false, 'row')}</div>}
             </div>
           </BoardPreview>
@@ -773,6 +935,7 @@ export default function Index() {
               onHelp={forceShowTutorial}
               onHelpHold={flags.donationPrompt ? () => triggerDonation() : undefined}
               canUndo={phase === 'review' ? gs.canStepBack : gs.canUndo}
+              undoPending={roomMode && rs?.requests.outgoing === 'takeback'}
               canRedo={phase === 'review' ? gs.canStepForward : gs.canRedo}
               onUndo={phase === 'review' ? () => gs.step(-1) : () => void gs.undo()}
               onRedo={phase === 'review' ? () => gs.step(1) : () => void gs.redo()}
@@ -787,9 +950,11 @@ export default function Index() {
               onPass={handlePass}
               onResign={handleResign}
               opponentPassed={!!view && flagLive && opponentPassed(view)}
-              flagDisabled={!flagLive}
+              flagDisabled={roomMode ? !roomFlagLive : !flagLive}
               onContinue={phase === 'review' ? handleContinue : undefined}
-              onShare={handleShare}
+              onRematch={roomOver ? () => setOverlay(true) : undefined}
+              rematchPending={rematchPending}
+              onShare={roomMode && phase !== 'review' ? () => setInviteOpen(true) : handleShare}
               onCopySgf={handleCopySgf}
               scoringBar={scoringBar}
             />
@@ -811,11 +976,50 @@ export default function Index() {
             onShare={handleShare}
             onCopySgf={handleCopySgf}
             onPrimary={handleNewGame}
+            primaryBusy={rematchPending}
+            primaryDisabled={rematchBlocked}
+            primaryNote={
+              rematchPending ? t('room.pending.waiting') : rematchBlocked && rs?.presence !== 'connected' ? t('room.presence.waiting') : undefined
+            }
             onDismiss={() => setOverlay(false)}
           />
         )}
 
-        {session && (
+        {room && (
+          <>
+            <RoomToasts
+              room={room.code}
+              onNotice={room.onNotice}
+              requests={rs?.requests}
+              onReply={room.reply}
+              manualCause={room.manualCause}
+              live={roomLive}
+              quiet={failureQuiet}
+              onConnectManually={connectManually}
+              onUpdateCheck={() => void checkForUpdate()}
+            />
+            <InviteSheet
+              open={inviteShown}
+              onOpenChange={setInviteOpen}
+              code={room.code}
+              presence={rs?.presence ?? null}
+              manualCause={room.manualCause}
+              onConnectManually={connectManually}
+            />
+            {manual && (
+              <ManualConnectSheet
+                open={manualShown}
+                onOpenChange={onManualOpenChange}
+                manual={manual}
+                onAcceptAnswer={room.acceptAnswer}
+                onStartOver={room.restartManual}
+              />
+            )}
+            <RoomBanner tab={room.tab} phase={rs?.phase} waiting={waitsAsAnchor(rs)} onTakeOver={room.takeOver} />
+          </>
+        )}
+
+        {session && !roomMode && (
           <ResignUndoToast
             open={!!resigned && !!end}
             who={resigned ?? 'you'}
@@ -846,17 +1050,18 @@ export default function Index() {
           opponent={gs.opponent}
           onOpponentChange={gs.setOpponent}
           opponentRank={startRank}
-          color={gs.colorChoice}
+          color={roomSaved ? roomSaved.color : gs.colorChoice}
           onColorChange={gs.setColorChoice}
-          size={gs.size}
+          size={roomSaved ? roomSaved.size : gs.size}
           onSizeChange={gs.setSize}
-          rules={gs.rules}
+          rules={roomSaved ? roomSaved.rules : gs.rules}
           onRulesChange={gs.setRules}
-          handicap={gs.handicap}
+          handicap={roomSaved ? roomSaved.handicap : gs.handicap}
           onHandicapChange={gs.setHandicap}
-          clock={startClock}
+          clock={roomSaved ? roomClock : startClock}
           onClockChange={(tc) => gs.setTc(formatTc(tc))}
           saved={pillSaved}
+          pillsLocked={!!roomSaved}
           busy={animating}
           showChevron={saved.games.length > 0}
           engineStatus={<EngineStatus line={engineOffline.line} onDownload={engineOffline.download} />}

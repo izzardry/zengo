@@ -1,8 +1,8 @@
 /**
  * The integrated stage (Integrator 1): start ⇄ game, pass-and-play, undo/redo, hidden chrome,
  * passes with their undo toast, resign with undo, scoring with a marked group and Accept, game over,
- * history, review, continue from here, the ko toast and the live region. Room Start answers
- * `Coming soon` until milestone 3.
+ * history, review, continue from here, the ko toast and the live region. Since milestone 3 Start
+ * with a room opens the room (its flows are in Index.room.test.tsx).
  * Milestone 2 (Integrator 2): the computer against a FakeEngine (Start waits for the engine, the
  * reply, a game link that opens a computer game, the hint bulb and the territory preview, the blunder
  * guard, passing into scoring with the engine's proposal, the calm failure toast).
@@ -20,6 +20,13 @@ import zigo, { encodeMoves, fromGtp, makeSettings } from '@/lib/zigo';
 import type { Point } from '@/lib/types';
 import { cell, installPointerEvent, layoutGrid, tap } from '@/components/board/test-helpers';
 import Index from './Index';
+
+// No test here reaches the public broker: a room's broker is unreachable (Index.room.test.tsx runs
+// rooms over the memory network).
+vi.mock('@/lib/transport', async (importOriginal) => {
+  const real = await importOriginal<typeof import('@/lib/transport')>();
+  return { ...real, createPeerJsFactory: () => () => Promise.reject(new Error('broker unreachable')) };
+});
 
 function renderStage(path = '/') {
   return render(
@@ -108,12 +115,15 @@ describe('Index stage', () => {
     expect(screen.getByText('Medium')).toBeInTheDocument();
   });
 
-  it('answers Start with a room with Coming soon until milestone 3', async () => {
+  it('Start with a room opens the room since milestone 3 (no Coming soon)', async () => {
     renderStage();
     selectOpponent('Room');
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
-    expect(await screen.findByText('Coming soon')).toBeInTheDocument();
-    expect(stage()).toHaveAttribute('data-phase', 'start');
+    expect(stage()).toHaveAttribute('data-phase', 'playing');
+    // The creator waits for the opponent with the invite sheet open (DESIGN 9).
+    expect(await screen.findByTestId('invite-sheet')).toBeInTheDocument();
+    expect(screen.getByRole('toolbar', { hidden: true })).toHaveAttribute('data-mode', 'room');
+    expect(screen.queryByText('Coming soon')).toBeNull();
   });
 
   it('the size pill switches the preview to 13×13 and 19×19', () => {

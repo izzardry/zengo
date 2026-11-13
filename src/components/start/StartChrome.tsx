@@ -14,7 +14,9 @@
  *                 ClockDial (hold the clock pill); open only on the idle start screen
  *
  * A code that refers to a saved game (`saved`) shows that game's opponent, color, size, rules,
- * handicap and clock, dimmed and locked (DESIGN 4.1).
+ * handicap and clock, dimmed and locked (DESIGN 4.1). With `ROOM` selected and a room this device
+ * already holds, the room's settings apply (DESIGN 9.1): the integrator passes them as the values
+ * with `pillsLocked`, which dims the pills but leaves the opponent selector free.
  */
 import { useEffect, useState, type ReactNode } from 'react';
 import { flags } from '@/lib/flags';
@@ -72,6 +74,8 @@ export interface StartChromeProps {
   settingsLocked?: boolean;
   /** Room joiner: the color pill (and its handicap) is dimmed because the creator's choice applies. */
   colorLocked?: boolean;
+  /** A room's own settings apply: the color, size and clock pills are dimmed and locked; the opponent selector stays free. */
+  pillsLocked?: boolean;
   /** Blocks the code field during the start transition. */
   busy?: boolean;
 
@@ -110,6 +114,7 @@ export function StartChrome({
   saved,
   settingsLocked = false,
   colorLocked = false,
+  pillsLocked = false,
   busy = false,
   showChevron = true,
   engineStatus,
@@ -118,6 +123,7 @@ export function StartChrome({
 }: StartChromeProps) {
   const idle = visible && !scrolled;
   const locked = settingsLocked || !!saved;
+  const pillsOff = locked || pillsLocked;
   const shown = saved
     ? settingsOfGame(saved)
     : { opponent, color, size, rules, handicap, clock };
@@ -128,8 +134,8 @@ export function StartChrome({
   const open = (kind: OpenDial['kind']) => (a: PillAnchor) => setDial({ kind, x: a.x, y: a.y, dragging: a.source === 'pointer' });
   const close = () => setDial(null);
   useEffect(() => {
-    if (!idle || locked) setDial(null);
-  }, [idle, locked]);
+    if (!idle || pillsOff) setDial(null);
+  }, [idle, pillsOff]);
 
   return (
     <>
@@ -159,17 +165,17 @@ export function StartChrome({
               onChange={onColorChange}
               handicap={shown.handicap}
               onLongPress={open('handicap')}
-              disabled={locked || colorLocked}
+              disabled={pillsOff || colorLocked}
               colorFixed={colorFixed}
             />
-            <SizePill size={shown.size} rules={shown.rules} onChange={onSizeChange} onLongPress={open('rules')} disabled={locked} />
+            <SizePill size={shown.size} rules={shown.rules} onChange={onSizeChange} onLongPress={open('rules')} disabled={pillsOff} />
             {flags.clock && (
               <ClockPill
                 size={shown.size}
                 value={shown.clock}
                 onChange={onClockChange}
                 onLongPress={open('clock')}
-                disabled={locked}
+                disabled={pillsOff}
               />
             )}
           </>

@@ -14,9 +14,19 @@
  * - `finish(result)` ends the game with a result decided elsewhere (the computer resigning);
  * - `timeout(color)` for the clock; `markAssisted()` for hints and the guard;
  * - the `proposeDead` option: the dead-stone proposer, called when a game enters scoring.
- * Rooms are not run here in milestone 1: Start with ROOM, an invite link and a stored room game
- * call the `onRoom` option (milestone 3 opens the room there); without it they return false and
- * the integrator shows "Coming soon". A finished room game from history opens in review.
+ *
+ * Rooms (DESIGN 9, PLAN 7), with the `rooms` option: the room controller owns the game. This hook
+ * runs `useRoom` for the open room and only reads from it: `session` is derived from the
+ * controller's snapshot (with this hook's review cursor), the actions go to the controller (a
+ * stone or a pass, undo as a takeback request, resign, the flag, the scoring marks, Accept and
+ * Resume), and nothing is saved here (the controller saves the room and its games). Start with
+ * `ROOM` creates or joins the room of the shown code (DESIGN 9.2); an invite link (`?s=CODE&o=r`,
+ * also with `x` / `y`) opens it at once; Back leaves it. Room addresses carry the code only, never
+ * moves (DESIGN 13.2). The room's engine proposal is the `room.propose` option, handed to the
+ * controller as it is: the controller sends its answer as data (DESIGN 9.5).
+ * Without `rooms`, Start with ROOM, an invite link and a stored unfinished room game call the
+ * `onRoom` option instead (false without it). A finished room game that is not the room's current
+ * game opens in review.
  *
  * The rules themselves are pure functions in `lib/gameRecord.ts` (session transitions) and
  * `lib/zigo.ts` (Go); this hook wires them to React, the store, the address bar and the turn timer.
@@ -77,6 +87,8 @@ import {
   type StartPill,
   type UndoRule,
 } from '@/lib/gameRecord';
+import { flags } from '@/lib/flags';
+import type { RoomCreateSettings, RoomState } from '@/lib/room';
 import {
   readClock,
   readColorChoice,
@@ -117,8 +129,10 @@ import {
   useUrlParams,
   type UrlParams,
 } from '@/lib/url';
-import zigo, { isPass, normalizeHandicap } from '@/lib/zigo';
-import { useScoring, type UseScoring } from './useScoring';
+import { roomGameId } from '@/lib/sync';
+import zigo, { isPass, makeSettings, normalizeHandicap } from '@/lib/zigo';
+import { useRoom, type RoomHandle, type UseRoomOptions } from './useRoom';
+import { useScoring, type ScoringActions, type UseScoring } from './useScoring';
 
 export type { GameSession, GameSettings, StartPill, UndoRule } from '@/lib/gameRecord';
 
@@ -155,11 +169,33 @@ export interface UseGameStateOptions {
   /** Dead-stone proposer for the scoring phase (milestone 2). Without it every stone starts alive. */
   proposeDead?: DeadStoneProposer;
   /**
-   * Opens the room of `code` (milestone 3): Start with ROOM (`create` holds the start-screen
-   * settings), an invite link `?s=CODE&o=r` or a stored unfinished room game (`create` null).
-   * Returns whether the room opened. Without it these return false.
+   * Runs rooms in this hook (DESIGN 9): Start with ROOM, invite links and stored room games open
+   * the room through `useRoom`. Default false; `flags.rooms` must be on too.
+   */
+  rooms?: boolean;
+  /**
+   * Options of the room session (`useRoom`): the engine's dead-stone proposer (`propose`), and in
+   * tests the memory broker, the lock manager, timers or a fake controller. The store, the create
+   * intent and the `x` / `y` signals come from this hook.
+   */
+  room?: Omit<UseRoomOptions, 'enabled' | 'create' | 'offer' | 'answer' | 'onSignalUsed' | 'store'>;
+  /**
+   * Without `rooms`: opens the room of `code` elsewhere. Start with ROOM (`create` holds the
+   * start-screen settings), an invite link `?s=CODE&o=r` or a stored unfinished room game (`create`
+   * null). Returns whether the room opened. Without it (and without `rooms`) these return false.
    */
   onRoom?: (code: string, create: RoomStartSettings | null) => boolean;
+}
+
+/** The room open on the stage (room mode). The game itself lives in the room controller. */
+interface RoomOpen {
+  readonly code: string;
+  /** Start with ROOM: the settings to create the room with if this device has none. Null for links and history. */
+  readonly create: RoomCreateSettings | null;
+  /** Review cursor (move list jump, stepping), or null while live. */
+  readonly review: number | null;
+  /** `now()` when the room was opened. */
+  readonly openedAt: number;
 }
 
 /** Internal state: start-screen settings plus the open session. */
@@ -176,14 +212,18 @@ interface State {
   /** Last solo opponent setting, for "continue from here" (DESIGN 12.3). */
   lastSolo: Opponent;
   session: GameSession | null;
-  /** The code of a room invite link that arrived and has not been handled yet. */
+  /** The code of a room invite link that arrived and has not been handled yet (without `rooms`). */
   roomInvite: string | null;
+  /** The open room (room mode, with `rooms`); `session` is null then. */
+  room: RoomOpen | null;
 }
 
 interface Ctx {
   store: Store;
   now: Now;
   rng: Rng;
+  /** Rooms run in this hook (`rooms` option and `flags.rooms`). */
+  rooms: boolean;
 }
 
 /* ---------------------------------------------------------------------------------------------- */
@@ -204,6 +244,7 @@ function initialSettings(ctx: Ctx): State {
     lastSolo: isSolo(opponent) ? opponent : DEFAULT_OPPONENT,
     session: null,
     roomInvite: null,
+    room: null,
   };
 }
 
@@ -238,10 +279,14 @@ function applyUrl(prev: State, url: UrlParams, ctx: Ctx): State {
   const games = ctx.store.games();
   const code = url.code ?? (isValidCode(prev.code) ? prev.code : freshCode(games, ctx.rng));
   const isGameLink = !!url.playing || url.moves !== undefined;
-  const base: State = { ...prev, code, session: null, roomInvite: null };
+  const base: State = { ...prev, code, session: null, roomInvite: null, room: null };
 
   if (url.mode === 'room') {
-    return { ...base, opponent: { mode: 'room' }, roomInvite: url.code ?? null };
+    if (!ctx.rooms) return { ...base, opponent: { mode: 'room' }, roomInvite: url.code ?? null };
+    // The room already open here (a manual-signalling `x` / `y` arriving in this tab): keep it.
+    if (prev.room && prev.room.code === code) return prev;
+    if (!url.code) return { ...base, opponent: { mode: 'room' } };
+    return { ...base, opponent: { mode: 'room' }, room: { code, create: null, review: null, openedAt: ctx.now() } };
   }
 
   if (!isGameLink) {
@@ -311,6 +356,8 @@ function levelOf(s: State): number {
  * remembered in `zigo:opponent` anyway.
  */
 function desiredUrl(s: State): UrlParams {
+  // A room says its code only (DESIGN 13.2): no moves, no settings.
+  if (s.room) return { code: s.room.code, playing: true, mode: 'room' };
   if (s.session) return gameParams(toSavedGame(s.session));
   return {
     code: isValidCode(s.code) ? s.code : undefined,
@@ -330,6 +377,61 @@ function isVisible(): boolean {
 
 function defaultVersion(): string {
   return typeof __GIT_HASH__ === 'string' ? __GIT_HASH__ : 'dev';
+}
+
+/** The board shown while the room controller has not loaded yet: the create settings, else 9×9. */
+function placeholderGame(open: RoomOpen): Game {
+  const c = open.create;
+  return zigo.newGame(makeSettings(c?.size ?? 9, c?.rules ?? 'area', normalizeHandicap(c?.size ?? 9, c?.handicap ?? 0)));
+}
+
+/**
+ * The stage's session for an open room, read from the controller's snapshot (PLAN 7: the
+ * controller owns the game). Not saved by this hook. `review` is clamped to the game as it stands
+ * now (a takeback may have cut it); reaching the live position means live.
+ */
+function roomSessionOf(open: RoomOpen, rs: RoomState | null, fallback: Game): GameSession {
+  const game = rs?.game ?? fallback;
+  const cur = rs && rs.logs.length > 0 ? rs.logs[rs.logs.length - 1] : undefined;
+  const n = rs?.n ?? 0;
+  return {
+    id: roomGameId(open.code, n),
+    code: open.code,
+    mode: 'room',
+    color: rs?.color ?? 'B',
+    tc: cur?.tc ?? null,
+    game,
+    assisted: false,
+    createdAt: open.openedAt,
+    lastPlayedAt: open.openedAt,
+    touched: true,
+    openedAt: open.openedAt,
+    review: open.review === null ? null : Math.max(0, Math.min(open.review, game.cursor)),
+    room: { n, epoch: rs?.epoch ?? 0 },
+  };
+}
+
+/** The stored game of room `code` with the highest game number, if any. */
+function latestRoomGame(games: readonly SavedGame[], code: string): SavedGame | null {
+  let best: SavedGame | null = null;
+  for (const g of games) {
+    if (g.mode !== 'room' || g.code !== code) continue;
+    if (!best || (g.room?.n ?? 0) > (best.room?.n ?? 0)) best = g;
+  }
+  return best;
+}
+
+/**
+ * Whether a stored room game opens its room (reconnects) rather than a read-only review: an
+ * unfinished game always does; a finished one when it is the room's current game, so its rematch
+ * can be asked for (DESIGN 9.4). Older games of a room open in review (DESIGN 12.2).
+ */
+function opensRoom(saved: SavedGame, store: Store): boolean {
+  if (saved.mode !== 'room') return false;
+  if (!isFinished(saved)) return true;
+  if (!store.rooms().some((r) => r.code === saved.code)) return false;
+  const n = saved.room?.n ?? 0;
+  return !store.games().some((g) => g.mode === 'room' && g.code === saved.code && (g.room?.n ?? 0) > n);
 }
 
 /* ---------------------------------------------------------------------------------------------- */
@@ -376,8 +478,14 @@ export interface UseGameState {
   startPill: StartPill;
   /** Position for the blurred start-screen board: the stored game of the code, or an empty board of the selected size with the handicap stones. */
   preview: Game;
-  /** The code of a room invite link that arrived (ROOM is preselected); null once handled or replaced. */
+  /** The code of a room invite link that arrived (ROOM is preselected); null once handled or replaced. Without `rooms` only. */
   roomInvite: string | null;
+  /**
+   * With ROOM selected: the current game of the shown code's room, when this device holds that
+   * room. Its settings (size, rules, handicap, clock, this device's color) are the room's and are
+   * shown dimmed (DESIGN 4.1, 9.1).
+   */
+  roomSaved: SavedGame | null;
 
   /* ---- opening and leaving games ---- */
   /**
@@ -392,8 +500,13 @@ export interface UseGameState {
   open(saved: SavedGame): boolean;
   /** "New game" on the overlay: a new code with the current game's mode, level, clock, size, rules and handicap. False in a room. */
   newGame(): boolean;
-  /** Back to the start screen. The game is already saved; the code stays selected. */
+  /** Back to the start screen. The game is already saved; the code stays selected. Leaves an open room. */
   exit(): void;
+  /**
+   * The open room (room mode): its view (presence, requests, score, scoring, manual exchange, tab
+   * guard) and actions. Null outside room mode, also while a finished room game is only reviewed.
+   */
+  room: RoomHandle | null;
 
   /* ---- playing ---- */
   /**
@@ -483,7 +596,8 @@ export function useGameState(options: UseGameStateOptions = {}): UseGameState {
   const rngOpt = options.rng;
   const now = useCallback<Now>(() => (nowOpt ? nowOpt() : Date.now()), [nowOpt]);
   const rng = useCallback<Rng>(() => (rngOpt ? rngOpt() : defaultRng()), [rngOpt]);
-  const ctx = useMemo<Ctx>(() => ({ store, now, rng }), [store, now, rng]);
+  const roomsOn = !!options.rooms && flags.rooms;
+  const ctx = useMemo<Ctx>(() => ({ store, now, rng, rooms: roomsOn }), [store, now, rng, roomsOn]);
   const ctxRef = useRef(ctx);
   ctxRef.current = ctx;
   const optsRef = useRef(options);
@@ -495,6 +609,34 @@ export function useGameState(options: UseGameStateOptions = {}): UseGameState {
   const [state, setState] = useState<State>(() => applyUrl(initialSettings(ctx), parseUrl(search), ctx));
   const ref = useRef(state);
 
+  /* ---- the open room (DESIGN 9): the controller owns its game; this hook only reads it ---- */
+  const roomOpen = state.room;
+  const roomHandle = useRoom(roomOpen?.code ?? null, {
+    ...options.room,
+    store,
+    enabled: !!roomOpen,
+    create: roomOpen?.create ?? null,
+    offer: roomOpen ? (url.params.offer ?? null) : null,
+    answer: roomOpen ? (url.params.answer ?? null) : null,
+    // `x` and `y` are transient: once used they leave the address bar (DESIGN 13.2).
+    onSignalUsed: () => write({ ...desiredUrl(ref.current), offer: '', answer: '' }),
+  });
+  const roomRef = useRef(roomHandle);
+  roomRef.current = roomHandle;
+  const roomState = roomOpen ? roomHandle.state : null;
+  const roomStateRef = useRef(roomState);
+  roomStateRef.current = roomState;
+  const roomFallback = useMemo(() => (roomOpen ? placeholderGame(roomOpen) : null), [roomOpen]);
+  const roomFallbackRef = useRef(roomFallback);
+  roomFallbackRef.current = roomFallback;
+
+  // The controller saves the room's games itself: tell the history and the Start pill.
+  // The controller keeps `logs` as the same array until a game changes, so this runs per change.
+  const roomLogs = roomState?.logs;
+  useEffect(() => {
+    if (roomLogs) notifySavedGames();
+  }, [roomLogs]);
+
   /* ---- turn timer: ms per ply even without a clock ---- */
   const turn = useRef<{ used: number; since: number | null }>({ used: 0, since: null });
   const timerInit = useRef(false);
@@ -504,6 +646,7 @@ export function useGameState(options: UseGameStateOptions = {}): UseGameState {
   }
 
   const turnElapsed = useCallback(() => {
+    if (ref.current.room) return roomRef.current.elapsed();
     const t = turn.current;
     return Math.max(0, t.used + (t.since !== null ? ctxRef.current.now() - t.since : 0));
   }, []);
@@ -590,7 +733,7 @@ export function useGameState(options: UseGameStateOptions = {}): UseGameState {
   useEffect(() => {
     if (!invite) return;
     const onRoom = optsRef.current.onRoom;
-    if (onRoom && onRoom(invite, null)) commit({ ...ref.current, roomInvite: null });
+    if (!ctxRef.current.rooms && onRoom && onRoom(invite, null)) commit({ ...ref.current, roomInvite: null });
   }, [invite, commit]);
 
   /* ---- autosave on every change (DESIGN 12.1) ---- */
@@ -699,7 +842,16 @@ export function useGameState(options: UseGameStateOptions = {}): UseGameState {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [state.code, state.opponent, store, savedVersion],
   );
-  const previewSaved = startPill.saved;
+  // With ROOM selected, the preview shows the current game of that room if this device holds it.
+  const roomSaved = useMemo(
+    () =>
+      roomsOn && state.opponent.mode === 'room' && store.rooms().some((r) => r.code === state.code)
+        ? latestRoomGame(store.games(), state.code)
+        : null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [roomsOn, state.code, state.opponent, store, savedVersion],
+  );
+  const previewSaved = startPill.saved ?? roomSaved;
   const { size: selSize, rules: selRules, handicap: selHandicap } = state;
   const preview = useMemo(
     () =>
@@ -788,13 +940,19 @@ export function useGameState(options: UseGameStateOptions = {}): UseGameState {
   const openSaved = useCallback(
     (saved: SavedGame) => {
       const st = ref.current;
-      if (saved.mode === 'room' && !isFinished(saved)) {
-        const onRoom = optsRef.current.onRoom;
-        if (!onRoom || !onRoom(saved.code, null)) return false;
-        commit({ ...st, code: saved.code, session: null, roomInvite: null });
+      const { rooms, store: s, now: n } = ctxRef.current;
+      if (rooms && opensRoom(saved, s)) {
+        // Resuming a room game reconnects to its room (the controller loads it from the store).
+        commit({ ...st, code: saved.code, session: null, roomInvite: null, room: { code: saved.code, create: null, review: null, openedAt: n() } });
         return true;
       }
-      commit({ ...st, code: saved.code, roomInvite: null, session: sessionFromSaved(saved, ctxRef.current.now()) });
+      if (saved.mode === 'room' && !isFinished(saved)) {
+        const onRoom = optsRef.current.onRoom;
+        if (rooms || !onRoom || !onRoom(saved.code, null)) return false;
+        commit({ ...st, code: saved.code, session: null, roomInvite: null, room: null });
+        return true;
+      }
+      commit({ ...st, code: saved.code, roomInvite: null, room: null, session: sessionFromSaved(saved, n()) });
       return true;
     },
     [commit],
@@ -806,9 +964,13 @@ export function useGameState(options: UseGameStateOptions = {}): UseGameState {
     const games = s.games();
     const code = isValidCode(st.code) ? st.code : freshCode(games, r);
     if (st.opponent.mode === 'room') {
-      // Creating and joining are the same action (DESIGN 9.2): milestone 3's `onRoom` finds out which.
-      const onRoom = optsRef.current.onRoom;
+      // Creating and joining are the same action (DESIGN 9.2): the controller finds out which.
       const create: RoomStartSettings = { tc: st.tc, color: st.colorChoice, size: st.size, rules: st.rules, handicap: st.handicap };
+      if (ctxRef.current.rooms) {
+        commit({ ...st, code, session: null, roomInvite: null, room: { code, create, review: null, openedAt: n() } });
+        return true;
+      }
+      const onRoom = optsRef.current.onRoom;
       if (!onRoom || !onRoom(code, create)) return false;
       commit({ ...st, code, session: null, roomInvite: null });
       return true;
@@ -827,7 +989,7 @@ export function useGameState(options: UseGameStateOptions = {}): UseGameState {
       },
       n(),
     );
-    commit({ ...st, code, roomInvite: null, session });
+    commit({ ...st, code, roomInvite: null, room: null, session });
     return true;
   }, [commit, openSaved]);
 
@@ -836,7 +998,7 @@ export function useGameState(options: UseGameStateOptions = {}): UseGameState {
     const { store: s, rng: r, now: n } = ctxRef.current;
     const cur = st.session;
     const mode: Mode = cur ? cur.mode : st.opponent.mode;
-    if (mode === 'room') return false;
+    if (mode === 'room' || st.room) return false;
     const level = cur ? cur.level : st.opponent.mode === 'computer' ? st.opponent.level : undefined;
     const settings: GameSettings = cur
       ? savedSettings(cur.game.settings)
@@ -852,34 +1014,63 @@ export function useGameState(options: UseGameStateOptions = {}): UseGameState {
 
   const exit = useCallback(() => {
     const st = ref.current;
+    if (st.room) {
+      // Leaving the room: useRoom disposes its session (transport closed, lock released, turn banked).
+      commit({ ...st, code: st.room.code, session: null, room: null });
+      notifySavedGames();
+      return;
+    }
     if (!st.session) return;
     commit({ ...st, code: st.session.code, session: null });
   }, [commit]);
 
   /* ---- playing ---- */
   const play = useCallback(
-    (p: Point, ms?: number) => update((s, at) => applyMove(s, p, ms ?? turnElapsed(), at)),
+    (p: Point, ms?: number) => {
+      const st = ref.current;
+      if (st.room) return st.room.review === null && roomRef.current.move(p, ms);
+      return update((s, at) => applyMove(s, p, ms ?? turnElapsed(), at));
+    },
     [update, turnElapsed],
   );
   const pass = useCallback(
-    (ms?: number) =>
-      update((s, at) => {
+    (ms?: number) => {
+      const st = ref.current;
+      if (st.room) return st.room.review === null && roomRef.current.pass(ms);
+      return update((s, at) => {
         const next = applyPass(s, ms ?? turnElapsed(), at);
         // Round 2 without a proposer: scored at once with every stone alive (DESIGN 8.4 step 5).
         if (next && isScoring(next) && next.game.scoring!.round === 2 && !optsRef.current.proposeDead) {
           return applyScoreEnd(next, [], at) ?? next;
         }
         return next;
-      }),
+      });
+    },
     [update, turnElapsed],
   );
-  const undo = useCallback(() => update((s, at) => applyUndo(s, at)), [update]);
+  const undo = useCallback(() => {
+    // In a room, undo is a takeback request (DESIGN 4.2, 9.4).
+    const st = ref.current;
+    if (st.room) return st.room.review === null && roomRef.current.ask('takeback');
+    return update((s, at) => applyUndo(s, at));
+  }, [update]);
   const redo = useCallback(() => update((s, at) => applyRedo(s, at)), [update]);
   const undoPass = useCallback(() => update((s, at) => applyUndoPass(s, at)), [update]);
-  const resign = useCallback(() => update((s, at) => applyResign(s, at)), [update]);
+  const resign = useCallback(() => {
+    // Final in a room (DESIGN 8.3): the controller sends the end.
+    if (ref.current.room) return roomRef.current.resign();
+    return update((s, at) => applyResign(s, at));
+  }, [update]);
   const reopen = useCallback(() => update((s, at) => applyReopen(s, at)), [update]);
   const finish = useCallback((result: Result) => update((s, at) => applyEnd(s, result, at)), [update]);
-  const timeout = useCallback((flagged: Color) => update((s, at) => applyTimeout(s, flagged, at)), [update]);
+  const timeout = useCallback(
+    (flagged: Color) => {
+      // The controller decides: its own flag at zero, the opponent's 2 s past zero (DESIGN 9.7).
+      if (ref.current.room) return roomRef.current.flag();
+      return update((s, at) => applyTimeout(s, flagged, at));
+    },
+    [update],
+  );
   const markAssisted = useCallback(() => {
     update((s) => applyAssisted(s));
   }, [update]);
@@ -888,32 +1079,79 @@ export function useGameState(options: UseGameStateOptions = {}): UseGameState {
   const toggleDead = useCallback((p: Point) => update((s, at) => applyToggle(s, p, at)), [update]);
   const acceptScore = useCallback((side?: Color) => update((s, at) => applyAccept(s, side ?? null, at)), [update]);
   const resumePlay = useCallback(() => update((s, at) => applyResume(s, at)), [update]);
-  const setDead = useCallback((dead: readonly Point[]) => update((s, at) => applyMarks(s, dead, at)), [update]);
-
-  /* ---- review ---- */
-  const goto = useCallback((cursor: number) => void update((s) => applyGoto(s, cursor)), [update]);
-  const step = useCallback(
-    (delta: number) => void update((s) => applyGoto(s, (s.review ?? s.game.cursor) + Math.trunc(delta))),
+  const setDead = useCallback(
+    (dead: readonly Point[]) => {
+      if (ref.current.room) return roomRef.current.mark(dead);
+      return update((s, at) => applyMarks(s, dead, at));
+    },
     [update],
   );
+
+  /* ---- review ---- */
+  /** Room mode: sets the review cursor; reaching the live position means live. */
+  const roomGoto = useCallback(
+    (cursor: (review: number | null, max: number) => number, keepAtMax = false) => {
+      const st = ref.current;
+      if (!st.room) return;
+      const max = roomStateRef.current?.game.cursor ?? 0;
+      const c = Math.max(0, Math.min(max, Math.floor(cursor(st.room.review, max))));
+      const review = c === max && !keepAtMax ? null : c;
+      if (review !== st.room.review) commit({ ...st, room: { ...st.room, review } });
+    },
+    [commit],
+  );
+  const goto = useCallback(
+    (cursor: number) => {
+      if (ref.current.room) roomGoto(() => cursor);
+      else update((s) => applyGoto(s, cursor));
+    },
+    [update, roomGoto],
+  );
+  const step = useCallback(
+    (delta: number) => {
+      if (ref.current.room) roomGoto((r, max) => (r ?? max) + Math.trunc(delta));
+      else update((s) => applyGoto(s, (s.review ?? s.game.cursor) + Math.trunc(delta)));
+    },
+    [update, roomGoto],
+  );
   const toStart = useCallback(() => goto(0), [goto]);
-  const toEnd = useCallback(() => void update((s) => applyGoto(s, s.game.cursor)), [update]);
+  const toEnd = useCallback(() => {
+    if (ref.current.room) roomGoto((_, max) => max);
+    else update((s) => applyGoto(s, s.game.cursor));
+  }, [update, roomGoto]);
   const enterReview = useCallback(
     (cursor?: number) => {
+      if (ref.current.room) {
+        roomGoto((r, max) => cursor ?? r ?? max, true);
+        return;
+      }
       update((s) => {
         const c = Math.max(0, Math.min(s.game.cursor, Math.floor(cursor ?? s.review ?? s.game.cursor)));
         return s.review === c ? s : { ...s, review: c };
       });
     },
-    [update],
+    [update, roomGoto],
   );
   const exitReview = useCallback(() => {
+    const st = ref.current;
+    if (st.room) {
+      if (st.room.review !== null) commit({ ...st, room: { ...st.room, review: null } });
+      return;
+    }
     update((s) => (s.game.end || s.review === null ? s : { ...s, review: null }));
-  }, [update]);
+  }, [update, commit]);
+
+  /** The shown session: the open room's (derived from the controller), else the solo session. */
+  const shownSession = useCallback((st: State): GameSession | null => {
+    if (st.room) return roomSessionOf(st.room, roomStateRef.current, roomFallbackRef.current ?? placeholderGame(st.room));
+    return st.session;
+  }, []);
 
   const continueFromHere = useCallback(() => {
     const st = ref.current;
-    const shown = st.session;
+    // In a room the shown game is the controller's (with this hook's review cursor). The new game
+    // is a solo game: room games are never forked into a room (DESIGN 12.3).
+    const shown = shownSession(st);
     if (!shown) return false;
     const { store: s, rng: r, now: n } = ctxRef.current;
     const view = viewOf(shown);
@@ -923,15 +1161,17 @@ export function useGameState(options: UseGameStateOptions = {}): UseGameState {
     const spec = continueSpec(view, st.lastSolo, freshCode(s.games(), r), tc);
     if (!spec) return false;
     const session = createSession(spec, n());
-    commit({ ...st, code: session.code, session });
+    commit({ ...st, code: session.code, room: null, session });
     return true;
-  }, [commit]);
+  }, [commit, shownSession]);
 
   /* ---- sharing ---- */
   const baseUrl = options.baseUrl;
   const shareUrl = useCallback(() => {
     const st = ref.current;
     const base = baseUrl ?? appBaseUrl();
+    // Rooms share the invite only: `?s=CODE&o=r`, never moves or the key (DESIGN 13.2).
+    if (st.room) return roomShareUrl(st.room.code, base);
     if (st.session) return buildShareUrl(toSavedGame(st.session), base);
     // Rooms share the invite only: `?s=CODE&o=r`, never moves or the key (DESIGN 13.2).
     if (st.opponent.mode === 'room' && isValidCode(st.code)) return roomShareUrl(st.code, base);
@@ -939,33 +1179,60 @@ export function useGameState(options: UseGameStateOptions = {}): UseGameState {
   }, [baseUrl]);
 
   const sgf = useCallback(() => {
-    const s = ref.current.session;
+    const s = shownSession(ref.current);
     return s ? sgfOf(s, optsRef.current.version ?? defaultVersion()) : null;
-  }, []);
+  }, [shownSession]);
 
   /* ---- derived ---- */
-  const session = state.session;
+  const roomGame = roomState?.game ?? null;
+  const roomColor = roomState?.color;
+  const roomN = roomState?.n;
+  const roomEpoch = roomState?.epoch;
+  const roomTc = roomState && roomState.logs.length > 0 ? roomState.logs[roomState.logs.length - 1].tc : null;
+  const roomSession = useMemo(
+    () => (roomOpen ? roomSessionOf(roomOpen, roomStateRef.current, roomFallback ?? placeholderGame(roomOpen)) : null),
+    // The derived session changes only when what it shows changes (not on every snapshot).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [roomOpen, roomFallback, roomGame, roomColor, roomN, roomEpoch, roomTc],
+  );
+  const session = roomSession ?? state.session;
   const view = useMemo(() => (session ? viewOf(session) : null), [session]);
-  const scoringNow = isScoring(session);
+  const roomScoringNow = !!roomSession && !!roomSession.game.scoring && !roomSession.game.end;
+  const scoringNow = isScoring(session) || roomScoringNow;
   const phase: Phase = !session ? 'start' : session.review !== null ? 'review' : scoringNow ? 'scoring' : 'playing';
   const rule = session ? undoRuleFor(session.mode) : null;
   const liveGame = !!session && session.review === null && session.mode !== 'room';
-  const canUndo = liveGame && !session.game.end && !!rule && undoTarget(session.game, rule, session.color) < session.game.cursor;
+  const canUndo = roomOpen
+    ? session?.review === null && !!roomState?.canAsk.takeback
+    : liveGame && !session.game.end && !!rule && undoTarget(session.game, rule, session.color) < session.game.cursor;
   const canRedo =
     liveGame && !!rule && !session.game.end && redoTarget(session.game, rule, session.color) > session.game.cursor;
   const playable = canPlay(session) && !session.game.scoring;
-  const isPlayerTurn = playable && (session.mode === 'local' || session.game.turn === session.color);
+  const isPlayerTurn = roomOpen
+    ? session?.review === null && !!roomState?.canMove && roomHandle.tab === 'owner'
+    : playable && (session.mode === 'local' || session.game.turn === session.color);
   const isComputerTurn = isRunning(session) && session.mode === 'computer' && session.game.turn !== session.color;
   const canUndoPass = useMemo(() => !!session && applyUndoPass(session, 0) !== null, [session]);
   const reviewCursor = session?.review ?? null;
   const viewCursor = session ? (session.review ?? session.game.cursor) : 0;
   const finished = !!session?.game.end;
 
-  const scoring = useScoring(
-    view,
-    { toggle: toggleDead, accept: acceptScore, resume: resumePlay },
-    { live: !!session && session.review === null && session.mode !== 'room', pending: proposing },
+  // In a room the scoring actions go to the controller; marking needs the controller's consent
+  // (seated, round 1, a proposal there or seat 0's hand, DESIGN 9.5), also offline (9.3).
+  const soloActions = useMemo<ScoringActions>(
+    () => ({ toggle: toggleDead, accept: acceptScore, resume: resumePlay }),
+    [toggleDead, acceptScore, resumePlay],
   );
+  const roomActions = roomHandle.scoringActions;
+  const roomCanMark = !!roomHandle.scoring?.canMark && roomHandle.tab === 'owner';
+  const roomScoringActions = useMemo<ScoringActions>(
+    () => ({ toggle: roomCanMark ? roomActions.toggle : undefined, accept: roomActions.accept, resume: roomActions.resume }),
+    [roomActions, roomCanMark],
+  );
+  const scoring = useScoring(view, roomOpen ? roomScoringActions : soloActions, {
+    live: !!session && session.review === null,
+    pending: roomOpen ? !!roomHandle.scoring?.proposing : proposing,
+  });
 
   return {
     phase,
@@ -990,11 +1257,13 @@ export function useGameState(options: UseGameStateOptions = {}): UseGameState {
     startPill,
     preview,
     roomInvite: state.roomInvite,
+    roomSaved,
 
     start,
     open: openSaved,
     newGame,
     exit,
+    room: roomOpen ? roomHandle : null,
 
     play,
     pass,

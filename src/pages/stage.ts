@@ -11,10 +11,10 @@ import type { Color, EngineApi, Game, Mode, Point, TcString, TimeControl } from 
 import zigo, { isPass } from '@/lib/zigo';
 
 /**
- * Milestone switch for rooms (milestone 3 sets it to true and plugs the room into `useGameState`'s
- * `onRoom`). Typed as a plain boolean so code can test it either way.
+ * Milestone switch for rooms (milestone 3 turned it on; `useGameState` runs the room with its
+ * `rooms` option). Typed as a plain boolean so code can test it either way.
  */
-export const ROOMS_ENABLED: boolean = false;
+export const ROOMS_ENABLED: boolean = true;
 
 /**
  * Modes that can be started in this build. Milestone 2 turns `computer` on (`COMPUTER_ENABLED`),
