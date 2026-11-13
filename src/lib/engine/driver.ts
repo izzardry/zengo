@@ -340,6 +340,7 @@ export class EngineDriver implements EngineHandle {
         }
         lane.warming = null;
         lane.warm.set(warming.key, { gpuMs: got.ms, wasmMs: ref.ms });
+        console.info(`Zigo engine: WebGPU ready for ${warming.key} (one call ${got.ms.toFixed(1)} ms; WASM ${ref.ms.toFixed(1)} ms).`);
         this.rememberBackend('webgpu');
         if (got.ms < ref.ms * GPU_ROWS) this.set({ backend: 'webgpu' });
         this.pump();
@@ -426,6 +427,7 @@ export class EngineDriver implements EngineHandle {
         return;
       }
       case 'backend':
+        if (m.note) console.warn(`Zigo engine: ${m.backend} worker note: ${m.note}.`);
         // The main worker runs WASM; the figure says WebGPU once a WebGPU warm-up has passed.
         if (!this.gpu || this.gpu.warm.size === 0) this.set({ backend: m.backend });
         return;
@@ -504,6 +506,7 @@ export class EngineDriver implements EngineHandle {
       /* already gone */
     }
     const error = err instanceof EngineUnavailableError ? err : new EngineUnavailableError(err.message);
+    if (!this.disposed) console.error(`Zigo engine failed: ${error.message}`);
     const jobs = [...(this.running ? [this.running] : []), ...this.queue.splice(0)];
     this.running = null;
     for (const j of jobs) j.settle({ status: 'failed', error });

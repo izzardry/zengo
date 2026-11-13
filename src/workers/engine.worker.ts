@@ -54,6 +54,9 @@ function describe(e: unknown): string {
  * Backends
  * --------------------------------------------------------------------------------------------- */
 
+/** Why WASM could not start, when the worker fell back to the plain CPU backend. */
+let wasmError = '';
+
 async function startWasm(): Promise<Active> {
   try {
     const wasm = await import('@tensorflow/tfjs-backend-wasm');
@@ -62,8 +65,9 @@ async function startWasm(): Promise<Active> {
       await ready();
       return 'wasm';
     }
-  } catch {
-    /* CPU below */
+    wasmError = 'TF.js could not set the wasm backend';
+  } catch (e) {
+    wasmError = describe(e);
   }
   await import('@tensorflow/tfjs-backend-cpu');
   if (!(await setBackend('cpu'))) throw new Error('No TF.js backend could start');
@@ -92,7 +96,7 @@ async function init(wanted: EngineBackendChoice): Promise<void> {
     return;
   }
   active = await startWasm();
-  post({ type: 'backend', backend: 'wasm', decided: false, note: active === 'cpu' ? 'cpu' : undefined });
+  post({ type: 'backend', backend: 'wasm', decided: false, note: active === 'cpu' ? `cpu: ${wasmError}` : undefined });
 }
 
 /* ------------------------------------------------------------------------------------------------
