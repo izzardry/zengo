@@ -1,0 +1,29 @@
+/*
+ * Room-only motion. Plain CSS, outside Tailwind's layers, in the board's pattern (board.css):
+ * every one-shot mark has a still fallback under reduced motion (Ztyle 07). The global block in
+ * ztyle.css cuts animations to 1 ms, so the mark is shown still for twice the pulse, then cleared
+ * by a 1 ms animation delayed by that time (the global block shortens durations, not delays).
+ */
+
+/* The opponent's toggle (DESIGN 9.5): a ring around each stone of the group, once. */
+.zigo-toggle-flash {
+  transform-box: fill-box;
+  transform-origin: center;
+  pointer-events: none;
+  opacity: 0;
+  animation: zigo-toggle-flash calc(var(--dur-pulse, 800ms) * 1.5) ease-out 1 forwards;
+}
+@keyframes zigo-toggle-flash {
+  0% { opacity: 1; transform: scale(1); }
+  40% { opacity: 1; transform: scale(1.12); }
+  100% { opacity: 0; transform: scale(1.4); }
+}
+
+@keyframes zigo-toggle-clear { to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .zigo-toggle-flash {
+    opacity: 1;
+    transform: none;
+    animation: zigo-toggle-clear 1ms linear calc(var(--dur-pulse, 800ms) * 2) 1 forwards !important;
+  }
+}

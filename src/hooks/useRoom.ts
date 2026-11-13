@@ -1,6 +1,6 @@
 /**
- * `useRoom` — the room controller (3C) wired to React, the transports (3B) and the browser
- * (DESIGN 9, PLAN milestone 3, package 3D).
+ * `useRoom` — the room controller (lib/room, package 3B) wired to React, the transports
+ * (lib/transport) and the browser (DESIGN 9, PLAN milestone 3, package 3C).
  *
  * The work is done by `createRoomSession`, which has no React in it and is tested on its own:
  *
@@ -20,13 +20,21 @@
  * - **10-second rule (DESIGN 9).** `manualCause` says when to show `Connect manually`: at once
  *   when the broker is unreachable or switched off, or when ICE failed; after `fallbackMs` (10 s) of
  *   failing signalling otherwise. A device waiting peacefully as the anchor is not failing.
- * - **Persistence.** The controller saves the room and every game through the `Store` (3C). This
+ * - **Persistence.** The controller saves the room and every game through the `Store`. This
  *   session adds the running turn's time: it is banked in `localStorage` on `pagehide`, on a
  *   hidden tab and on dispose, and handed back to the controller as `initialTurn` (DESIGN 9.7).
  *   `localStorage`, not `sessionStorage`: closing the app (a phone's normal way to leave) must not
  *   lose it, or the reconnect would report a turn time of 0.
  * - **Snapshot.** `subscribe` / `view` follow the `useSyncExternalStore` contract: the view object
  *   changes only when something in it changed.
+ * - **Go (DESIGN 9.1, 9.5).** The view adds what the room UI needs beyond the controller's
+ *   snapshot: `settings` (the creator's size, rules, handicap and clock as this device received them
+ *   in `welcome`, for the joiner's dimmed start screen), `scoring` (round, rev, dead stones, both
+ *   acceptances, what this device may do, whether the opponent is away or a first proposal is being
+ *   computed) and `lastToggle` (the stones the opponent's last mark changed, with a key, so the board can
+ *   flash that group once). `toggle(p)` marks the group at `p` through the controller's `mark`.
+ * - **Engine proposal (DESIGN 9.5, PLAN 7).** `propose` is handed to the controller as it is. The
+ *   controller sends its answer as data (`mark` or `end`); nothing here computes a result from it.
  *
  * Time, timers, randomness, the lock manager, the transports and the controller itself are
  * injectable, so tests run over the memory transport with fake time (PLAN 7).
@@ -35,6 +43,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { flags } from '@/lib/flags';
 import { isValidCode } from '@/lib/codes';
 import { createRoomController, type InitialTurn, type RoomControllerApi, type RoomControllerOptions, type RoomCreateSettings, type RoomState } from '@/lib/room';
+import scoringApi from '@/lib/scoring';
 import { store as defaultStore } from '@/lib/storage';
 import { scoreView } from '@/lib/sync';
 import {
@@ -50,7 +59,23 @@ import {
   type RoomTransport,
   type Timers,
 } from '@/lib/transport';
-import type { Now, Point, RequestKind, RoomNotice, Rng, Store, Transport, TransportFactory, TransportState } from '@/lib/types';
+import type {
+  Color,
+  Game,
+  Now,
+  Point,
+  RequestKind,
+  RoomNotice,
+  Rng,
+  Rules,
+  Seat,
+  Size,
+  Store,
+  TimeControl,
+  Transport,
+  TransportFactory,
+  TransportState,
+} from '@/lib/types';
 
 /* ---------------------------------------------------------------------------------------------- */
 /* Public types                                                                                     */
@@ -111,6 +136,66 @@ export interface ManualView {
  */
 export type ManualCause = 'no-broker' | 'broker-unreachable' | 'ice-failed' | 'timeout';
 
+/**
+ * The game settings of the room's current game as this device holds them (DESIGN 9.1): the
+ * creator's choice, received by the joiner in `welcome`, kept for every rematch. The joiner's start
+ * screen shows them dimmed (DESIGN 4.1); `color` is this device's own color in the current game.
+ */
+export interface RoomSettingsView {
+  readonly size: Size;
+  readonly rules: Rules;
+  readonly handicap: number;
+  /** The time control, or null for no clock. */
+  readonly clock: TimeControl;
+  /** This device's color in the current game. */
+  readonly color: Color;
+  readonly seat: Seat;
+  /** Seat 1: the creator's settings apply, so the start screen shows them dimmed and locked. */
+  readonly joiner: boolean;
+}
+
+/**
+ * Scoring in a room as this device sees it (DESIGN 9.3, 9.5). Present while the current game is in
+ * scoring and not over; null otherwise.
+ */
+export interface RoomScoringView {
+  /** 1 = marking round, 2 = after a resume (scored at once by seat 0, no marking). */
+  readonly round: 1 | 2;
+  /** Marking revision; 0 = no proposal yet. */
+  readonly rev: number;
+  /** Dead stones, sorted SGF points. */
+  readonly dead: readonly Point[];
+  /** The rev each seat accepted (0 = none), indexed by seat. */
+  readonly accepted: readonly [number, number];
+  /** This device's seat accepted the current marking: its Accept shows pending (waiting for the opponent). */
+  readonly mine: boolean;
+  /** The opponent accepted the current marking. */
+  readonly theirs: boolean;
+  /** A tap on a stone would mark its group (also offline; DESIGN 9.3). */
+  readonly canMark: boolean;
+  readonly canAccept: boolean;
+  readonly canResume: boolean;
+  /** The opponent is not connected: `Scoring continues when your opponent is back` (DESIGN 9.3). */
+  readonly paused: boolean;
+  /** A first proposal (or the round-2 count) is being waited for, from this device's engine or the opponent's. */
+  readonly proposing: 'me' | 'opponent' | null;
+}
+
+/**
+ * The stones whose status the opponent's last mark changed (DESIGN 9.5: toggles appear live on both
+ * boards). `key` grows with every such change, so the same group toggled twice flashes twice. A
+ * change this device made itself, and the first proposal, are not reported.
+ */
+export interface RoomToggle {
+  /** Every changed stone, sorted. */
+  readonly points: readonly Point[];
+  /** Of those, the stones now marked dead. */
+  readonly dead: readonly Point[];
+  /** Of those, the stones now marked alive. */
+  readonly alive: readonly Point[];
+  readonly key: number;
+}
+
 /** Everything the room UI renders. A new object only when something changed. */
 export interface RoomView {
   readonly code: string;
@@ -126,9 +211,17 @@ export interface RoomView {
   readonly score: readonly [number, number];
   /** The transport in use: the broker, a manual channel, or none yet. */
   readonly via: 'broker' | 'manual' | null;
+  /** The current game (the controller's `state.game`), or null before a controller exists. */
+  readonly game: Game | null;
+  /** The current game's settings once this device holds a seat; null before (a joiner before `welcome`). */
+  readonly settings: RoomSettingsView | null;
+  /** Scoring as this device sees it, while the current game is in scoring. */
+  readonly scoring: RoomScoringView | null;
+  /** The opponent's last change of the marking, while the scoring it belongs to lasts. */
+  readonly lastToggle: RoomToggle | null;
 }
 
-/** The manual signalling functions (3B), injectable for tests. */
+/** The manual signalling functions (lib/transport), injectable for tests. */
 export interface ManualApi {
   startHost(code: string): Promise<ManualHost>;
   answerOffer(code: string, offer: string): Promise<ManualGuest>;
@@ -150,7 +243,7 @@ export interface RoomSessionOptions {
   code: string;
   /** Default: the app store. */
   store?: Store;
-  /** Start with ROOM: create the room if this device has none (3C `create`). Unset for invite links. */
+  /** Start with ROOM: create the room if this device has none (the controller's `create`). Unset for invite links. */
   create?: RoomCreateSettings | null;
   /** `x` of a manual offer link: answer it as the guest. */
   offer?: string | null;
@@ -160,7 +253,7 @@ export interface RoomSessionOptions {
   broker?: TransportFactory | null;
   /** Manual fallback available. Default `flags.manualSignalling`. */
   manualEnabled?: boolean;
-  /** Manual signalling functions. Default: 3B's. */
+  /** Manual signalling functions. Default: lib/transport's. */
   manualApi?: Partial<ManualApi>;
   /** Web Locks. Default `navigator.locks`; null = no tab guard. */
   locks?: LockManagerLike | null;
@@ -168,6 +261,12 @@ export interface RoomSessionOptions {
   createController?: (opts: RoomControllerOptions) => RoomControllerApi;
   /** Extra controller options (ping interval, grace, …). */
   controllerOptions?: Partial<Omit<RoomControllerOptions, 'code' | 'store' | 'transport' | 'factory' | 'readOnly' | 'create' | 'initialTurn'>>;
+  /**
+   * This device's dead-stone proposer (DESIGN 9.5), e.g. `createDeadStoneProposer(() => engineRef.current)`
+   * from lib/proposal.ts. Leave unset on a device without an engine. Passed to the controller as
+   * it is (it wins over `controllerOptions.propose`); its answer only ever travels as data.
+   */
+  propose?: RoomControllerOptions['propose'];
   /** Monotonic clock, shared with the controller and `useClock`. Default `performance.now()`. */
   now?: Now;
   /** Wall clock. Default `Date.now`. */
@@ -206,6 +305,10 @@ export interface RoomSession {
   signal(s: { offer?: string | null; answer?: string | null }): void;
   /** Banks the running turn's time now (also done on pagehide, hidden tab and dispose). */
   bank(): void;
+  /** Sends a marking made on this device (the full dead set). Never reported as the opponent's `lastToggle`. */
+  mark(dead: readonly Point[]): boolean;
+  /** Marks the group at `p` dead or alive (DESIGN 8.4 step 2), through `mark`. False if not allowed or no stone. */
+  toggle(p: Point): boolean;
   dispose(): void;
 }
 
@@ -238,7 +341,117 @@ export const IDLE_ROOM_VIEW: RoomView = Object.freeze({
   manualCause: null,
   score: NO_SCORE,
   via: null,
+  game: null,
+  settings: null,
+  scoring: null,
+  lastToggle: null,
 });
+
+/* ---------------------------------------------------------------------------------------------- */
+/* Go views of the snapshot (pure)                                                                  */
+/* ---------------------------------------------------------------------------------------------- */
+
+const sameList = (a: readonly unknown[], b: readonly unknown[]): boolean => a === b || (a.length === b.length && a.every((x, i) => x === b[i]));
+
+function sameTc(a: TimeControl, b: TimeControl): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.kind !== b.kind) return false;
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/** The settings view of a snapshot; `prev` is returned when nothing in it changed. */
+export function roomSettingsOf(state: RoomState | null, prev: RoomSettingsView | null = null): RoomSettingsView | null {
+  if (!state || state.seat === null) return null;
+  const s = state.game.settings;
+  const next: RoomSettingsView = {
+    size: s.size,
+    rules: s.rules,
+    handicap: s.handicap,
+    clock: state.tc,
+    color: state.color,
+    seat: state.seat,
+    joiner: state.seat === 1,
+  };
+  if (
+    prev &&
+    prev.size === next.size &&
+    prev.rules === next.rules &&
+    prev.handicap === next.handicap &&
+    sameTc(prev.clock, next.clock) &&
+    prev.color === next.color &&
+    prev.seat === next.seat
+  ) {
+    return prev;
+  }
+  return Object.freeze(next);
+}
+
+/** The scoring view of a snapshot; `prev` is returned when nothing in it changed. */
+export function roomScoringOf(state: RoomState | null, prev: RoomScoringView | null = null): RoomScoringView | null {
+  const sc = state?.game.scoring;
+  if (!state || !sc || state.game.end || state.seat === null) return null;
+  const seat = state.seat;
+  const other: Seat = seat === 0 ? 1 : 0;
+  const proposing = state.proposing ?? null;
+  const next: RoomScoringView = {
+    round: sc.round,
+    rev: sc.rev,
+    dead: sc.dead,
+    accepted: [sc.accepted[0], sc.accepted[1]],
+    mine: sc.rev >= 1 && sc.accepted[seat] === sc.rev,
+    theirs: sc.rev >= 1 && sc.accepted[other] === sc.rev,
+    canMark: state.canMark,
+    canAccept: state.canAccept,
+    canResume: state.canResume,
+    paused: !state.live,
+    proposing: proposing === null ? null : proposing === seat ? 'me' : 'opponent',
+  };
+  if (
+    prev &&
+    prev.round === next.round &&
+    prev.rev === next.rev &&
+    sameList(prev.dead, next.dead) &&
+    prev.accepted[0] === next.accepted[0] &&
+    prev.accepted[1] === next.accepted[1] &&
+    prev.canMark === next.canMark &&
+    prev.canAccept === next.canAccept &&
+    prev.canResume === next.canResume &&
+    prev.paused === next.paused &&
+    prev.proposing === next.proposing
+  ) {
+    return prev;
+  }
+  return Object.freeze({ ...next, dead: Object.freeze([...next.dead]), accepted: Object.freeze(next.accepted) as readonly [number, number] });
+}
+
+/**
+ * What changed between two dead sets of the same scoring, or null when nothing did. Pure; used for
+ * the opponent's `toggle`.
+ */
+export function markingChange(before: readonly Point[], after: readonly Point[]): { points: Point[]; dead: Point[]; alive: Point[] } | null {
+  const a = new Set(before);
+  const b = new Set(after);
+  const dead = [...b].filter((p) => !a.has(p)).sort();
+  const alive = [...a].filter((p) => !b.has(p)).sort();
+  if (dead.length === 0 && alive.length === 0) return null;
+  return { points: [...dead, ...alive].sort(), dead, alive };
+}
+
+/** Both snapshots show the same scoring: same game, epoch, plies and round. */
+function sameScoring(prev: RoomState | null, next: RoomState): prev is RoomState & { game: { scoring: NonNullable<Game['scoring']> } } {
+  const a = prev?.game.scoring;
+  const b = next.game.scoring;
+  return (
+    !!prev &&
+    !!a &&
+    !!b &&
+    !prev.game.end &&
+    prev.n === next.n &&
+    prev.epoch === next.epoch &&
+    prev.game.plies.length === next.game.plies.length &&
+    a.round === b.round
+  );
+}
 
 interface BankEntry {
   code: string;
@@ -358,7 +571,11 @@ function sameView(a: RoomView, b: RoomView): boolean {
     a.manualCause === b.manualCause &&
     a.score[0] === b.score[0] &&
     a.score[1] === b.score[1] &&
-    a.via === b.via
+    a.via === b.via &&
+    a.game === b.game &&
+    a.settings === b.settings &&
+    a.scoring === b.scoring &&
+    a.lastToggle === b.lastToggle
   );
 }
 
@@ -385,8 +602,12 @@ class Session implements RoomSession {
   private readonly doc: (EventSourceLike & { visibilityState?: string }) | null;
   private readonly fallbackMs: number;
   private readonly onSignalUsed: (() => void) | undefined;
+  private readonly propose: RoomControllerOptions['propose'] | undefined;
 
   private ctrl: RoomControllerApi | null = null;
+  /** Inside this device's own `mark()`: the change is not the opponent's toggle. */
+  private localMark = 0;
+  private toggleSeq = 0;
   private ctrlOff: (() => void)[] = [];
   private tab: TabState = 'pending';
   private disposed = false;
@@ -445,6 +666,7 @@ class Session implements RoomSession {
     this.doc = opts.document !== undefined ? opts.document : typeof document !== 'undefined' ? document : null;
     this.fallbackMs = opts.fallbackMs ?? MANUAL_FALLBACK_MS;
     this.onSignalUsed = opts.onSignalUsed;
+    this.propose = opts.propose;
     this.current = { ...IDLE_ROOM_VIEW, code: this.code, guarded: !!this.locks };
 
     this.listen(this.win, 'pagehide', () => this.bank());
@@ -573,6 +795,28 @@ class Session implements RoomSession {
     const ms = c.elapsed();
     if (!Number.isFinite(ms) || ms <= 0) return;
     bankRoomTurn(this.turnStorage, { code: this.code, n: s.n, epoch: s.epoch, len: s.game.plies.length, ms: Math.round(ms), at: this.wallNow() });
+  }
+
+  mark(dead: readonly Point[]): boolean {
+    const c = this.ctrl;
+    if (!c || this.disposed) return false;
+    this.localMark++;
+    try {
+      return c.mark(dead);
+    } finally {
+      this.localMark--;
+    }
+  }
+
+  toggle(p: Point): boolean {
+    const c = this.ctrl;
+    if (!c || this.disposed) return false;
+    const s = c.snapshot;
+    const sc = s.game.scoring;
+    if (!s.canMark || !sc || s.game.end) return false;
+    const next = scoringApi.toggle(s.game, sc.dead, p);
+    if (sameList(next, sc.dead)) return false;
+    return this.mark(next);
   }
 
   dispose(): void {
@@ -723,6 +967,7 @@ class Session implements RoomSession {
     const initialTurn = readOnly ? null : takeBankedTurn(this.code, this.turnStorage, this.wallNow);
     const ctrl = this.makeCtrl({
       ...this.ctrlOpts,
+      ...(this.propose !== undefined ? { propose: this.propose } : {}),
       code: this.code,
       store: this.store,
       now: this.now,
@@ -1040,6 +1285,7 @@ class Session implements RoomSession {
     }
     const seat = state?.seat ?? null;
     const score = state && seat !== null ? scoreView(state.score, seat) : NO_SCORE;
+    const prev = this.current;
     const next: RoomView = {
       code: this.code,
       state,
@@ -1049,6 +1295,10 @@ class Session implements RoomSession {
       manualCause: this.manualCauseOf(state),
       score: score === NO_SCORE ? NO_SCORE : [score[0], score[1]],
       via: this.tab !== 'owner' ? null : this.manualT ? 'manual' : this.brokerT ? 'broker' : null,
+      game: state?.game ?? null,
+      settings: roomSettingsOf(state, prev.settings),
+      scoring: roomScoringOf(state, prev.scoring),
+      lastToggle: this.toggleOf(prev.state, state, prev.lastToggle),
     };
     if (sameView(this.current, next)) return;
     this.current = Object.freeze(next);
@@ -1059,6 +1309,26 @@ class Session implements RoomSession {
         console.error(e);
       }
     }
+  }
+
+  /**
+   * The opponent's last change of the marking (DESIGN 9.5): a new one when the dead set of the same
+   * scoring changed and this device did not change it itself; kept while that scoring lasts.
+   */
+  private toggleOf(prevState: RoomState | null, state: RoomState | null, prevToggle: RoomToggle | null): RoomToggle | null {
+    const sc = state?.game.scoring;
+    if (!state || !sc || state.game.end) return null;
+    if (!sameScoring(prevState, state)) return null;
+    // Round 2 has no marking; the first proposal (rev 0 → 1) is no toggle.
+    if (sc.round !== 1 || prevState.game.scoring.rev < 1) return prevToggle;
+    const change = this.localMark > 0 ? null : markingChange(prevState.game.scoring.dead, sc.dead);
+    if (!change) return prevToggle;
+    return Object.freeze({
+      points: Object.freeze(change.points),
+      dead: Object.freeze(change.dead),
+      alive: Object.freeze(change.alive),
+      key: ++this.toggleSeq,
+    });
   }
 
   private listen(target: EventSourceLike | null, type: string, cb: (e: Event) => void): void {
@@ -1098,10 +1368,21 @@ export interface RoomHandle extends RoomView {
   pass(ms?: number): boolean;
   /** Scoring: sends the full dead set (a proposal or a toggle). */
   mark(dead: readonly Point[]): boolean;
+  /** Scoring: marks the group at `p` dead or alive (the board's `onToggleGroup`). */
+  toggle(p: Point): boolean;
   /** Scoring: accepts the current marking. */
   accept(): boolean;
   /** Scoring: leaves it and plays on. */
   resume(): boolean;
+  /**
+   * The scoring actions in `useScoring`'s shape (`ScoringActions`): `toggle`, `accept` (the side
+   * argument is ignored: a room device accepts for its own seat) and `resume`. Stable per session.
+   */
+  readonly scoringActions: {
+    toggle(p: Point): boolean;
+    accept(side?: Color): boolean;
+    resume(): boolean;
+  };
   ask(kind: RequestKind): boolean;
   reply(kind: RequestKind | 'rejoin', ok: boolean): boolean;
   resign(): boolean;
@@ -1159,12 +1440,17 @@ export function useRoom(code: string | null, opts: UseRoomOptions = {}): RoomHan
   // Actions are stable per session, so they can sit in effect dependencies.
   const actions = useMemo<Omit<RoomHandle, keyof RoomView | 'controller'>>(() => {
     const c = () => session?.controller ?? null;
+    const toggle = (p: Point) => session?.toggle(p) ?? false;
+    const accept = () => c()?.accept() ?? false;
+    const resume = () => c()?.resume() ?? false;
     return {
       move: (point, ms) => c()?.move(point, ms) ?? false,
       pass: (ms) => c()?.pass(ms) ?? false,
-      mark: (dead) => c()?.mark(dead) ?? false,
-      accept: () => c()?.accept() ?? false,
-      resume: () => c()?.resume() ?? false,
+      mark: (dead) => session?.mark(dead) ?? false,
+      toggle,
+      accept,
+      resume,
+      scoringActions: Object.freeze({ toggle, accept: () => accept(), resume }),
       ask: (kind) => c()?.ask(kind) ?? false,
       reply: (kind, ok) => c()?.reply(kind, ok) ?? false,
       resign: () => c()?.resign() ?? false,

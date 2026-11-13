@@ -1,10 +1,19 @@
 /** useRoom: the session wired to React (useSyncExternalStore), with a fake controller. */
 import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { createFakeController, type FakeController } from '@/components/room/testUtils';
+import { createFakeController, fakeRoomState, type FakeController } from '@/components/room/testUtils';
 import type { RoomControllerOptions } from '@/lib/room';
-import type { RoomNotice } from '@/lib/types';
-import { IDLE_ROOM_VIEW, useRoom, type ManualApi, type UseRoomOptions } from './useRoom';
+import type { Game, Point, RoomNotice, Scoring } from '@/lib/types';
+import zigo, { makeSettings } from '@/lib/zigo';
+import { IDLE_ROOM_VIEW, markingChange, roomScoringOf, roomSettingsOf, useRoom, type ManualApi, type UseRoomOptions } from './useRoom';
+
+/** A 9×9 game in scoring: black cc, cg; white gg, gc; two passes. */
+function scoringGame(scoring?: Partial<Scoring>): Game {
+  let g = zigo.newGame(makeSettings(9));
+  for (const p of ['cc', 'gg', 'cg', 'gc']) g = zigo.play(g, p, 0);
+  g = zigo.pass(zigo.pass(g, 0), 0);
+  return scoring ? zigo.setScoring(g, { ...g.scoring!, ...scoring }) : g;
+}
 
 function setup(extra: Partial<UseRoomOptions> = {}) {
   const made: FakeController[] = [];
@@ -173,4 +182,146 @@ describe('useRoom', () => {
     act(() => result.current.closeManual());
     expect(result.current.manual.step).toBe('idle');
   });
+
+  it('toggles a group through mark, and offers the scoring actions in useScoring\'s shape', () => {
+    const { made, opts } = setup();
+    const { result } = renderHook(() => useRoom('K7QW2M', opts));
+    const c = made[0];
+    // Not scoring: nothing to toggle.
+    expect(result.current.toggle('cc')).toBe(false);
+    act(() => c.set({ seat: 1, live: true, phase: 'live', game: scoringGame({ rev: 1, dead: ['gg'] }), canMark: true }));
+    expect(result.current.toggle('cc')).toBe(true);
+    expect(c.mark).toHaveBeenLastCalledWith(['cc', 'gg']);
+    expect(result.current.scoringActions.toggle('gg')).toBe(true);
+    expect(c.mark).toHaveBeenLastCalledWith([]);
+    // An empty point is no group; marking not allowed is refused before the controller.
+    expect(result.current.toggle('ee')).toBe(false);
+    act(() => c.set({ canMark: false }));
+    expect(result.current.toggle('cc')).toBe(false);
+    expect(c.mark).toHaveBeenCalledTimes(2);
+    // accept ignores a side: a room device accepts for its own seat.
+    expect(result.current.scoringActions.accept('W')).toBe(true);
+    expect(c.accept).toHaveBeenCalledWith();
+    expect(result.current.scoringActions.resume()).toBe(true);
+    expect(c.resume).toHaveBeenCalled();
+    const actions = result.current.scoringActions;
+    act(() => c.set({ live: false }));
+    expect(result.current.scoringActions).toBe(actions);
+  });
+
+  it('derives the scoring view: own and opponent acceptance, pause, proposing', () => {
+    const { made, opts } = setup();
+    const { result } = renderHook(() => useRoom('K7QW2M', opts));
+    const c = made[0];
+    expect(result.current.scoring).toBeNull();
+    act(() => c.set({ seat: 1, live: true, phase: 'live', game: scoringGame(), proposing: 0 }));
+    expect(result.current.scoring).toMatchObject({ round: 1, rev: 0, mine: false, theirs: false, proposing: 'opponent', paused: false });
+    act(() => c.set({ game: scoringGame({ rev: 3, dead: ['gg'], accepted: [3, 2] }), proposing: null, canAccept: true, canResume: true, canMark: true }));
+    expect(result.current.scoring).toMatchObject({ rev: 3, dead: ['gg'], accepted: [3, 2], mine: false, theirs: true, proposing: null, canAccept: true });
+    const before = result.current.scoring;
+    act(() => c.set({ presence: 'connected' }));
+    expect(result.current.scoring).toBe(before); // unchanged: same object
+    act(() => c.set({ live: false, canAccept: false, canResume: false }));
+    expect(result.current.scoring).toMatchObject({ paused: true, canAccept: false });
+    act(() => c.set({ seat: 0, proposing: 0 }));
+    expect(result.current.scoring).toMatchObject({ mine: true, theirs: false, proposing: 'me' });
+    // Over: no scoring view, no toggle.
+    const g = scoringGame({ rev: 3, dead: ['gg'], accepted: [3, 3] });
+    act(() => c.set({ game: zigo.end(g, { winner: 'B', by: 'score', margin: 9 }) }));
+    expect(result.current.scoring).toBeNull();
+    expect(result.current.lastToggle).toBeNull();
+  });
+
+  it("reports the opponent's change of the marking, never this device's own", () => {
+    const { made, opts } = setup();
+    const { result } = renderHook(() => useRoom('K7QW2M', opts));
+    const c = made[0];
+    act(() => c.set({ seat: 0, live: true, phase: 'live', game: scoringGame({ rev: 1, dead: ['gg'] }), canMark: true }));
+    expect(result.current.lastToggle).toBeNull();
+    act(() => c.set({ game: scoringGame({ rev: 2, dead: ['cc', 'gg'] }) }));
+    expect(result.current.lastToggle).toMatchObject({ points: ['cc'], dead: ['cc'], alive: [] });
+    const first = result.current.lastToggle!;
+    // Acceptances alone change nothing on the board.
+    act(() => c.set({ game: scoringGame({ rev: 2, dead: ['cc', 'gg'], accepted: [0, 2] }) }));
+    expect(result.current.lastToggle).toBe(first);
+    // Own toggle: the controller updates its snapshot inside mark(); no new toggle.
+    c.mark.mockImplementation((dead: readonly Point[]) => {
+      c.set({ game: scoringGame({ rev: 3, dead: [...dead] }) });
+      return true;
+    });
+    act(() => void result.current.toggle('gc'));
+    expect(result.current.state?.game.scoring?.dead).toEqual(['cc', 'gc', 'gg']);
+    expect(result.current.lastToggle).toBe(first);
+    // The opponent's next toggle: a new key.
+    act(() => c.set({ game: scoringGame({ rev: 4, dead: ['gc', 'gg'] }) }));
+    expect(result.current.lastToggle).toMatchObject({ points: ['cc'], dead: [], alive: ['cc'] });
+    expect(result.current.lastToggle!.key).toBeGreaterThan(first.key);
+    // A resume (no scoring) clears it.
+    const resumed = zigo.resume(scoringGame({ rev: 4, dead: ['gc', 'gg'] }));
+    act(() => c.set({ game: resumed }));
+    expect(result.current.lastToggle).toBeNull();
+    // Round 2 has no marking round: a change of its dead stones is no toggle.
+    let r2 = zigo.pass(zigo.pass(zigo.play(resumed, 'ee', 0), 0), 0);
+    expect(r2.scoring?.round).toBe(2);
+    act(() => c.set({ game: r2 }));
+    r2 = zigo.setScoring(r2, { ...r2.scoring!, rev: 1, dead: ['gg'] });
+    act(() => c.set({ game: r2 }));
+    expect(result.current.lastToggle).toBeNull();
+  });
+
+  it('exposes the settings of the current game once seated', () => {
+    const { made, opts } = setup();
+    const { result } = renderHook(() => useRoom('K7QW2M', opts));
+    const c = made[0];
+    act(() => c.set({ seat: null }));
+    expect(result.current.settings).toBeNull();
+    const g = zigo.newGame(makeSettings(19, 'territory', 4));
+    act(() => c.set({ seat: 1, color: 'B', game: g, tc: { kind: 'fischer', baseMs: 300_000, incMs: 7000 } }));
+    expect(result.current.settings).toEqual({
+      size: 19,
+      rules: 'territory',
+      handicap: 4,
+      clock: { kind: 'fischer', baseMs: 300_000, incMs: 7000 },
+      color: 'B',
+      seat: 1,
+      joiner: true,
+    });
+    expect(result.current.game).toBe(g);
+  });
+
+  it('passes propose to the controller', () => {
+    const propose = vi.fn(() => null);
+    const { made, opts } = setup({ propose });
+    renderHook(() => useRoom('K7QW2M', opts));
+    expect(made[0].opts.propose).toBe(propose);
+    expect(propose).not.toHaveBeenCalled();
+  });
 });
+
+describe('useRoom view helpers', () => {
+  it('markingChange lists what turned dead and what turned alive', () => {
+    expect(markingChange(['aa', 'bb'], ['aa', 'bb'])).toBeNull();
+    expect(markingChange([], ['cc', 'cd'])).toEqual({ points: ['cc', 'cd'], dead: ['cc', 'cd'], alive: [] });
+    expect(markingChange(['gg', 'cc'], ['dd', 'gg'])).toEqual({ points: ['cc', 'dd'], dead: ['dd'], alive: ['cc'] });
+  });
+
+  it('roomSettingsOf and roomScoringOf keep the previous object while nothing changed', () => {
+    expect(roomSettingsOf(null)).toBeNull();
+    expect(roomScoringOf(null)).toBeNull();
+    const state = fakeRoomState({ seat: 0, live: true, game: scoringGame({ rev: 2, dead: ['gg'], accepted: [2, 0] }), tc: { kind: 'byoyomi', baseMs: 600_000, periods: 5, periodMs: 30_000 } });
+    const settings = roomSettingsOf(state);
+    const scoring = roomScoringOf(state);
+    expect(scoring).toMatchObject({ mine: true, theirs: false });
+    expect(Object.isFrozen(scoring)).toBe(true);
+    // A new snapshot with equal content (a copy of the game, a copy of the clock) keeps both objects.
+    const copy = fakeRoomState({ ...state, game: scoringGame({ rev: 2, dead: ['gg'], accepted: [2, 0] }), tc: { kind: 'byoyomi', baseMs: 600_000, periods: 5, periodMs: 30_000 } });
+    expect(roomSettingsOf(copy, settings)).toBe(settings);
+    expect(roomScoringOf(copy, scoring)).toBe(scoring);
+    expect(roomScoringOf(fakeRoomState({ ...state, live: false }), scoring)).not.toBe(scoring);
+    expect(roomSettingsOf(fakeRoomState({ ...state, tc: null }), settings)?.clock).toBeNull();
+    // No seat yet (a joiner before welcome): neither view.
+    expect(roomSettingsOf(fakeRoomState({ ...state, seat: null }))).toBeNull();
+    expect(roomScoringOf(fakeRoomState({ ...state, seat: null }))).toBeNull();
+  });
+});
+

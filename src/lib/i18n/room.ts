@@ -1,6 +1,6 @@
 /**
- * Strings of the room UI (package 1G now, 3C in milestone 3) (see PLAN.md): presence, transition toasts, requests,
- * invite sheet, manual connection, tab guard and the calm failure messages of DESIGN 9.
+ * Strings of the room UI (packages 1G and 3C, see PLAN.md): presence, transition toasts, requests,
+ * scoring notes, invite sheet, manual connection, tab guard and the calm failure messages of DESIGN 9.
  * EN is the source of truth; DE du, FR vous, ES tú. Every key is prefixed `room.`.
  * Shared words (Accept, Decline, Allow, Share, Close, Link copied, Room) come from `common.ts`.
  * Package 3B (transports) added no `room.transport.*` keys; its failure codes are translated here.
@@ -43,6 +43,14 @@ export default defineTable({
     'room.pending.takeback': 'Takeback requested',
     'room.pending.rematch': 'Rematch requested',
     'room.pending.waiting': 'Waiting for your opponent',
+
+    // Scoring in a room (DESIGN 9.3, 9.5); the paused line is 1C's `game.scoringPaused`
+    'room.scoring.waiting': 'Waiting for your opponent to accept',
+    'room.scoring.theyAccepted': 'Your opponent accepted this count',
+    'room.scoring.proposing': 'Finding dead stones…',
+    'room.scoring.counting': 'Counting…',
+    'room.scoring.toggledDead': 'Your opponent marked the group at {point} dead',
+    'room.scoring.toggledAlive': 'Your opponent marked the group at {point} alive',
 
     // Invite sheet (DESIGN 9)
     'room.invite.title': 'Invite your opponent',
@@ -122,6 +130,13 @@ export default defineTable({
     'room.pending.rematch': 'Revanche angefragt',
     'room.pending.waiting': 'Warte auf deinen Gegner',
 
+    'room.scoring.waiting': 'Warte, bis dein Gegner annimmt',
+    'room.scoring.theyAccepted': 'Dein Gegner hat diese Zählung angenommen',
+    'room.scoring.proposing': 'Suche tote Steine …',
+    'room.scoring.counting': 'Zähle …',
+    'room.scoring.toggledDead': 'Dein Gegner hat die Gruppe auf {point} als tot markiert',
+    'room.scoring.toggledAlive': 'Dein Gegner hat die Gruppe auf {point} als lebendig markiert',
+
     'room.invite.title': 'Lade deinen Gegner ein',
     'room.invite.body': 'Schick diesen Link, oder lass ihn den Code mit „Raum“ eingeben.',
     'room.invite.qr': 'QR-Code des Links',
@@ -197,6 +212,13 @@ export default defineTable({
     'room.pending.rematch': 'Revanche demandée',
     'room.pending.waiting': 'En attente de votre adversaire',
 
+    'room.scoring.waiting': 'En attente de l’accord de votre adversaire',
+    'room.scoring.theyAccepted': 'Votre adversaire a accepté ce décompte',
+    'room.scoring.proposing': 'Recherche des pierres mortes…',
+    'room.scoring.counting': 'Décompte en cours…',
+    'room.scoring.toggledDead': 'Votre adversaire a marqué le groupe en {point} comme mort',
+    'room.scoring.toggledAlive': 'Votre adversaire a marqué le groupe en {point} comme vivant',
+
     'room.invite.title': 'Invitez votre adversaire',
     'room.invite.body': 'Envoyez ce lien, ou faites saisir le code avec « Salon » choisi.',
     'room.invite.qr': 'QR code du lien',
@@ -271,6 +293,13 @@ export default defineTable({
     'room.pending.takeback': 'Deshacer pedido',
     'room.pending.rematch': 'Revancha pedida',
     'room.pending.waiting': 'Esperando a tu rival',
+
+    'room.scoring.waiting': 'Esperando a que tu rival acepte',
+    'room.scoring.theyAccepted': 'Tu rival aceptó este recuento',
+    'room.scoring.proposing': 'Buscando piedras muertas…',
+    'room.scoring.counting': 'Contando…',
+    'room.scoring.toggledDead': 'Tu rival marcó el grupo en {point} como muerto',
+    'room.scoring.toggledAlive': 'Tu rival marcó el grupo en {point} como vivo',
 
     'room.invite.title': 'Invita a tu rival',
     'room.invite.body': 'Envía este enlace, o que escriba el código con «Sala» elegida.',

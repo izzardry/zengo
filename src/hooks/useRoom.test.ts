@@ -7,7 +7,7 @@ import { createRoomController, type RoomControllerApi, type RoomControllerOption
 import { createHarness, seeded, type Harness } from '@/lib/room/testkit';
 import { createStore, memoryStorage } from '@/lib/storage';
 import { createMemoryPair, ManualError, type MemoryPair, type RoomTransport, type TransportFailureKind, type TransportRole } from '@/lib/transport';
-import type { Message, RoomNotice, Store, Transport, TransportFactory, TransportState } from '@/lib/types';
+import type { Message, Point, RoomNotice, Store, Transport, TransportFactory, TransportState } from '@/lib/types';
 import {
   bankRoomTurn,
   createRoomSession,
@@ -925,5 +925,197 @@ describe('room session · controller factory', () => {
     expect(seen[1].store).toBe(store);
     expect(seen[1].now).toBe(r.h.time.now);
     expect(seen[1].timers).toBe(r.h.time);
+  });
+});
+
+/* ---------------------------------------------------------------------------------------------- */
+/* Go: settings, scoring and the opponent's toggles (DESIGN 9.1, 9.3, 9.5)                          */
+/* ---------------------------------------------------------------------------------------------- */
+
+/** Two stones each, then two passes: scoring with stones on cc, cg (Black) and gg, gc (White). */
+const TO_SCORING = ['cc', 'gg', 'cg', 'gc', 'tt', 'tt'];
+
+async function playOut(r: Rig, sessions: RoomSession[], points: string[]): Promise<void> {
+  for (const p of points) {
+    const s = sessions.find((x) => x.view.state?.myTurn);
+    if (!s) throw new Error(`nobody to move for ${p}`);
+    expect(s.controller?.move(p, 1000), `move ${p}`).toBe(true);
+    await r.settle();
+  }
+}
+
+function deferred<T>() {
+  let resolve!: (v: T) => void;
+  const promise = new Promise<T>((r) => (resolve = r));
+  return { promise, resolve };
+}
+
+/** A creator (seat 0, Black) and a joiner (seat 1), live. */
+async function pairUp(r: Rig, a: Partial<RoomSessionOptions> = {}, b: Partial<RoomSessionOptions> = {}) {
+  const A = r.session({ create: { tc: null, color: 'B' }, ...a });
+  await r.settle();
+  const B = r.session(b);
+  await r.settle();
+  expect(A.view.state?.live).toBe(true);
+  expect(B.view.state?.live).toBe(true);
+  return { A, B };
+}
+
+describe('room session · Go', () => {
+  it("exposes the creator's settings on both devices; the joiner's are marked as the creator's (DESIGN 9.1, 4.1)", async () => {
+    const r = rig();
+    const A = r.session({ create: { tc: '20m5x30', color: 'W', size: 13, rules: 'territory', handicap: 3 } });
+    await r.settle();
+    expect(A.view.settings).toMatchObject({ size: 13, rules: 'territory', handicap: 3, color: 'W', seat: 0, joiner: false });
+    expect(A.view.settings?.clock).toEqual({ kind: 'byoyomi', baseMs: 20 * 60_000, periods: 5, periodMs: 30_000 });
+
+    const B = r.session();
+    expect(B.view.settings).toBeNull(); // no seat before welcome
+    await r.settle();
+    expect(B.view.settings).toMatchObject({ size: 13, rules: 'territory', handicap: 3, color: 'B', seat: 1, joiner: true });
+    expect(B.view.settings?.clock).toEqual(A.view.settings?.clock);
+    expect(B.view.game).toBe(B.view.state?.game);
+    expect(B.view.game?.settings.size).toBe(13);
+    // Unchanged settings keep their object (useSyncExternalStore friendly).
+    const before = B.view.settings;
+    await playOut(r, [A, B], ['ef']);
+    expect(B.view.settings).toBe(before);
+  });
+
+  it("scoring: the proposal, the opponent's toggle flashes on the other device only, Accept pending, both accept", async () => {
+    const r = rig();
+    const proposeA = vi.fn(() => ['gg']);
+    const proposeB = vi.fn(() => ['cc', 'cg']); // would disagree: never asked (PLAN 7)
+    const { A, B } = await pairUp(r, { propose: proposeA }, { propose: proposeB });
+    expect(A.view.scoring).toBeNull();
+    await playOut(r, [A, B], TO_SCORING);
+
+    for (const s of [A, B]) {
+      expect(s.view.scoring).toMatchObject({ round: 1, rev: 1, dead: ['gg'], accepted: [0, 0], mine: false, theirs: false, paused: false, proposing: null });
+      expect(s.view.scoring).toMatchObject({ canMark: true, canAccept: true, canResume: true });
+      expect(s.view.lastToggle).toBeNull(); // the first proposal is no toggle
+    }
+    expect(proposeA).toHaveBeenCalledTimes(1);
+    expect(proposeB).not.toHaveBeenCalled();
+
+    // The guest toggles the black group at C3 (cc + cg are not connected: only cc).
+    expect(B.toggle('cc')).toBe(true);
+    expect(B.view.lastToggle).toBeNull(); // own toggle: no flash here
+    await r.settle();
+    expect(A.view.scoring).toMatchObject({ rev: 2, dead: ['cc', 'gg'] });
+    expect(A.view.lastToggle).toEqual({ points: ['cc'], dead: ['cc'], alive: [], key: expect.any(Number) });
+    const k1 = A.view.lastToggle!.key;
+
+    // The same group back to alive: a new key, so the board flashes again.
+    expect(B.toggle('cc')).toBe(true);
+    await r.settle();
+    expect(A.view.lastToggle).toMatchObject({ points: ['cc'], dead: [], alive: ['cc'] });
+    expect(A.view.lastToggle!.key).toBeGreaterThan(k1);
+    // Own toggles on A never flash on A; an empty point is no toggle.
+    const k2 = A.view.lastToggle!.key;
+    expect(A.toggle('ee')).toBe(false);
+    expect(A.toggle('gc')).toBe(true);
+    expect(A.view.lastToggle!.key).toBe(k2);
+    await r.settle();
+    expect(B.view.lastToggle).toMatchObject({ points: ['gc'], dead: ['gc'] });
+
+    // Accept: pending on the own device until the opponent accepts the same rev.
+    const rev = A.view.scoring!.rev;
+    expect(A.controller?.accept()).toBe(true);
+    await r.settle();
+    expect(A.view.scoring).toMatchObject({ rev, mine: true, theirs: false, canAccept: false });
+    expect(B.view.scoring).toMatchObject({ rev, mine: false, theirs: true, canAccept: true });
+
+    // A toggle clears both acceptances.
+    expect(B.toggle('cg')).toBe(true);
+    await r.settle();
+    for (const s of [A, B]) expect(s.view.scoring).toMatchObject({ rev: rev + 1, mine: false, theirs: false });
+
+    for (const s of [A, B]) expect(s.controller?.accept()).toBe(true);
+    await r.settle();
+    for (const s of [A, B]) {
+      expect(s.view.scoring).toBeNull();
+      expect(s.view.lastToggle).toBeNull();
+      expect(s.view.game?.end?.result.by).toBe('score');
+    }
+    expect(A.view.game?.end).toEqual(B.view.game?.end);
+    expect(A.view.game?.scoring?.dead).toEqual(['cg', 'gc', 'gg']);
+    expect(proposeB).not.toHaveBeenCalled();
+  });
+
+  it('while the opponent is away scoring is paused; marks made offline still count (DESIGN 9.3)', async () => {
+    const r = rig();
+    const { A, B } = await pairUp(r, { propose: () => ['gg'] });
+    await playOut(r, [A, B], TO_SCORING);
+    r.h.net.link(r.h.code)?.disconnect();
+    await r.advance(100);
+    for (const s of [A, B]) expect(s.view.scoring).toMatchObject({ paused: true, canAccept: false, canResume: false, canMark: true });
+    expect(B.toggle('cc')).toBe(true);
+    expect(B.view.scoring).toMatchObject({ rev: 2, dead: ['cc', 'gg'], paused: true });
+    r.h.net.link(r.h.code)?.reconnect();
+    await r.advance(1000);
+    expect(A.view.scoring).toMatchObject({ rev: 2, dead: ['cc', 'gg'], paused: false, canAccept: true });
+    // The offline mark reached A through the reconcile: it is the opponent's change, so it flashes.
+    expect(A.view.lastToggle).toMatchObject({ points: ['cc'], dead: ['cc'] });
+    expect(B.view.lastToggle).toBeNull();
+  });
+
+  it("crossing toggles settle on seat 0's stones; seat 1 sees its own group revert as the opponent's change", async () => {
+    const r = rig();
+    const { A, B } = await pairUp(r, { propose: () => ['gg'] });
+    await playOut(r, [A, B], TO_SCORING);
+    r.h.net.link(r.h.code)?.disconnect();
+    await r.advance(100);
+    expect(A.toggle('gc')).toBe(true); // seat 0: ['gc', 'gg'] at rev 2
+    expect(B.toggle('cc')).toBe(true); // seat 1: ['cc', 'gg'] at rev 2
+    r.h.net.link(r.h.code)?.reconnect();
+    await r.advance(1000);
+    for (const s of [A, B]) expect(s.view.scoring).toMatchObject({ rev: 3, dead: ['gc', 'gg'] });
+    expect(B.view.lastToggle).toMatchObject({ points: ['cc', 'gc'], dead: ['gc'], alive: ['cc'] });
+    expect(A.view.lastToggle).toBeNull(); // A's own marking won: nothing changed on A
+  });
+
+  it('the first proposal: waiting on both devices while seat 0 computes it; a resume ends scoring (DESIGN 9.5)', async () => {
+    const r = rig();
+    const answer = deferred<Point[] | null>();
+    const { A, B } = await pairUp(r, { propose: () => answer.promise });
+    await playOut(r, [A, B], TO_SCORING);
+    expect(A.view.scoring).toMatchObject({ rev: 0, proposing: 'me', canAccept: false });
+    expect(B.view.scoring).toMatchObject({ rev: 0, proposing: 'opponent', canAccept: false, canMark: false });
+    answer.resolve(['gc', 'gg']);
+    await r.settle();
+    for (const s of [A, B]) expect(s.view.scoring).toMatchObject({ rev: 1, dead: ['gc', 'gg'], proposing: null });
+    expect(B.controller?.resume()).toBe(true);
+    await r.settle();
+    for (const s of [A, B]) {
+      expect(s.view.scoring).toBeNull();
+      expect(s.view.lastToggle).toBeNull();
+    }
+  });
+
+  it("seat 0 without an engine hands the first proposal to seat 1's engine; the proposal travels as data", async () => {
+    const r = rig();
+    const proposeB = vi.fn(() => ['gc', 'gg']);
+    const { A, B } = await pairUp(r, {}, { propose: proposeB });
+    await playOut(r, [A, B], TO_SCORING);
+    expect(proposeB).toHaveBeenCalledTimes(1);
+    for (const s of [A, B]) expect(s.view.scoring).toMatchObject({ rev: 1, dead: ['gc', 'gg'] });
+    expect(A.view.lastToggle).toBeNull();
+  });
+
+  it('passes propose to the controller, over controllerOptions.propose', async () => {
+    const r = rig();
+    const seen: RoomControllerOptions[] = [];
+    const mine = () => ['aa'];
+    const other = () => ['bb'];
+    const make = (o: RoomControllerOptions): RoomControllerApi => {
+      seen.push(o);
+      return createRoomController(o);
+    };
+    r.session({ createController: make, propose: mine, controllerOptions: { propose: other } });
+    r.session({ createController: make, controllerOptions: { propose: other } });
+    await r.settle();
+    expect(seen[0].propose).toBe(mine);
+    expect(seen[1].propose).toBe(other);
   });
 });
