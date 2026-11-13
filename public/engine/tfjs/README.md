@@ -12,4 +12,4 @@ The threaded build needs `SharedArrayBuffer` (cross-origin isolation), which Git
 
 **Source:** <https://github.com/tensorflow/tfjs> (npm `@tensorflow/tfjs-backend-wasm@4.22.0`).
 
-**Licence:** Apache License 2.0, <https://github.com/tensorflow/tfjs/blob/master/LICENSE>. Copyright Google LLC. Not covered by Zigo's MIT licence.
+**Licence:** Apache License 2.0, Copyright Google LLC: see `LICENSE` in this folder (the unmodified licence text; upstream <https://github.com/tensorflow/tfjs/blob/master/LICENSE>). Not covered by Zigo's MIT licence.

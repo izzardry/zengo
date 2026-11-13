@@ -240,14 +240,22 @@ async function newContext(browser, size, theme, seed) {
   return context;
 }
 
-/** Every visible Accept button of the scoring bar (two face to face in pass-and-play, DESIGN 8.4). */
+/**
+ * The scoring bar's Accept buttons (`data-action="accept"`, see ScoringBar.tsx): face to face in
+ * pass-and-play each side has its own, named "Accept the count for Black" and so on (DESIGN 8.4),
+ * so they are found by their data attribute and not by an accessible name starting with "Accept".
+ */
+function acceptButtons(page) {
+  return page.locator('button[data-action="accept"]:visible');
+}
+
+/** Clicks every visible Accept that has not been pressed yet, one at a time (the bar re-renders). */
 async function acceptAll(page) {
-  const buttons = page.getByRole('button', { name: /^Accept/ });
-  await buttons.first().waitFor({ state: 'visible', timeout: 15_000 });
-  const n = await buttons.count();
-  for (let i = 0; i < n; i++) {
-    const b = buttons.nth(i);
-    if (await b.isVisible().catch(() => false)) await b.click().catch(() => {});
+  const open = page.locator('button[data-action="accept"][data-accepted="false"]:visible');
+  await acceptButtons(page).first().waitFor({ state: 'visible', timeout: 15_000 });
+  for (let i = 0; i < 4 && (await open.count()) > 0; i++) {
+    await open.first().click();
+    await page.waitForTimeout(150);
   }
 }
 
@@ -262,7 +270,8 @@ async function openStored(page, code, label) {
   const pill = page.getByRole('button', { name: label, exact: true });
   await pill.waitFor({ state: 'visible', timeout: 15_000 });
   await pill.click();
-  await page.getByRole('toolbar').waitFor({ state: 'visible', timeout: 30_000 });
+  // A game in scoring shows the scoring bar where the toolbar was (StatusBar.tsx), so either counts.
+  await page.getByRole('toolbar').or(acceptButtons(page)).first().waitFor({ state: 'visible', timeout: 30_000 });
 }
 
 /* ---------------------------------------------------------------------------------------------- */
@@ -315,7 +324,7 @@ const SCREENS = {
 
   async scoring(page) {
     await openStored(page, 'SCORE9', 'Resume');
-    await page.getByRole('button', { name: /^Accept/ }).first().waitFor({ timeout: 15_000 });
+    await acceptButtons(page).first().waitFor({ timeout: 15_000 });
     await settle(page, 900);
   },
 
