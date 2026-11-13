@@ -431,7 +431,8 @@ export function StatusBar(props: StatusBarProps) {
           className={cn(
             'fixed z-chrome',
             GLASS,
-            'transition-[opacity,transform] duration-chrome ease-out',
+            // `top` too: the landscape rail moves up smoothly while toasts show below it.
+            'transition-[opacity,transform,top] duration-chrome ease-out',
             landscape
               ? cn(
                   'top-[var(--rail-top)] right-[max(1rem,env(safe-area-inset-right))]',

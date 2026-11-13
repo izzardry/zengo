@@ -13,9 +13,25 @@
  */
 
 /*
- * Toasts in mobile landscape (components/ui/sonner.tsx): bottom right beside the board, also on
- * phones of 600 px or less, where sonner would otherwise stretch them across the screen.
+ * Toast text breaks only between words: sonner's `overflow-wrap: anywhere` let a narrow title column
+ * break inside words, one fragment per line. A system toast's action (`Connect manually`, `Reload`)
+ * moves under the text, at the right, when the text would get narrower than 8rem, as the request
+ * toasts do (room/RequestToasts.tsx).
  */
+[data-sonner-toaster] [data-sonner-toast] { overflow-wrap: break-word; flex-wrap: wrap; row-gap: 0.5rem; }
+[data-sonner-toaster] [data-sonner-toast] > [data-content] { flex: 1 1 8rem; min-width: 8rem; }
+
+/*
+ * Toasts in mobile landscape (components/ui/sonner.tsx): bottom right beside the board, also on
+ * phones of 600 px or less, where sonner would otherwise stretch them across the screen. The column
+ * there is 160–250 px wide and about 100 px tall below the right rail, so they are compact (text-xs,
+ * py-2 px-3, like the rail's other text): a two-line message with an action then takes 84 px, and
+ * the rail moves up for the rest (`RAIL_TOASTS_VAR`).
+ */
+[data-sonner-toaster].zigo-toaster-rail [data-sonner-toast] { padding: 0.5rem 0.75rem; font-size: 0.75rem; row-gap: 0.375rem; }
+[data-sonner-toaster].zigo-toaster-rail [data-request] { font-size: 0.75rem; line-height: 1rem; }
+/* At the narrowest (160 px) a long action label (`MANUELL VERBINDEN`) still fits inside the frame. */
+[data-sonner-toaster].zigo-toaster-rail [data-sonner-toast] [data-button] { padding-left: 6px; padding-right: 6px; letter-spacing: 0.025em; max-width: 100%; }
 @media (max-width: 600px) {
   [data-sonner-toaster].zigo-toaster-rail { left: auto; width: var(--width); }
   [data-sonner-toaster].zigo-toaster-rail [data-sonner-toast] { width: var(--width); }

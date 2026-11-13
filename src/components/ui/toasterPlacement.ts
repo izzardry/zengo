@@ -17,6 +17,11 @@
  * The start screen has no toolbar but a footer of selectors and pills: while it shows, the footer
  * publishes the bottom offset that keeps a toast off it in `START_TOAST_VAR` (`StartFooter`), which
  * then replaces the portrait offset (phones and tablets) and the landscape one.
+ *
+ * In mobile landscape the space below the centered right rail (toolbar or scoring bar) holds a
+ * one-line toast, but not a message with an action, which wraps to three or four rows there. So
+ * while toasts show beside the landscape board, the Toaster publishes how much of the screen's
+ * bottom they take in `RAIL_TOASTS_VAR`, and the rail moves up by that much (never above Help).
  */
 import type { ComponentProps, CSSProperties } from "react";
 import type { Toaster as Sonner } from "sonner";
@@ -34,6 +39,12 @@ export const BOTTOM_CHROME_VAR = "--zigo-bottom-chrome";
  * footer while it shows (`startToastBottomPx`); absent in game.
  */
 export const START_TOAST_VAR = "--zigo-start-toast-bottom";
+/**
+ * CSS variable (on `<html>`) with the height the toasts take at the bottom right in mobile landscape
+ * (their stack, the bottom offset and a gap), set by the Toaster while toasts show there
+ * (`railToastsValue`); absent otherwise. The right rail stays above it (`railVars`, `ScoringBar`).
+ */
+export const RAIL_TOASTS_VAR = "--zigo-rail-toasts";
 /** The portrait toolbar's height above its inset: 44 px buttons + py-1.5 + border. */
 export const TOOLBAR_HEIGHT_PX = 58;
 
@@ -57,6 +68,25 @@ export const TOAST_BOTTOM_PORTRAIT = `var(${START_TOAST_VAR}, max(${ABOVE_TOOLBA
 /** Landscape bottom offset: the bottom inset beside the board, or what the start footer publishes. */
 export const TOAST_BOTTOM_LANDSCAPE = `var(${START_TOAST_VAR}, max(0.75rem, env(safe-area-inset-bottom)))`;
 const RIGHT = "max(1rem, env(safe-area-inset-right))";
+/** Sonner's gap between stacked toasts and the number it shows at once (its defaults). */
+export const TOAST_GAP_PX = 14;
+export const TOAST_VISIBLE = 3;
+
+/**
+ * Height in px of sonner's toast stack, the front toast first: collapsed, the toasts behind the
+ * front one peek out a gap each; expanded (mouse over it), they stand one above the other.
+ */
+export function toastStackPx(heights: readonly number[], expanded: boolean): number {
+  const shown = heights.slice(0, TOAST_VISIBLE);
+  if (shown.length === 0) return 0;
+  const gaps = (shown.length - 1) * TOAST_GAP_PX;
+  return (expanded ? shown.reduce((sum, h) => sum + h, 0) : shown[0]) + gaps;
+}
+
+/** `RAIL_TOASTS_VAR` for a toast stack `stackPx` high: the stack, its bottom offset and a 0.5rem gap. */
+export function railToastsValue(stackPx: number): string {
+  return `calc(${Math.ceil(stackPx)}px + ${TOAST_BOTTOM_LANDSCAPE} + 0.5rem)`;
+}
 /** Space between the board and a toast beside it (the frame's 4 px padding included). */
 const BESIDE_GAP = "0.75rem";
 /** Landscape: the board leaves (100vw − board) / 2 on each side; the toast takes the right one. */

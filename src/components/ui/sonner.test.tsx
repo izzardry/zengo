@@ -1,10 +1,12 @@
 import { act, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { I18nProvider } from '@/lib/i18n';
 import { Toaster, toast } from './sonner';
 import {
   BOTTOM_CHROME_VAR,
   MIN_BESIDE_PX,
+  RAIL_TOASTS_VAR,
+  TOAST_BOTTOM_LANDSCAPE,
   TOAST_BOTTOM_CAP,
   TOAST_BOTTOM_PORTRAIT,
   TOAST_SIDE_PHONE,
@@ -14,6 +16,8 @@ import {
   besideWidthPx,
   portraitBoardPx,
   portraitToastBottomPx,
+  railToastsValue,
+  toastStackPx,
   toasterPlacement,
 } from './toasterPlacement';
 
@@ -166,6 +170,62 @@ describe('Toaster', () => {
       expect(toaster().style.getPropertyValue('--width')).toBe(TOAST_WIDTH_BESIDE);
     } finally {
       act(() => resize(size.w, size.h));
+    }
+  });
+
+  it('measures sonner’s stack: the front toast, then a 14 px gap for each toast peeking out behind it', () => {
+    expect(toastStackPx([], false)).toBe(0);
+    expect(toastStackPx([84], false)).toBe(84);
+    expect(toastStackPx([84, 48], false)).toBe(98);
+    // Sonner shows three at most.
+    expect(toastStackPx([84, 48, 48, 48], false)).toBe(112);
+    // Expanded, they stand one above the other.
+    expect(toastStackPx([84, 48], true)).toBe(84 + 14 + 48);
+    expect(railToastsValue(83.4)).toBe(`calc(84px + ${TOAST_BOTTOM_LANDSCAPE} + 0.5rem)`);
+  });
+
+  it('in mobile landscape publishes the height its toasts take, so the right rail moves up above them', async () => {
+    const size = { w: window.innerWidth, h: window.innerHeight };
+    const resize = (w: number, h: number) => {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: w });
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: h });
+      window.dispatchEvent(new Event('resize'));
+    };
+    // jsdom has no layout: every toast is 84 px high (a two-line message with an action at 844×390).
+    const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')!;
+    Object.defineProperty(HTMLElement.prototype, 'offsetHeight', { configurable: true, get: () => 84 });
+    const lift = () => document.documentElement.style.getPropertyValue(RAIL_TOASTS_VAR);
+    const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+    try {
+      act(() => resize(844, 390));
+      const view = renderToaster();
+      expect(lift()).toBe('');
+      act(() => {
+        toast('Could not reach the connection service.', { id: 'rail-lift', duration: Infinity });
+      });
+      await screen.findByText('Could not reach the connection service.');
+      await act(frame);
+      expect(lift()).toBe(railToastsValue(84));
+      // Gone: the rail returns to the middle.
+      act(() => {
+        toast.dismiss('rail-lift');
+      });
+      await vi.waitFor(() => expect(lift()).toBe(''), { timeout: 2000 });
+      act(() => {
+        toast('Opponent joined', { id: 'rail-lift-2', duration: Infinity });
+      });
+      await screen.findByText('Opponent joined');
+      await act(frame);
+      expect(lift()).not.toBe('');
+      // Portrait has no right rail: nothing is published.
+      act(() => resize(390, 844));
+      await act(frame);
+      expect(lift()).toBe('');
+      view.unmount();
+    } finally {
+      Object.defineProperty(HTMLElement.prototype, 'offsetHeight', offsetHeight);
+      act(() => resize(size.w, size.h));
+      document.documentElement.style.removeProperty(RAIL_TOASTS_VAR);
     }
   });
 });

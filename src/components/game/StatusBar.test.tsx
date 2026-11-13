@@ -1,7 +1,7 @@
 import { act, fireEvent, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { StatusBar, type StatusBarProps } from './StatusBar';
-import { toolbarLayout } from './toolbarLayout';
+import { RAIL_TOP, railVars, toolbarLayout } from './toolbarLayout';
 import { renderWithI18n } from './testUtils';
 
 function props(over: Partial<StatusBarProps> = {}): StatusBarProps {
@@ -336,6 +336,31 @@ describe('StatusBar layout', () => {
     expect(screen.getByRole('button', { name: /seating|face|side/i }).closest('.col-span-2')).not.toBeNull();
     // Rooms have four buttons: still one column when the screen is tall enough.
     expect(toolbarLayout([1, 1, 2], true).column.height).toBeLessThan(toolbarLayout([2, 3, 2], true).column.height);
+  });
+
+  it('the landscape rail is centered, and moves up (no higher than below Help) while toasts show below it', () => {
+    // `--rail-top` in px for a screen `h` high, with the toasts' published height (RAIL_TOASTS_VAR).
+    const top = (railHeight: number, h: number, toasts?: number) => {
+      const js = railVars({ height: railHeight })['--rail-top']
+        .replace(RAIL_TOP, '76')
+        .replace(/var\(--zigo-rail-toasts, 0px\)/, String(toasts ?? 0))
+        .replace(/100%/g, String(h))
+        .replace(/50%/g, String(h / 2))
+        .replace(/(\d+(?:\.\d+)?)px/g, '$1')
+        .replace(/calc\(/g, '(')
+        .replace(/max\(/g, 'Math.max(')
+        .replace(/min\(/g, 'Math.min(');
+      return Function(`return ${js}`)() as number;
+    };
+    // 844×390, a room's two-column rail (172 px): centered without toasts.
+    expect(top(172, 390)).toBe(109);
+    // A one-line toast (48 px + 12 px offset + 8 px gap) fits below the centered rail.
+    expect(top(172, 390, 68)).toBe(109);
+    // A three-line message with its action (102 px): the rail moves up to clear it.
+    expect(top(172, 390, 102 + 20)).toBe(390 - 172 - 122);
+    expect(390 - 172 - 122).toBeGreaterThanOrEqual(76);
+    // 740×360: never above Help.
+    expect(top(172, 360, 102 + 20)).toBe(76);
   });
 
   it('every toolbar button is a 44 px target; only the spacing shrinks (DESIGN 14.1)', () => {

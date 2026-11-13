@@ -159,7 +159,13 @@ export function ScoringBar({
       className={cn(
         'fixed z-chrome flex items-center gap-2 transition-[opacity,transform] duration-chrome ease-out',
         landscape
-          ? 'flex-col-reverse top-1/2 -translate-y-1/2 right-[max(1rem,env(safe-area-inset-right))]'
+          ? cn(
+              'flex-col-reverse top-1/2 right-[max(1rem,env(safe-area-inset-right))]',
+              // Centered (-50% of its height), but moved up while toasts show below it, so its bottom
+              // stays above the height they publish (RAIL_TOASTS_VAR, components/ui/toasterPlacement.ts);
+              // never above Help (RAIL_TOP: 1.5rem or the top inset, + 2.75rem + 0.5rem).
+              'translate-y-[min(-50%,max(calc(max(1.5rem,env(safe-area-inset-top))_+_3.25rem_-_50dvh),calc(50dvh_-_100%_-_var(--zigo-rail-toasts,0px))))]',
+            )
           : 'flex-col left-1/2 -translate-x-1/2 bottom-[max(1rem,env(safe-area-inset-bottom))] w-max max-w-[calc(100vw-1rem)]',
         visible ? 'opacity-100' : 'opacity-0 pointer-events-none',
         landscape ? (visible ? 'translate-x-0' : 'translate-x-4') : visible ? 'translate-y-0' : 'translate-y-4',

@@ -1,6 +1,6 @@
 import { fireEvent, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { BOTTOM_CHROME_VAR } from '@/components/ui/toasterPlacement';
+import { BOTTOM_CHROME_VAR, RAIL_TOASTS_VAR } from '@/components/ui/toasterPlacement';
 import { ScoringAccept, ScoringBar, type ScoringBarProps } from './ScoringBar';
 import { renderWithI18n } from './testUtils';
 
@@ -107,6 +107,15 @@ describe('ScoringBar (DESIGN 8.4)', () => {
     expect(screen.getByTestId('scoring-bar').className).toContain('bottom-[max(1rem');
     rerender(<ScoringBar {...props()} landscape />);
     expect(screen.getByTestId('scoring-bar').className).toContain('right-[max(1rem');
+  });
+
+  it('landscape: centered, but moved up above the toasts beside the board (their published height)', () => {
+    renderWithI18n(<ScoringBar {...props()} landscape />);
+    const cls = screen.getByTestId('scoring-bar').className;
+    expect(cls).toContain('top-1/2');
+    expect(cls).toContain('translate-y-[min(-50%,');
+    expect(cls).toContain(`var(${RAIL_TOASTS_VAR},0px)`);
+    expect(cls).not.toContain('-translate-y-1/2');
   });
 
   it('hides with the chrome and becomes inert', () => {

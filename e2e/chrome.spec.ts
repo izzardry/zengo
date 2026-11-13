@@ -6,9 +6,12 @@
  * - Mobile landscape: the left rail (far strip, info pill, near strip) fits below the Back button
  *   and above the bottom inset, in play with prisoners and komi and in face-to-face scoring with
  *   the score line, at 844×390 and 667×375.
+ * - Mobile landscape rooms: the calm failure message with `Connect manually` (broker unreachable)
+ *   keeps its words whole and leaves the right rail's buttons free, in play and in scoring, at
+ *   844×390 and 740×360.
  */
 import { test, expect, type Page } from '@playwright/test';
-import { encodeMoves } from '../src/lib/zigo';
+import { encodeMoves, fromGtp } from '../src/lib/zigo';
 import { cell, sgf, skipTutorial, stage } from './helpers';
 
 /** 9×9 walls on E and F, a white invader at B5, then two passes: the link opens in scoring. */
@@ -104,5 +107,81 @@ for (const [width, height] of [
       await expect(page.locator('[data-part="score-side"]')).toHaveCount(4);
       await expectRailFits(page, height);
     });
+  });
+}
+
+/* ---- mobile landscape: the room's failure toast and the right rail ---------------------------- */
+
+/** Seat 0 of a saved room whose game is in play, or in scoring after two passes. */
+function roomSeed(code: string, scoring: boolean) {
+  const gtps = scoring ? [...WALLS9, 'pass', 'pass'] : WALLS9;
+  const moves = gtps.map((g) => (g === 'pass' ? 'tt' : fromGtp(g, 9))).join('');
+  const game = {
+    id: `${code}.1`, code, mode: 'room', color: 'B', size: 9, rules: 'area', handicap: 0, tc: null,
+    moves, ms: Array<number>(gtps.length).fill(3000), assisted: false, room: { n: 1, epoch: 0 },
+    ...(scoring ? { scoring: { round: 1, rev: 1, dead: [fromGtp('B5', 9)], accepted: [0, 0] } } : {}),
+  };
+  const room = { code, key: 'q2Zt8vXcR1mK0aBdE3fGhw', seat: 0, score: [0, 0], games: [game.id] };
+  return { game, room };
+}
+
+type Box = { x: number; y: number; width: number; height: number };
+
+for (const [width, height] of [
+  [844, 390],
+  [740, 360],
+] as const) {
+  test.describe(`${width}×${height}: the room's failure toast beside the board`, () => {
+    phone(width, height);
+
+    for (const scoring of [false, true]) {
+      test(`keeps its words whole and the right rail free ${scoring ? 'in scoring' : 'in play'}`, async ({ context, page }) => {
+        const code = `TR${scoring ? 'S' : 'P'}${width}`;
+        const seed = roomSeed(code, scoring);
+        await context.addInitScript((s) => {
+          if (sessionStorage.getItem('seeded')) return;
+          sessionStorage.setItem('seeded', '1');
+          const now = Date.now();
+          localStorage.setItem('zigo:donation-shown', 'true');
+          localStorage.setItem('zigo:install-dismissed', 'true');
+          localStorage.setItem('zigo:opponent', JSON.stringify({ mode: 'room' }));
+          localStorage.setItem('zigo:games', JSON.stringify([{ ...s.game, createdAt: now - 3600e3, lastPlayedAt: now - 60e3 }]));
+          localStorage.setItem('zigo:rooms', JSON.stringify([{ ...s.room, createdAt: now - 3600e3, lastSeenAt: now - 60e3 }]));
+        }, seed);
+        // Nothing leaves the machine: the broker is blocked, so the app shows the calm failure message.
+        await context.routeWebSocket(/peerjs/, (ws) => ws.close());
+        await context.route(/peerjs\.com/, (route) => route.abort());
+
+        await page.goto(`./#/?s=${code}`);
+        await page.getByRole('button', { name: /^(Resume|Start)$/ }).click();
+        const toast = page.locator('[data-sonner-toast]').filter({ hasText: 'Could not reach the connection service.' });
+        await expect(toast).toBeVisible({ timeout: 30_000 });
+        await expect(toast.getByRole('button', { name: 'Connect manually' })).toBeVisible();
+
+        // Whole words: two lines at most in the 186–223 px column (it broke into eleven fragments).
+        const title = (await toast.locator('[data-title]').boundingBox())!;
+        expect(title.height).toBeLessThanOrEqual(40);
+
+        // What must stay reachable on the right rail: every toolbar button, or Undo, Resume and Accept.
+        const targets = scoring
+          ? page.getByTestId('scoring-bar').getByRole('group').getByRole('button')
+          : page.getByRole('toolbar').getByRole('button');
+        await expect(targets.first()).toBeVisible();
+        // The toast slides in and the rail moves up, both animated: poll until the toast is fully on
+        // screen with every target above its top edge.
+        await expect(toast).toHaveAttribute('data-mounted', 'true');
+        await expect
+          .poll(
+            async () => {
+              const t = (await toast.boundingBox())!;
+              const boxes = (await Promise.all((await targets.all()).map((b) => b.boundingBox()))) as Box[];
+              const covered = Math.max(...boxes.map((b) => b.y + b.height)) - t.y;
+              return Math.max(covered, t.y + t.height - height, t.x + t.width - width);
+            },
+            { timeout: 5_000 },
+          )
+          .toBeLessThanOrEqual(0);
+      });
+    }
   });
 }

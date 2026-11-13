@@ -4,6 +4,8 @@
  * where one column would not fit below Help with room left for toasts.
  */
 
+import { RAIL_TOASTS_VAR } from '@/components/ui/toasterPlacement';
+
 /** Top of the landscape rail: below Help (top 1.5rem, 44 px on touch) with a small gap. */
 export const RAIL_TOP = 'calc(max(1.5rem, env(safe-area-inset-top)) + 2.75rem + 0.5rem)';
 
@@ -69,7 +71,13 @@ export function toolbarLayout(groupSizes: readonly number[], landscape: boolean)
   };
 }
 
-/** The rail is centered when there is room, but never higher than just below Help. */
+/**
+ * The rail is centered when there is room, but never higher than just below Help. While toasts show
+ * beside the board they publish the height they take at the bottom (`RAIL_TOASTS_VAR`), and the
+ * rail moves up to stay clear of them, again no higher than below Help.
+ */
 export function railVars(size: RailSize): Record<string, string> {
-  return { '--rail-top': `max(${RAIL_TOP}, calc(50% - ${size.height / 2}px))` };
+  const centered = `calc(50% - ${size.height / 2}px)`;
+  const aboveToasts = `calc(100% - ${size.height}px - var(${RAIL_TOASTS_VAR}, 0px))`;
+  return { '--rail-top': `max(${RAIL_TOP}, min(${centered}, ${aboveToasts}))` };
 }
