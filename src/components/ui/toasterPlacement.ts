@@ -13,6 +13,10 @@
  *
  * "Above the bottom chrome" means above the toolbar, or above the scoring bar and its note while
  * dead stones are marked: the scoring bar publishes its measured height in `BOTTOM_CHROME_VAR`.
+ *
+ * The start screen has no toolbar but a footer of selectors and pills: while it shows, the footer
+ * publishes the bottom offset that keeps a toast off it in `START_TOAST_VAR` (`StartFooter`), which
+ * then replaces the portrait offset (phones and tablets) and the landscape one.
  */
 import type { ComponentProps, CSSProperties } from "react";
 import type { Toaster as Sonner } from "sonner";
@@ -25,6 +29,11 @@ type ToasterProps = ComponentProps<typeof Sonner>;
  * is taller than the toolbar: set by the scoring bar with its note (`ScoringBar`).
  */
 export const BOTTOM_CHROME_VAR = "--zigo-bottom-chrome";
+/**
+ * CSS variable (on `<html>`) with the toasts' bottom offset on the start screen, set by the start
+ * footer while it shows (`startToastBottomPx`); absent in game.
+ */
+export const START_TOAST_VAR = "--zigo-start-toast-bottom";
 /** The portrait toolbar's height above its inset: 44 px buttons + py-1.5 + border. */
 export const TOOLBAR_HEIGHT_PX = 58;
 
@@ -42,9 +51,11 @@ export const TOAST_BOTTOM_CAP = `calc(50dvh - ${BOARD_SIZE_PORTRAIT} / 2 - 88px)
  * Portrait bottom offset: above the bottom chrome (the toolbar, or the scoring bar with its note),
  * but never so high that the toast reaches the board where only the note is below it (a 320×568
  * phone has no free row there: the toast then covers the note, never the board), and never lower
- * than above the toolbar.
+ * than above the toolbar. On the start screen the start footer's offset (`START_TOAST_VAR`) applies.
  */
-export const TOAST_BOTTOM_PORTRAIT = `max(${ABOVE_TOOLBAR}, min(${ABOVE_CHROME}, ${TOAST_BOTTOM_CAP}))`;
+export const TOAST_BOTTOM_PORTRAIT = `var(${START_TOAST_VAR}, max(${ABOVE_TOOLBAR}, min(${ABOVE_CHROME}, ${TOAST_BOTTOM_CAP})))`;
+/** Landscape bottom offset: the bottom inset beside the board, or what the start footer publishes. */
+export const TOAST_BOTTOM_LANDSCAPE = `var(${START_TOAST_VAR}, max(0.75rem, env(safe-area-inset-bottom)))`;
 const RIGHT = "max(1rem, env(safe-area-inset-right))";
 /** Space between the board and a toast beside it (the frame's 4 px padding included). */
 const BESIDE_GAP = "0.75rem";
@@ -103,7 +114,7 @@ export type ToasterPlacement = Pick<ToasterProps, "position" | "offset" | "mobil
 export function toasterPlacement(landscape: boolean, viewport: Viewport = { width: 1024, height: 768 }): ToasterPlacement {
   const layout = toastLayout(landscape, viewport);
   if (layout === "rail") {
-    const offset = { bottom: "max(0.75rem, env(safe-area-inset-bottom))", right: RIGHT, left: "auto" };
+    const offset = { bottom: TOAST_BOTTOM_LANDSCAPE, right: RIGHT, left: "auto" };
     return {
       layout,
       position: "bottom-right",

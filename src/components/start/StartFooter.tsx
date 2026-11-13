@@ -6,9 +6,13 @@
  * does, so the short viewport keeps the board clear. The pills row may wrap to two lines on a
  * 320 px phone; the footer is fixed, so the board's layout box never moves, and `BoardPreview`
  * shrinks the blurred preview to the space that is left (`previewFit`).
+ *
+ * While it shows, it tells the toasts where to sit so they never cover it (`startToastRoom.ts`):
+ * in the chevron's row, or above the footer when that row is missing.
  */
 import { useRef, type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
+import { useStartToastRoom } from './startToastRoom';
 import { useInert } from './useInert';
 
 export interface StartFooterProps {
@@ -30,6 +34,7 @@ export interface StartFooterProps {
 export function StartFooter({ visible, landscape = false, selector, pills, status, extra, chevron, className }: StartFooterProps) {
   const ref = useRef<HTMLDivElement>(null);
   useInert(ref, !visible);
+  useStartToastRoom(ref, visible, landscape);
   return (
     <div
       ref={ref}
@@ -55,7 +60,11 @@ export function StartFooter({ visible, landscape = false, selector, pills, statu
           never jump when it appears (a hold on a pill would slip off it). */}
       {status && <div className={cn(!landscape && 'mt-2 min-h-6')}>{status}</div>}
       {extra && <div className={cn(!landscape && 'mt-4')}>{extra}</div>}
-      {chevron && !landscape && <div className="mt-6">{chevron}</div>}
+      {chevron && !landscape && (
+        <div className="mt-6" data-start-toast-free="">
+          {chevron}
+        </div>
+      )}
     </div>
   );
 }
