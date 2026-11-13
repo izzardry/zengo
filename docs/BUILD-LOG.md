@@ -18,7 +18,7 @@ The run's memory (PLAN.md section 1, rule 5). Updated after every package and ev
 
 The final gate, as re-run by the orchestrator at `bc271fc`: `npm run lint` clean, `npm run typecheck` clean, `npm test` 81 files / 2054 tests, `npm run build` ok (33 precache entries; only the chunk-size warning), chess grep 0 hits, `caffeinate -i npx playwright test` 55/55 (smoke 5, chrome 9, m1 22, m2 13, m3 6).
 
-### After the run: computer failed in Safari (fixed 2026-11-13, not yet confirmed in Safari)
+### After the run: computer failed in Safari (fixed 2026-11-13 in `d8b201a`, confirmed by the owner in Safari on the Mac)
 
 **Actual cause (found with the owner's Safari console, second fix):**
 - The TF.js backend chunks imported shared code from the engine worker's entry file. Chrome reuses the running entry module; Safari evaluates it a second time inside the worker.
@@ -42,7 +42,7 @@ Fix:
 Results:
 - Measured in Chromium: first reply about 0.4 s (was about 20 s), WebGPU warm-up 5.3 s down to 0.1 s.
 - The headless test browser reads GPU results in about 300 ms, so there WebGPU correctly takes nothing.
-- Real Safari could not be driven (safaridriver sessions time out), so the owner has to confirm the fix in Safari and on iOS.
+- Real Safari could not be driven (safaridriver sessions timed out even with remote automation on). The owner confirmed `d8b201a` in Safari on the Mac; iOS is still to be confirmed.
 
 ### Switched off by flag
 
