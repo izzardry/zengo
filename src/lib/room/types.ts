@@ -14,6 +14,7 @@ import type {
   RoomNotice,
   RoomSnapshot,
   Rng,
+  Seat,
   Rules,
   Size,
   Store,
@@ -63,10 +64,13 @@ export interface RoomControllerOptions {
   readonly zigo?: ZigoApi;
   /**
    * The scoring proposal of this device's engine (DESIGN 9.5): dead stones for a game that just
-   * entered scoring, or null when there is no engine. Only seat 0 proposes. Default: none (every
-   * stone alive). Milestone 3 wires the engine in here.
+   * entered scoring, or null when the engine has no answer. Sync or async (`createDeadStoneProposer`
+   * in lib/proposal.ts fits). Seat 0 proposes round 1 and ends round 2 with it; seat 1 is asked only
+   * when seat 0 hands the first proposal over because it has none. Leave unset (or null) on a device
+   * without an engine: the other device learns that from `hello`. The answer is always sent as data
+   * (`mark` or `end`); no result is ever computed from it on this device alone (PLAN 7).
    */
-  readonly propose?: ((game: Game) => readonly Point[] | null) | null;
+  readonly propose?: ((game: Game) => Promise<readonly Point[] | null> | readonly Point[] | null) | null;
   /**
    * Monotonic clock for the running turn (DESIGN 9.7). Default `performance.now()`. Pass the same
    * function to `useClock({ now, external: snapshot.clock })`.
@@ -147,6 +151,12 @@ export interface RoomState extends RoomSnapshot {
   readonly canAccept: boolean;
   /** `resume()` would be accepted now: scoring, live. */
   readonly canResume: boolean;
+  /**
+   * While a scoring has no proposal yet (rev 0): the seat whose engine proposal it waits for, as far
+   * as this device knows (seat 1 after seat 0 handed it over; seat 0 in round 2). Null otherwise.
+   * Optional so hand-made snapshots (UI tests) need not set it; the controller always does.
+   */
+  readonly proposing?: Seat | null;
   /** Which requests `ask()` would send now. */
   readonly canAsk: Readonly<Record<RequestKind, boolean>>;
   /** Transport failure including `peer-gone` (a lost channel), which `failure` leaves out. */

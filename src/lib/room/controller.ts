@@ -34,14 +34,30 @@
  * the game context `(n, epoch, len)` and lapse when it changes. `end` carries the same context as an
  * addition so a resignation crossing a move is settled by reconcile.
  *
- * Scoring (DESIGN 9.5), a first cut that milestone 3 extends: the second consecutive pass puts the
- * log in scoring. Seat 0 proposes at once (`mark` rev 1, from the injected `propose`, or every stone
- * alive). Either seat toggles with `mark` (rev + 1, both acceptances cleared); `accept {n, rev}`
- * records a seat's acceptance and both seats on the same rev end the game on each device from the
- * shared dead set. `resume {n, epoch}` drops scoring. A second scoring after a resume (round 2) is
- * ended at once by seat 0 and sent as `end {…, by: 'score', dead}`, which seat 1 adopts as data.
- * Marks are kept offline and settle through `rev` in the reconcile; accept and resume need the
- * opponent connected.
+ * Scoring (DESIGN 9.5): the second consecutive pass puts the log in scoring at rev 0 (nothing
+ * proposed yet).
+ *
+ * - The first proposal (rev 1). Seat 0 asks its injected `propose(game)` (sync or async). With an
+ *   answer it sends `mark {rev: 1, dead}`. Without one (no engine, or the engine gave no answer) it
+ *   hands the proposal to seat 1 when seat 1 has an engine (`hello.engine`, a contract addition):
+ *   it sends `mark {rev: 0, dead: []}`, the hand-over, and seat 1 proposes `mark {rev: 1}` from its
+ *   own engine (every stone alive if that fails too). When seat 1 has no engine either, seat 0 marks
+ *   every stone alive at once. While seat 0 does not know (offline since load), it decides when the
+ *   opponent is back. Seat 1 never proposes on its own, so the two first proposals cannot cross.
+ * - Toggles: `mark` with rev + 1, both acceptances cleared. Live marks, accepts and resumes go
+ *   through sync's `applyMarkMsg`, `applyAcceptMsg` and `applyResumeMsg` (rule 6: two toggles of the
+ *   same rev settle on seat 0's dead stones at rev + 1, on both devices, without a toast).
+ * - `accept {n, rev}`: both seats on the same rev end the game on each device from the shared dead
+ *   set. `resume {n, epoch}` drops scoring; the next scoring is round 2, which seat 0 ends at once
+ *   from its proposal (every stone alive without one) and sends as `end {…, by: 'score', dead}`;
+ *   seat 1 adopts it as data after checking the claimed result against the count of those stones.
+ *   No device ever computes a result from its own engine output (PLAN 7).
+ * - Lost scoring messages: after sending a mark, accept, resume or end, a device probes every
+ *   `resendMs` with `head {probe: true}` (a contract addition) until a `head` from the other side
+ *   shows the same hash. The other side answers every probe with its own `head`, and the normal
+ *   reconcile settles any difference. A hand-over is sent again until seat 1's proposal arrives.
+ * - Marks are kept offline and settle through `rev` in the reconcile; accept and resume need the
+ *   opponent connected (DESIGN 9.3).
  *
  * Clocks (DESIGN 9.7): the running turn is `turnUsed + (now - turnStart)`. A disconnect pauses it
  * (timed games; in untimed games this device's own turn keeps counting because it may move
@@ -91,12 +107,16 @@ import type {
 } from '../types';
 import { PROTOCOL_VERSION } from '../types';
 import zigoDefault, { makeSettings, normalizeHandicap, parseTc, PASS } from '../zigo';
+import { budgetMs } from '../clock';
 import { defaultTimers, type RoomTransport, type Timers, type TransportFailureKind, type TransportRole } from '../transport/common';
 import {
-  acceptLog,
+  acceptMarking,
   appendPly,
+  applyAcceptMsg,
+  applyMarkMsg,
   applyMoveMsg,
-  bothAccepted,
+  applyResumeMsg,
+  applyScoredEnd,
   colorOf,
   currentLog,
   DEFAULT_LOG_SETTINGS,
@@ -104,6 +124,7 @@ import {
   gamePoints,
   generateKey,
   generateNonce,
+  hashLog,
   isPly,
   isScoring,
   isValidKey,
@@ -118,12 +139,10 @@ import {
   proveSeat,
   reconcile,
   rematchLog,
-  resumeLog,
   roomGameId,
   roomScore,
   roundTwoEnd,
   savedToLog,
-  scoreEnd,
   seatToMove,
   sortLogs,
   takebackLog,
@@ -167,7 +186,44 @@ type EndOut = EndMsg & { epoch?: number; len?: number };
  * length (`len`), so a collision of two provisional rooms is settled by the game, not by the
  * transport role.
  */
-type HelloOut = HelloMsg & { open?: boolean; born?: number; len?: number };
+type HelloOut = HelloMsg & { open?: boolean; born?: number; len?: number; engine?: boolean };
+
+/**
+ * `head` as this controller sends it (contract addition): `probe` asks the other side to answer
+ * with its own `head`, so a lost scoring message or `end` shows up as a hash difference and the
+ * reconcile settles it without waiting for a reconnect.
+ */
+type HeadOut = HeadMsg & { probe?: boolean };
+
+/** What the injected engine proposal may return (DESIGN 9.5): dead stones, or null = no engine. */
+type ProposalResult = readonly Point[] | null;
+type Proposer = (game: Game) => Promise<ProposalResult> | ProposalResult;
+
+/**
+ * The first proposal of a scoring (rev 0) as this device sees it.
+ * - `engine`: this device's `propose` is running (seat 0; seat 1 after a hand-over; seat 0 in round 2).
+ * - `deferred`: seat 0 has no proposal and does not yet know whether seat 1 has an engine.
+ * - `handover`: seat 0 handed the proposal to seat 1 and waits for its `mark` rev 1.
+ */
+interface ProposalState {
+  key: string;
+  state: 'engine' | 'deferred' | 'handover';
+}
+
+/** Identifies one scoring of one game position: a proposal is only used for the scoring it was made for. */
+function scoringKey(log: GameLog & { scoring: { round: number } }): string {
+  return `${log.n}|${log.epoch}|${log.plies.length}|${log.scoring.round}`;
+}
+
+function isThenable<T>(x: unknown): x is PromiseLike<T> {
+  return !!x && (typeof x === 'object' || typeof x === 'function') && typeof (x as { then?: unknown }).then === 'function';
+}
+
+function sameResult(a: unknown, b: unknown): boolean {
+  const x = a as Partial<EndMsg['result']> | null | undefined;
+  const y = b as Partial<EndMsg['result']> | null | undefined;
+  return !!x && !!y && x.winner === y.winner && x.by === y.by && (x.margin ?? null) === (y.margin ?? null);
+}
 
 /**
  * Whether this device's provisional room beats the other side's in a collision of two open rooms:
@@ -203,13 +259,13 @@ function timeout(color: Color): LogEnd {
 }
 
 /**
- * Time left on the running turn of the side to move after `turnMs` (DESIGN 11): Fischer's remaining
- * time, or byo-yomi's main time plus every period left (a move inside a period keeps it).
+ * Time left on the running turn of the side to move after `turnMs` (DESIGN 11, 9.7): derived from
+ * the ply log alone (`clocks`) and the running turn, with lib/clock's `budgetMs`: Fischer's
+ * remaining time, or byo-yomi's main time plus every period left (a move inside a period keeps it).
+ * The flag falls at zero or below, the same instant as lib/clock's `flagged`.
  */
 export function timeLeft(api: ZigoApi, game: Game, tc: NonNullable<TimeControl>, turnMs: number): number {
-  const c = api.clocks(game, tc)[game.turn];
-  const total = tc.kind === 'fischer' ? c.mainMs : c.mainMs + c.periods * c.periodMs;
-  return total - turnMs;
+  return budgetMs(api.clocks(game, tc)[game.turn], tc) - turnMs;
 }
 
 /** Rules-core settings of log settings (default komi). */
@@ -262,7 +318,7 @@ class Controller implements RoomControllerApi {
   private readonly code: string;
   private readonly store: Store;
   private readonly api: ZigoApi;
-  private readonly propose: ((game: Game) => readonly Point[] | null) | null;
+  private readonly propose: Proposer | null;
   private readonly now: () => number;
   private readonly wall: () => number;
   private readonly rng: (() => number) | undefined;
@@ -320,6 +376,14 @@ class Controller implements RoomControllerApi {
 
   /* moves */
   private pending: Pending[] = [];
+
+  /* scoring */
+  /** The first proposal of the current scoring (rev 0), if any is under way. */
+  private proposal: ProposalState | null = null;
+  /** Whether the other device has an engine (its last `hello`); null = not heard this session. */
+  private peerEngine: boolean | null = null;
+  /** A scoring message or an `end` was sent and the other side has not shown the same hash yet. */
+  private probe = false;
 
   /* clock */
   private turnKey = '';
@@ -456,6 +520,7 @@ class Controller implements RoomControllerApi {
     const next = markLog(cur, dead, undefined, this.api);
     if (!next) return false;
     this.setLogs(this.replaceCur(next));
+    this.proposal = null; // a mark by hand replaces any first proposal still under way
     this.sendMark(next);
     this.emit();
     return true;
@@ -465,11 +530,12 @@ class Controller implements RoomControllerApi {
     const cur = this.cur();
     const room = this.room;
     if (!room || !this.canAccept() || !isScoring(cur)) return false;
-    let next = acceptLog(cur, room.seat);
+    // DESIGN 9.5: the game ends when both seats accepted the same rev (sync's acceptMarking).
+    const next = acceptMarking(cur, room.seat, this.api);
     if (!next) return false;
     this.send({ t: 'accept', v: V, n: cur.n, rev: cur.scoring.rev } satisfies AcceptMsg);
-    if (bothAccepted(next)) next = endLog(next, scoreEnd(next, this.api) as LogEnd);
     this.setLogs(this.replaceCur(next));
+    this.startProbe();
     this.emit();
     return true;
   }
@@ -477,10 +543,11 @@ class Controller implements RoomControllerApi {
   resume(): boolean {
     const cur = this.cur();
     if (!this.canResume() || !isScoring(cur)) return false;
-    const next = resumeLog(cur);
-    if (!next) return false;
-    this.setLogs(this.replaceCur(next));
+    const out = applyResumeMsg(cur, { n: cur.n, epoch: cur.epoch });
+    if (out.kind !== 'applied') return false;
+    this.setLogs(this.replaceCur(out.log));
     this.send({ t: 'resume', v: V, n: cur.n, epoch: cur.epoch } satisfies ResumeMsg);
+    this.startProbe();
     this.emit();
     return true;
   }
@@ -533,6 +600,7 @@ class Controller implements RoomControllerApi {
     if (this.closed) return;
     this.recomputeClock();
     this.closed = true;
+    this.proposal = null;
     this.turnUsed = this.elapsed();
     this.turnStart = null;
     for (const h of [this.pingTimer, this.resendTimer, this.flagTimer, this.retryTimer]) if (h !== null) this.timers.clearTimeout(h);
@@ -706,7 +774,15 @@ class Controller implements RoomControllerApi {
     this.refreshGame();
     this.prunePending();
     this.pruneRequests();
+    this.pruneProposal();
     this.recomputeClock();
+  }
+
+  /** A first proposal belongs to one scoring at rev 0; any other change of the game drops it. */
+  private pruneProposal(): void {
+    const p = this.proposal;
+    const cur = this.cur();
+    if (p && (!isScoring(cur) || cur.scoring.rev !== 0 || scoringKey(cur) !== p.key)) this.proposal = null;
   }
 
   private replaceCur(log: GameLog): GameLog[] {
@@ -812,7 +888,8 @@ class Controller implements RoomControllerApi {
     };
     this.bindOnHead = false;
     const room = this.room;
-    const hello: HelloOut = { t: 'hello', v: V, hasKey: !!room, nonce: this.round.nonce };
+    // `engine`: this device can propose dead stones (DESIGN 9.5: seat 1 proposes when seat 0 cannot).
+    const hello: HelloOut = { t: 'hello', v: V, hasKey: !!room, nonce: this.round.nonce, engine: !!this.propose };
     if (room) {
       hello.open = room.lastSeenAt === 0;
       if (hello.open) {
@@ -980,6 +1057,7 @@ class Controller implements RoomControllerApi {
     }
     const r = this.round as Round;
     r.peer = m;
+    this.peerEngine = (m as HelloOut).engine === true;
     if ((m as { v: unknown }).v !== PROTOCOL_VERSION) {
       r.stage = 'version';
       if (!this.versionLocked) {
@@ -1232,6 +1310,9 @@ class Controller implements RoomControllerApi {
       r.quiet = true;
     }
     this.confirmPending(m);
+    const before = this.cur();
+    // The other side holds exactly this copy: whatever this device sent has arrived.
+    if (before && m.n === before.n && m.hash === hashLog(before)) this.probe = false;
     const res = reconcile(this.logs, m, room.seat, this.api);
     if (res.status === 'invalid') this.notify('sync-error');
     if (res.send?.length) this.sendLogs(res.send);
@@ -1250,6 +1331,8 @@ class Controller implements RoomControllerApi {
       }
     }
     if (res.status === 'in-sync') this.markSynced();
+    // A probe asks for this device's head (after any logs above), so the prober can compare.
+    if ((m as HeadOut).probe === true) this.send(makeHead(this.cur()));
     this.emit();
   }
 
@@ -1284,6 +1367,11 @@ class Controller implements RoomControllerApi {
       if (this.requestValid(this.outgoing, this.outgoingCtx, this.room?.seat ?? 0) && sameCtx(this.outgoingCtx, ctxOf(this.cur()))) this.sendAsk();
       else this.clearOutgoing();
     }
+    // The first proposal of a scoring that waited for the opponent (DESIGN 9.5, 9.3).
+    const handedOver = this.proposal?.state === 'handover';
+    this.autoScore();
+    if (handedOver && this.proposal?.state === 'handover') this.sendHandover();
+    if (this.probe) this.armResend();
   }
 
   /* ---- live play ---- */
@@ -1366,8 +1454,25 @@ class Controller implements RoomControllerApi {
         if (this.outgoingAt <= due) this.sendAsk();
         again = true;
       }
+      // Scoring messages and `end` have no ack: compare heads until the other side shows this copy.
+      if (this.probe) {
+        const head: HeadOut = { ...makeHead(this.cur()), probe: true };
+        this.send(head);
+        again = true;
+      }
+      // A lost hand-over is sent again until seat 1's proposal arrives.
+      if (this.proposal?.state === 'handover') {
+        this.sendHandover();
+        again = true;
+      }
       if (again) this.armResend();
     }, this.resendMs);
+  }
+
+  /** Watches the other side's heads until it holds this copy (see `probe`). */
+  private startProbe(): void {
+    this.probe = true;
+    if (this.live) this.armResend();
   }
 
   /* ---- requests ---- */
@@ -1478,6 +1583,7 @@ class Controller implements RoomControllerApi {
     this.setLogs(this.replaceCur(endLog(cur, end)));
     const msg: EndOut = { t: 'end', v: V, n: ctx.n, result: end.result, by: end.by, epoch: ctx.epoch, len: ctx.len };
     if (this.live) this.send(msg);
+    this.startProbe();
     this.emit();
   }
 
@@ -1490,7 +1596,7 @@ class Controller implements RoomControllerApi {
       return;
     }
     if (cur.end) {
-      if (cur.end.by !== m.by || cur.end.result !== m.result) this.sendHead();
+      if (cur.end.by !== m.by || !sameResult(cur.end.result, m.result)) this.sendHead();
       return;
     }
     if ((m.len !== undefined && m.len !== cur.plies.length) || (m.epoch !== undefined && m.epoch !== cur.epoch)) {
@@ -1498,11 +1604,10 @@ class Controller implements RoomControllerApi {
       return;
     }
     if (m.by === 'score') {
-      // Round 2 (DESIGN 9.5): seat 0 scored the game from its proposal; adopt it as data.
-      const next = isScoring(cur) && Array.isArray(m.dead) ? roundTwoEnd(cur, m.dead.filter((p) => typeof p === 'string'), this.api) : null;
-      const r = m.result as Partial<EndMsg['result']> | undefined;
-      const want = next?.end?.result;
-      if (!next || !want || !r || r.winner !== want.winner || r.margin !== want.margin) {
+      // Round 2 (DESIGN 9.5): seat 0 scored the game from its proposal. Its dead stones are data
+      // (this device's engine is never asked); the claimed result must equal their count.
+      const next = room.seat === 1 && Array.isArray(m.dead) ? applyScoredEnd(cur, m.dead, m.result, this.api) : null;
+      if (!next) {
         this.sendHead();
         return;
       }
@@ -1518,46 +1623,102 @@ class Controller implements RoomControllerApi {
   /* ---- scoring (DESIGN 9.5) ---- */
 
   private sendMark(log: GameLog): void {
-    if (!this.live || !log.scoring) return;
+    if (!log.scoring) return;
+    this.startProbe();
+    if (!this.live) return;
     this.send({ t: 'mark', v: V, n: log.n, epoch: log.epoch, rev: log.scoring.rev, dead: [...log.scoring.dead] } satisfies MarkMsg);
   }
 
+  /** Seat 0 hands the first proposal to seat 1: `mark {rev: 0, dead: []}` (DESIGN 9.5). */
+  private sendHandover(): void {
+    const cur = this.cur();
+    const p = this.proposal;
+    if (!this.live || !p || p.state !== 'handover' || !isScoring(cur) || scoringKey(cur) !== p.key || cur.scoring.rev !== 0) return;
+    this.send({ t: 'mark', v: V, n: cur.n, epoch: cur.epoch, rev: 0, dead: [] } satisfies MarkMsg);
+    this.armResend();
+  }
+
   /**
-   * Seat 0's duties when the current game is in scoring: the first proposal (rev 1) of round 1, and
-   * the immediate end of round 2 from its proposal (DESIGN 9.5). Without an engine (`propose` null)
-   * every stone counts alive.
+   * The first proposal of a scoring that has none yet (rev 0), as this seat's duty (DESIGN 9.5):
+   * seat 0 asks its engine for round 1's proposal and for round 2's immediate end; seat 1 proposes
+   * only when seat 0 hands it over (`onHandover`). Called whenever the current log may have entered
+   * scoring and when the opponent comes back.
    */
   private autoScore(): void {
     const room = this.room;
     const cur = this.cur();
-    if (!room || room.seat !== 0 || !isScoring(cur) || this.lockedHard()) return;
-    let dead: readonly Point[] = [];
-    try {
-      dead = this.propose?.(this.game) ?? [];
-    } catch {
-      dead = [];
+    if (!room || !isScoring(cur) || this.lockedHard() || cur.scoring.rev !== 0) {
+      this.proposal = null;
+      return;
     }
+    const key = scoringKey(cur);
+    if (this.proposal && this.proposal.key !== key) this.proposal = null;
+    if (room.seat !== 0) return;
+    if (!this.proposal) this.runProposer(key);
+    else if (this.proposal.state === 'deferred') this.handOver();
+  }
+
+  /** Asks this device's engine for the scoring `key`; sync and async proposers both work. */
+  private runProposer(key: string): void {
+    this.proposal = { key, state: 'engine' };
+    let out: unknown;
+    try {
+      out = this.propose ? this.propose(this.game) : null;
+    } catch {
+      out = null;
+    }
+    if (isThenable<ProposalResult>(out)) {
+      out.then(
+        (v) => this.proposed(key, v),
+        () => this.proposed(key, null),
+      );
+      return;
+    }
+    this.proposed(key, out);
+  }
+
+  /** The engine answered for the scoring `key` (null = no engine or no answer). */
+  private proposed(key: string, raw: unknown): void {
+    const p = this.proposal;
+    const room = this.room;
+    const cur = this.cur();
+    if (this.closed || !p || p.key !== key || p.state !== 'engine' || !room || !isScoring(cur) || cur.scoring.rev !== 0 || scoringKey(cur) !== key) return;
+    const dead = Array.isArray(raw) ? (raw as unknown[]).filter((x): x is Point => typeof x === 'string') : null;
     if (cur.scoring.round === 2) {
-      const next = roundTwoEnd(cur, dead, this.api);
-      if (!next?.end || !next.scoring) return;
-      this.setLogs(this.replaceCur(next));
-      if (this.live) {
-        const msg: EndOut = {
-          t: 'end',
-          v: V,
-          n: next.n,
-          result: next.end.result,
-          by: 'score',
-          dead: [...next.scoring.dead],
-          epoch: next.epoch,
-          len: next.plies.length,
-        };
-        this.send(msg);
-      }
+      // Seat 0 ends round 2 at once: its proposal, or every stone alive (DESIGN 8.4 step 5, 9.5).
+      this.proposal = null;
+      if (room.seat === 0) this.endRoundTwo(cur, dead ?? []);
       this.emit();
       return;
     }
-    if (cur.scoring.rev !== 0) return;
+    if (dead || room.seat === 1) {
+      // Seat 0's proposal, or seat 1's after a hand-over (every stone alive if its engine failed too).
+      this.proposal = null;
+      this.applyProposal(cur, dead ?? []);
+      return;
+    }
+    p.state = 'deferred';
+    this.handOver();
+    this.emit();
+  }
+
+  /** Seat 0 without a proposal: hand it to seat 1 if it has an engine, else every stone alive. */
+  private handOver(): void {
+    const p = this.proposal;
+    const cur = this.cur();
+    if (!p || p.state !== 'deferred' || !isScoring(cur)) return;
+    if (this.peerEngine === false) {
+      this.proposal = null;
+      this.applyProposal(cur, []);
+      return;
+    }
+    if (this.peerEngine !== true || !this.live) return; // decided when the opponent is back
+    p.state = 'handover';
+    this.sendHandover();
+  }
+
+  /** Stores and sends the first proposal (rev 1). */
+  private applyProposal(cur: GameLog, dead: readonly Point[]): void {
     const next = markLog(cur, dead, 1, this.api);
     if (!next) return;
     this.setLogs(this.replaceCur(next));
@@ -1565,64 +1726,112 @@ class Controller implements RoomControllerApi {
     this.emit();
   }
 
-  private onMark(m: MarkMsg): void {
+  /** Seat 0 ends round 2 from `dead` and sends `end {…, by: 'score', dead}` (DESIGN 9.5). */
+  private endRoundTwo(cur: GameLog, dead: readonly Point[]): void {
+    const next = roundTwoEnd(cur, dead, this.api);
+    if (!next?.end || !next.scoring) return;
+    this.setLogs(this.replaceCur(next));
+    if (this.live) {
+      const msg: EndOut = {
+        t: 'end',
+        v: V,
+        n: next.n,
+        result: next.end.result,
+        by: 'score',
+        dead: [...next.scoring.dead],
+        epoch: next.epoch,
+        len: next.plies.length,
+      };
+      this.send(msg);
+    }
+    this.startProbe();
+  }
+
+  /** Seat 1 got seat 0's hand-over (`mark` rev 0): it proposes from its own engine. */
+  private onHandover(m: MarkMsg): void {
+    const room = this.room;
     const cur = this.cur();
-    if (!this.room || !cur || !isInt(m.n) || !isInt(m.epoch) || !isInt(m.rev) || !Array.isArray(m.dead)) return;
+    if (!room || room.seat !== 1 || !cur || !isInt(m.n) || !isInt(m.epoch)) return;
     if (m.n !== cur.n || m.epoch !== cur.epoch) {
       if (m.n > cur.n || (m.n === cur.n && m.epoch > cur.epoch)) this.sendHead();
       return;
     }
-    if (!isScoring(cur)) {
-      if (!cur.end) this.sendHead(); // the double pass has not arrived here yet, or a resume crossed
+    if (!isScoring(cur) || cur.scoring.round !== 1) {
+      if (!cur.end) this.sendHead(); // the double pass has not arrived here yet: reconcile
       return;
     }
-    const dead = m.dead.filter((p): p is Point => typeof p === 'string');
-    if (m.rev > cur.scoring.rev) {
-      const next = markLog(cur, dead, m.rev, this.api);
-      if (next) this.setLogs(this.replaceCur(next));
-      this.emit();
+    if (cur.scoring.rev >= 1) {
+      this.sendMark(cur); // seat 0 missed this device's marking
       return;
     }
-    const same = m.rev === cur.scoring.rev && [...new Set(dead)].sort().join() === cur.scoring.dead.join();
-    if (!same) this.sendHead(); // crossing toggles: the reconcile settles it by rev (seat 0 on a tie)
+    const key = scoringKey(cur);
+    if (this.proposal?.key === key) return; // already proposing
+    this.runProposer(key);
+    this.emit();
+  }
+
+  private onMark(m: MarkMsg): void {
+    const room = this.room;
+    const cur = this.cur();
+    if (!room || !cur || !isInt(m.n) || !isInt(m.epoch) || !isInt(m.rev) || !Array.isArray(m.dead)) return;
+    if (m.rev === 0) return this.onHandover(m);
+    const out = applyMarkMsg(cur, m, room.seat, this.api);
+    switch (out.kind) {
+      case 'applied':
+        this.setLogs(this.replaceCur(out.log));
+        this.autoScore();
+        break;
+      case 'settled':
+        // Two toggles of the same rev crossed: seat 0's dead stones at rev + 1 on both devices.
+        this.setLogs(this.replaceCur(out.log));
+        this.autoScore();
+        this.sendMark(out.log);
+        break;
+      case 'older':
+        this.sendMark(cur); // a toggle crossed it: tell the other side the current marking
+        break;
+      case 'reconcile':
+        this.sendHead();
+        break;
+      default:
+        break;
+    }
+    this.emit();
   }
 
   private onAccept(m: AcceptMsg): void {
     const room = this.room;
     const cur = this.cur();
-    if (!room || !cur || !isInt(m.n) || !isInt(m.rev)) return;
-    if (m.n !== cur.n) {
-      if (m.n > cur.n) this.sendHead();
-      return;
-    }
-    if (!isScoring(cur)) {
-      if (!cur.end) this.sendHead();
-      return;
-    }
-    if (m.rev !== cur.scoring.rev) {
-      // An acceptance of a marking this device has not seen yet: reconcile. An older one is stale
-      // (a toggle crossed it and cleared it on both sides).
-      if (m.rev > cur.scoring.rev) this.sendHead();
-      return;
-    }
-    let next = acceptLog(cur, otherSeat(room.seat));
-    if (!next) return;
-    if (bothAccepted(next)) next = endLog(next, scoreEnd(next, this.api) as LogEnd);
-    this.setLogs(this.replaceCur(next));
+    if (!room || !cur) return;
+    const out = applyAcceptMsg(cur, m, otherSeat(room.seat), this.api);
+    if (out.kind === 'applied' || out.kind === 'settled') this.setLogs(this.replaceCur(out.log));
+    else if (out.kind === 'reconcile') this.sendHead();
     this.emit();
   }
 
   private onResume(m: ResumeMsg): void {
     const cur = this.cur();
-    if (!this.room || !cur || !isInt(m.n) || !isInt(m.epoch)) return;
-    if (m.n !== cur.n || m.epoch !== cur.epoch) {
-      if (m.n > cur.n || (m.n === cur.n && m.epoch > cur.epoch)) this.sendHead();
-      return;
-    }
-    if (!isScoring(cur)) return; // already left (or ended): nothing to do
-    const next = resumeLog(cur);
-    if (next) this.setLogs(this.replaceCur(next));
+    if (!this.room || !cur) return;
+    const out = applyResumeMsg(cur, m);
+    if (out.kind === 'applied' || out.kind === 'settled') {
+      this.setLogs(this.replaceCur(out.log));
+      this.autoScore();
+    } else if (out.kind === 'reconcile') this.sendHead();
     this.emit();
+  }
+
+  /** Which seat's first proposal the current scoring waits for (rev 0), as far as this device knows. */
+  private proposing(): Seat | null {
+    const room = this.room;
+    const cur = this.cur();
+    if (!room || !isScoring(cur) || cur.scoring.rev !== 0) return null;
+    if (cur.scoring.round === 2) return 0;
+    const p = this.proposal && this.proposal.key === scoringKey(cur) ? this.proposal : null;
+    if (room.seat === 1) return p ? 1 : 0;
+    if (!p) return 0;
+    if (p.state === 'handover') return 1;
+    if (p.state === 'deferred') return this.peerEngine ? 1 : 0;
+    return 0;
   }
 
   /** Marks are possible: scoring round 1, seated; seat 1 waits for seat 0's proposal (rev ≥ 1). Offline too. */
@@ -1820,6 +2029,7 @@ class Controller implements RoomControllerApi {
       canMark: this.canMark(),
       canAccept: this.canAccept(),
       canResume: this.canResume(),
+      proposing: this.proposing(),
       canAsk: Object.freeze({ takeback: this.canAsk('takeback'), rematch: this.canAsk('rematch') }),
       failureKind: this.failureKind,
       lastSeenAt: room?.lastSeenAt ?? 0,
