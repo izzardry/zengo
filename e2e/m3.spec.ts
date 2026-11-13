@@ -121,8 +121,41 @@ async function startRoom(page: Page, code: string, preset = '') {
   await expect(stage(page)).toHaveAttribute('data-phase', /^(playing|scoring)$/);
 }
 
+/**
+ * Where a device stands in the room and the manual exchange: the stage's room attributes, the
+ * manual sheet's step and any problem it shows. Attached to a failed connection wait, so a stall
+ * says which side and which step it stopped at.
+ */
+async function roomDiagnosis(page: Page): Promise<string> {
+  if (page.isClosed()) return '(page closed)';
+  return page
+    .evaluate(() => {
+      const st = document.querySelector('[data-testid="stage"]');
+      const attrs = st ? [...st.attributes].filter((a) => a.name.startsWith('data-room')).map((a) => `${a.name}=${a.value}`) : [];
+      const sheet = document.querySelector('[data-testid="manual-sheet"]');
+      const step = sheet?.querySelector('[data-step]')?.getAttribute('data-step') ?? '(no manual sheet)';
+      const alerts = sheet ? [...sheet.querySelectorAll('[role="alert"]')].map((e) => e.textContent?.trim()).filter(Boolean) : [];
+      return `${attrs.join(' ')} manual-step=${step}${alerts.length ? ` manual-alert="${alerts.join(' / ')}"` : ''}`;
+    })
+    .catch((e: unknown) => `(no diagnosis: ${String(e)})`);
+}
+
+/** Runs `wait`; when it fails, the error names every device's room state (see `roomDiagnosis`). */
+async function diagnosed(devices: Record<string, Page>, wait: () => Promise<void>) {
+  try {
+    await wait();
+  } catch (e) {
+    const lines = await Promise.all(Object.entries(devices).map(async ([name, p]) => `  ${name}: ${await roomDiagnosis(p)}`));
+    if (e instanceof Error) e.message += `\n\nRoom state at the failure:\n${lines.join('\n')}`;
+    throw e;
+  }
+}
+
 async function expectConnected(...pages: Page[]) {
-  for (const p of pages) await expect(stage(p)).toHaveAttribute('data-room-presence', 'connected', { timeout: 30_000 });
+  const devices = Object.fromEntries(pages.map((p, i) => [pages.length === 2 ? ['host', 'guest'][i] : `device ${i}`, p]));
+  await diagnosed(devices, async () => {
+    for (const p of pages) await expect(stage(p)).toHaveAttribute('data-room-presence', 'connected', { timeout: 30_000 });
+  });
 }
 
 /* ---------------------------------------------------------------------------------------------- */
@@ -184,7 +217,10 @@ async function connectManually(host: Page, guest: Page, opts: { guestInPlace?: b
   const offer = await hostOffer(host);
   if (opts.guestInPlace) await openInPlace(guest, offer);
   else await guest.goto(offer);
-  const answer = await guestAnswer(guest);
+  let answer = '';
+  await diagnosed({ host, guest }, async () => {
+    answer = await guestAnswer(guest);
+  });
   await hostPaste(host, answer);
   await expectConnected(host, guest);
   await expect(stage(host)).toHaveAttribute('data-room-via', 'manual');
@@ -324,7 +360,16 @@ const MANUAL_GAME = [...WALLS, 'C5', 'B5', 'A2', 'A1', 'B1', 'G5'];
 /* ---------------------------------------------------------------------------------------------- */
 
 test.describe('Gate 3 · rooms', () => {
-  test.describe.configure({ timeout: 240_000 });
+  // Each room test runs alone: Playwright's built-in `-exclusive-` lock starts it only when no
+  // other test is running, and no other test starts until it ends. Each of these tests drives two
+  // complete app instances over real WebRTC (non-trickle ICE with mDNS host candidates and STUN),
+  // and seat 0 runs the engine. Run side by side with each other and with m1/m2's engine games
+  // (`npm run e2e`, fullyParallel), the manual exchange stalled at the gate: the guest's answer
+  // came too late, or the host stayed `connecting` after the paste until its 20 s connect timer
+  // gave up. Run one at a time (`--workers=1`) every room test passed. The lock gives the room
+  // tests that condition inside the normal parallel run; the other suites stay parallel, and the
+  // room tests' own waits and assertions are unchanged.
+  test.describe.configure({ timeout: 240_000, lock: '-exclusive-' });
 
   test('manual path: offer, answer, stones with a capture, takeback, both pass, the host proposal, a toggle, both accept, rematch and score', async ({
     browser,
