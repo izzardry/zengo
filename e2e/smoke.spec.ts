@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { test, expect } from "@playwright/test";
 
 test("start page shows the wordmark and tagline", async ({ page }) => {
@@ -34,6 +36,19 @@ test("engine files are served as shipped: networks as gzip bytes, TF.js backends
     expect(wasm.ok(), file).toBe(true);
     expect(wasm.headers()["content-type"], file).toContain("application/wasm");
   }
+});
+
+test("no built chunk imports the engine worker's entry file (Safari would run the worker twice)", () => {
+  // Safari evaluates a module worker's entry again when a chunk imports it, which registered TF.js
+  // twice and replaced the worker's message handler with an uninitialised one: every search failed
+  // with "engine worker not initialised". The worker's shared code lives in the engine-core chunk.
+  const dir = path.resolve("dist/assets");
+  const files = fs.readdirSync(dir).filter((f) => f.endsWith(".js"));
+  const entry = files.find((f) => f.startsWith("engine.worker-"));
+  expect(entry).toBeDefined();
+  expect(files.some((f) => f.startsWith("engine-core-"))).toBe(true);
+  const importers = files.filter((f) => f !== entry && fs.readFileSync(path.join(dir, f), "utf8").includes(`./${entry}`));
+  expect(importers).toEqual([]);
 });
 
 test("unknown routes show the not-found page", async ({ page }) => {

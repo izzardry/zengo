@@ -137,9 +137,19 @@ export default defineConfig(() => {
       }),
     ],
     // The engine worker (src/workers/engine.worker.ts) is a module worker: ES output lets it load the
-    // TF.js backends as separate chunks (WebGPU only where the probe asks for it).
+    // TF.js backends as separate chunks (WebGPU only in the WebGPU worker).
+    // Everything from node_modules except the backends goes into one shared chunk, so the backend
+    // chunks import TF.js core from there and never from the worker's entry file. Safari evaluates a
+    // worker's entry a second time when a chunk imports it: TF.js registered twice ("Platform browser
+    // has already been set") and the worker's message handler replaced by an uninitialised one.
     worker: {
       format: "es" as const,
+      rollupOptions: {
+        output: {
+          manualChunks: (id: string) =>
+            id.includes("node_modules") && !/tfjs-backend-(wasm|webgpu|cpu)/.test(id) ? "engine-core" : undefined,
+        },
+      },
     },
     define: {
       __GIT_HASH__: JSON.stringify(gitHash),

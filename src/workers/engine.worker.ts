@@ -256,7 +256,9 @@ async function run(job: Job): Promise<void> {
     const out = await execute(job, ctl);
     post({ type: 'result', id: job.id, result: out.result }, out.transfer);
   } catch (e) {
-    console.error(`Zigo engine worker (${active}): ${job.type} failed`, e);
+    // A warning: the page decides whether this matters (a WebGPU worker that cannot start is expected
+    // on many devices) and logs real failures as errors itself.
+    console.warn(`Zigo engine worker (${active}): ${job.type} failed`, e);
     post({ type: 'error', id: job.id, message: describe(e) });
   } finally {
     current = null;

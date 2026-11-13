@@ -20,7 +20,16 @@ The final gate, as re-run by the orchestrator at `bc271fc`: `npm run lint` clean
 
 ### After the run: computer failed in Safari (fixed 2026-11-13, not yet confirmed in Safari)
 
-The owner reported "The computer could not be loaded." after the first stone, in Safari on the Mac and on iOS; Chrome played. Cause:
+**Actual cause (found with the owner's Safari console, second fix):**
+- The TF.js backend chunks imported shared code from the engine worker's entry file. Chrome reuses the running entry module; Safari evaluates it a second time inside the worker.
+- The second copy registered TF.js again ("Platform browser has already been set") and replaced the worker's message handler with one that was never initialised.
+- So every search after the backend loaded failed with "engine worker not initialised".
+- Fix: the worker build puts everything from node_modules except the backends into an `engine-core` chunk, so no chunk imports the entry. A smoke test checks the build for this.
+- Playwright's WebKit build does not show the fault, so only real Safari could find it.
+
+The first fix below did not solve the Safari failure; it fixes a real slow start in every browser.
+
+The owner reported "The computer could not be loaded." after the first stone, in Safari on the Mac and on iOS; Chrome played. First diagnosis (a real problem, but not the Safari cause):
 - On a first launch the worker probed WebGPU right after loading, with no time limit, and every search queued behind the probe.
 - With shader compilation, the first WebGPU reply in Chrome came after about 20 s; Safari, which compiles more slowly, ran into the 40 s watchdog.
 - The e2e suite never saw this: the headless browser has no WebGPU, so it always ran WASM.
