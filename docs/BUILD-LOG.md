@@ -34,7 +34,7 @@ Nothing. `flags.computer`, `flags.rooms` and the broker flag are on; `COMPUTER_E
 
 ### Decisions and deviations
 
-All 300 or so decisions are listed one per line under **Decisions** below, grouped by phase and package. The ones that change what a player sees:
+All 284 decisions are listed one per line under **Decisions** below, grouped by phase and package. The ones that change what a player sees:
 - Coordinates scale with the board, clamped to 7–8 px.
 - `P` passes only with Enter.
 - Go counts every ply as a move.
