@@ -5,10 +5,12 @@
  * In face-to-face pass-and-play each side accepts on its own: the near player uses this bar
  * (with `side` set), the far player a `ScoringAccept` passed as the far `PlayerStrip`'s `action`,
  * which the strip's rotation turns 180° (DESIGN 5.2). In a room `note` carries the room's text
- * (e.g. `Scoring continues when your opponent is back`) and `disabled` locks both buttons.
+ * (e.g. `Scoring continues when your opponent is back`) and `disabled` locks both buttons. From
+ * `sm` up in portrait the note sits inside the bar's pill, so it never reaches the near strip's row.
  */
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
 import { Check } from 'lucide-react';
+import { BOTTOM_CHROME_VAR } from '@/components/ui/toasterPlacement';
 import { useI18n } from '@/lib/i18n';
 import type { Color } from '@/lib/types';
 import { cn } from '@/lib/utils';
@@ -66,7 +68,10 @@ export interface ScoringBarProps {
   disabled?: boolean;
   /** Resume alone locked. */
   resumeDisabled?: boolean;
-  /** One line above the bar, e.g. the room's `Scoring continues when your opponent is back`. */
+  /**
+   * A short room note, e.g. `Scoring continues when your opponent is back`: above the bar on
+   * phones, inside the bar left of the buttons from `sm` up, above the column in landscape.
+   */
   note?: ReactNode;
   /** Chrome shown. */
   visible?: boolean;
@@ -95,6 +100,32 @@ export function ScoringBar({
 
   const hasNote = note !== undefined && note !== null && note !== false;
 
+  // Portrait: toasts sit above this bar and its note, which is taller than the toolbar they
+  // otherwise clear (`components/ui/toasterPlacement.ts`). Publish the measured height while the
+  // bar is on screen; the landscape rail leaves the bottom free.
+  useLayoutEffect(() => {
+    const node = ref.current;
+    if (!node || landscape) return;
+    const root = document.documentElement;
+    const publish = () => {
+      const h = node.getBoundingClientRect().height;
+      if (h > 0) root.style.setProperty(BOTTOM_CHROME_VAR, `${Math.ceil(h)}px`);
+      else root.style.removeProperty(BOTTOM_CHROME_VAR);
+    };
+    publish();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(publish);
+    observer?.observe(node);
+    return () => {
+      observer?.disconnect();
+      root.style.removeProperty(BOTTOM_CHROME_VAR);
+    };
+  }, [landscape, hasNote]);
+  // Portrait from `sm` up (desktop, tablets) the note sits inside the glass pill, left of the
+  // buttons, so the bar keeps the toolbar's one row. Stacked above the bar it would land in the
+  // near player strip's row (count left, clock right) wherever the board fills the height. Phones
+  // (below `sm`) keep it above the bar: there the board is width-bound and leaves room below it.
+  const row = !landscape;
+
   return (
     <div
       ref={ref}
@@ -109,32 +140,51 @@ export function ScoringBar({
         landscape ? (visible ? 'translate-x-0' : 'translate-x-4') : visible ? 'translate-y-0' : 'translate-y-4',
       )}
     >
-      {hasNote && (
-        <p
-          role="status"
-          data-part="note"
-          className={cn('text-xs text-muted-foreground text-center', landscape ? 'max-w-[8rem]' : 'max-w-[20rem]')}
-        >
-          {note}
-        </p>
-      )}
       <div
-        role="group"
-        aria-label={t('game.scoringBar')}
-        // Landscape: a column of two equal-width buttons in a rounded card (a full pill around two
-        // stacked buttons of different widths would cut through the wider one).
-        className={cn(GLASS, 'flex gap-2 p-1.5', landscape ? 'flex-col items-stretch rounded-3xl' : 'items-center rounded-full')}
+        data-part="row"
+        // Below `sm` (and in landscape) this wrapper is `contents`: note and buttons are items of
+        // the column above. From `sm` up in portrait it is the glass pill holding both.
+        className={cn(
+          'contents',
+          row && cn('sm:flex sm:items-center sm:gap-3 sm:rounded-full sm:p-1.5 sm:bg-card/80 sm:backdrop-blur-sm sm:border sm:border-border sm:shadow-lg', hasNote && 'sm:pl-4'),
+        )}
       >
-        <button
-          type="button"
-          onClick={onResume}
-          disabled={disabled || resumeDisabled}
-          data-action="resume"
-          className="btn-ghost min-h-11 px-5 disabled:opacity-40 disabled:cursor-not-allowed"
+        {hasNote && (
+          <p
+            role="status"
+            data-part="note"
+            className={cn(
+              'text-xs text-muted-foreground text-center',
+              landscape ? 'max-w-[8rem]' : 'max-w-[20rem] sm:max-w-[16rem] sm:text-left',
+            )}
+          >
+            {note}
+          </p>
+        )}
+        <div
+          role="group"
+          aria-label={t('game.scoringBar')}
+          // Landscape: a column of two equal-width buttons in a rounded card (a full pill around two
+          // stacked buttons of different widths would cut through the wider one).
+          className={cn(
+            GLASS,
+            'flex gap-2 p-1.5',
+            landscape ? 'flex-col items-stretch rounded-3xl' : 'items-center rounded-full',
+            // From `sm` up the row wrapper carries the glass; the group inside it is bare.
+            row && 'sm:p-0 sm:bg-transparent sm:backdrop-blur-none sm:border-0 sm:shadow-none sm:rounded-none',
+          )}
         >
-          {t('game.resumePlay')}
-        </button>
-        <ScoringAccept onAccept={onAccept} accepted={accepted} side={side} disabled={disabled} />
+          <button
+            type="button"
+            onClick={onResume}
+            disabled={disabled || resumeDisabled}
+            data-action="resume"
+            className="btn-ghost min-h-11 px-5 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {t('game.resumePlay')}
+          </button>
+          <ScoringAccept onAccept={onAccept} accepted={accepted} side={side} disabled={disabled} />
+        </div>
       </div>
     </div>
   );

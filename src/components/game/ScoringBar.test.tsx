@@ -53,6 +53,28 @@ describe('ScoringBar (DESIGN 8.4)', () => {
     expect(screen.getByRole('button', { name: 'Accept' })).toBeDisabled();
   });
 
+  it('portrait: from sm up the note sits in the glass pill beside the buttons, not above the bar', () => {
+    renderWithI18n(<ScoringBar {...props({ note: 'Waiting for your opponent to accept' })} />);
+    const row = screen.getByTestId('scoring-bar').querySelector('[data-part="row"]') as HTMLElement;
+    const note = screen.getByRole('status');
+    const group = screen.getByRole('group', { name: 'Scoring' });
+    // One row holds the note and then the buttons.
+    expect(row).toContainElement(note);
+    expect(row).toContainElement(group);
+    expect(note.nextElementSibling).toBe(group);
+    // Phones: the wrapper is transparent to layout (note above, as before); sm up: the glass pill.
+    expect(row).toHaveClass('contents', 'sm:flex', 'sm:rounded-full', 'sm:bg-card/80', 'sm:pl-4');
+    expect(group).toHaveClass('sm:bg-transparent', 'sm:border-0', 'sm:shadow-none');
+    expect(note).toHaveClass('sm:text-left');
+  });
+
+  it('landscape: the rail keeps the note outside the card, with no sm row', () => {
+    renderWithI18n(<ScoringBar {...props({ landscape: true, note: 'Waiting for your opponent to accept' })} />);
+    const row = screen.getByTestId('scoring-bar').querySelector('[data-part="row"]') as HTMLElement;
+    expect(row.className).toBe('contents');
+    expect(screen.getByRole('group', { name: 'Scoring' }).className).not.toMatch(/sm:/);
+  });
+
   it('Resume alone can be locked', () => {
     renderWithI18n(<ScoringBar {...props({ resumeDisabled: true })} />);
     expect(screen.getByRole('button', { name: 'Resume' })).toBeDisabled();
