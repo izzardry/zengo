@@ -1,5 +1,6 @@
 import { fireEvent, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import { BOTTOM_CHROME_VAR } from '@/components/ui/toasterPlacement';
 import { ScoringAccept, ScoringBar, type ScoringBarProps } from './ScoringBar';
 import { renderWithI18n } from './testUtils';
 
@@ -101,5 +102,23 @@ describe('ScoringBar (DESIGN 8.4)', () => {
     expect(screen.getByRole('group', { name: 'Zählung' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Weiterspielen' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Zählung für Weiß annehmen' })).toBeInTheDocument();
+  });
+
+  it('publishes its height for the toasts in portrait (the note makes it taller than the toolbar)', () => {
+    const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ height: 81.5 } as DOMRect);
+    const root = document.documentElement.style;
+    try {
+      const { rerender, unmount } = renderWithI18n(<ScoringBar {...props({ note: 'Scoring continues when your opponent is back' })} />);
+      expect(root.getPropertyValue(BOTTOM_CHROME_VAR)).toBe('82px');
+      // The landscape rail leaves the bottom free.
+      rerender(<ScoringBar {...props({ note: 'Scoring continues when your opponent is back' })} landscape />);
+      expect(root.getPropertyValue(BOTTOM_CHROME_VAR)).toBe('');
+      rerender(<ScoringBar {...props()} />);
+      expect(root.getPropertyValue(BOTTOM_CHROME_VAR)).toBe('82px');
+      unmount();
+      expect(root.getPropertyValue(BOTTOM_CHROME_VAR)).toBe('');
+    } finally {
+      rect.mockRestore();
+    }
   });
 });

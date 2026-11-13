@@ -69,10 +69,11 @@ export function RequestToasts({ requests, onReply }: RequestToastsProps) {
           role="alertdialog"
           aria-label={t(requestKey(kind))}
           data-request={kind}
-          className="flex w-full min-w-0 items-center justify-between gap-3 font-mono text-sm"
+          // Narrow toasts (beside the board) put the buttons under the text instead of squeezing it.
+          className="flex w-full min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-2 font-mono text-sm"
         >
-          <span className="min-w-0">{t(requestKey(kind))}</span>
-          <div className="flex items-center gap-1 shrink-0">
+          <span className="min-w-[8rem] flex-1">{t(requestKey(kind))}</span>
+          <div className="ml-auto flex items-center gap-1 shrink-0">
             <button
               type="button"
               onClick={() => answer(false)}
