@@ -10,21 +10,21 @@
  * - Networks: read compressed from Cache Storage `engine-cache` (where the offline manager stores
  *   them), else fetched (the service worker serves `engine/` CacheFirst); inflated here with
  *   `DecompressionStream`. Progress counts compressed bytes.
- * - Backend: the remembered choice from `zigo:engine-backend`. Without one, the worker starts on
- *   WASM at once and, after the small net has loaded, probes WebGPU: adapter, then an evaluation of a
- *   fixed position compared with the WASM result. On any error or a mismatch it stays on WASM. The
- *   decision is reported (`backend`, `decided`) for the page to remember. A remembered WebGPU that
- *   fails later falls back to WASM the same way.
+ * - Backend: one per worker, named in `init`. The page runs a WASM worker that answers every search
+ *   from the start, and beside it a WebGPU worker that it warms up (`warm`: the shaders of a board
+ *   size compiled in parallel with TF.js's compile-only mode, then one evaluation the page compares
+ *   with WASM's) and uses only once warm (EngineDriver). A WebGPU worker never falls back by itself:
+ *   it reports errors, and the page drops it.
+ * - WebGPU runs every forward pass at a fixed batch of 8 rows (NetRunner padTo), so each board size
+ *   compiles one set of shaders instead of one per batch length.
  */
-import { getBackend, ready, setBackend } from '@tensorflow/tfjs-core';
+import { backend as tfBackend, env, ready, setBackend } from '@tensorflow/tfjs-core';
 import { KataEngine, type EngineControl, type NetKind } from '@/lib/engine/katago/engine';
 import { gunzip, isGzip, parseModel, type ParsedModel } from '@/lib/engine/katago/loadModel';
 import { KataModel } from '@/lib/engine/katago/model';
 import { NetRunner } from '@/lib/engine/katago/net';
 import { ENGINE_CACHE } from '@/lib/engine/offline';
 import { NET_BYTES, NET_PATHS, TFJS_WASM_DIR, type EngineBackendChoice, type FromWorker, type ToWorker } from '@/lib/engine/protocol';
-import { probePosition, sameEvaluation } from '@/lib/engine/probe';
-import type { EngineEvaluation } from '@/lib/types';
 
 declare const self: DedicatedWorkerGlobalScope;
 
@@ -33,15 +33,12 @@ type Active = 'webgpu' | 'wasm' | 'cpu';
 let base = '';
 let active: Active | null = null;
 let initPromise: Promise<void> | null = null;
-let probeWanted = false;
 const parsed = new Map<NetKind, ParsedModel>();
 const runners = new Map<NetKind, NetRunner>();
 const loading = new Map<NetKind, Promise<NetRunner>>();
-/** Held while the WebGPU probe switches backends. */
-let backendLock: Promise<void> = Promise.resolve();
-
 /** Leaves per network call: WebGPU gains from batches; single-threaded WASM does not. */
-const batchSize = () => (active === 'webgpu' ? 8 : 1);
+const GPU_BATCH = 8;
+const batchSize = () => (active === 'webgpu' ? GPU_BATCH : 1);
 
 function post(m: FromWorker, transfer: Transferable[] = []): void {
   self.postMessage(m, transfer);
@@ -87,15 +84,15 @@ async function startWebGpu(): Promise<boolean> {
   }
 }
 
-async function init(remembered: EngineBackendChoice | null): Promise<void> {
-  if (remembered === 'webgpu' && (await startWebGpu())) {
+async function init(wanted: EngineBackendChoice): Promise<void> {
+  if (wanted === 'webgpu') {
+    if (!(await startWebGpu())) throw new Error('WebGPU did not start');
     active = 'webgpu';
     post({ type: 'backend', backend: 'webgpu', decided: false });
     return;
   }
   active = await startWasm();
-  if (remembered === 'webgpu') post({ type: 'backend', backend: 'wasm', decided: true, note: 'WebGPU did not start' });
-  else post({ type: 'backend', backend: 'wasm', decided: false, note: active === 'cpu' ? 'cpu' : undefined });
+  post({ type: 'backend', backend: 'wasm', decided: false, note: active === 'cpu' ? 'cpu' : undefined });
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -150,7 +147,7 @@ async function readNet(kind: NetKind): Promise<Uint8Array> {
 }
 
 function build(p: ParsedModel): NetRunner {
-  return new NetRunner(new KataModel(p));
+  return new NetRunner(new KataModel(p), { padTo: active === 'webgpu' ? GPU_BATCH : 1 });
 }
 
 function getNet(kind: NetKind): Promise<NetRunner> {
@@ -166,8 +163,6 @@ function getNet(kind: NetKind): Promise<NetRunner> {
         model = parseModel(await gunzip(bytes));
         parsed.set(kind, model);
       }
-      // Never build while the probe switches backends; it rebuilds what it finds parsed.
-      await backendLock;
       const built = runners.get(kind);
       if (built) return built;
       const r = build(model);
@@ -183,66 +178,30 @@ function getNet(kind: NetKind): Promise<NetRunner> {
 const engine = new KataEngine({ getNet, batchSize });
 
 /* ------------------------------------------------------------------------------------------------
- * WebGPU probe
+ * Warm-up
  * --------------------------------------------------------------------------------------------- */
 
-const NO_STOP: EngineControl = { stopped: () => false, yieldNow };
-
-/** Rebuilds every loaded network on the backend that is active now. */
-function rebuildAll(): Map<NetKind, NetRunner> {
-  const next = new Map<NetKind, NetRunner>();
-  for (const [k, p] of parsed) next.set(k, build(p));
-  return next;
-}
-
-function swapRunners(next: Map<NetKind, NetRunner>): void {
-  for (const r of runners.values()) r.model.dispose();
-  runners.clear();
-  for (const [k, r] of next) runners.set(k, r);
-}
-
-async function probe(): Promise<void> {
-  if (active !== 'wasm' && active !== 'cpu') return;
-  const pos = probePosition();
-  let reference: EngineEvaluation;
-  try {
-    await getNet('small');
-    reference = await engine.evaluate(pos, {}, NO_STOP);
-  } catch {
-    return;
-  }
-  const from = active;
-  let candidates: Map<NetKind, NetRunner> | null = null;
-  let release!: () => void;
-  backendLock = new Promise<void>((r) => (release = r));
-  try {
-    if (!(await startWebGpu())) {
-      post({ type: 'backend', backend: 'wasm', decided: true, note: 'no WebGPU adapter' });
-      return;
+/**
+ * Gets `net` ready for `pos`'s board size: on WebGPU its shaders are first created in parallel
+ * (compile-only pass, then wait for the pipelines). Then `pos` is evaluated for the page to check,
+ * and evaluated once more to time one warm network call (`ms`), which the page compares between the
+ * WASM and the WebGPU worker.
+ */
+async function warm(pos: Parameters<typeof engine.evaluate>[0], net: NetKind, ctl: EngineControl) {
+  const runner = await getNet(net);
+  if (active === 'webgpu') {
+    env().set('WEBGPU_ENGINE_COMPILE_ONLY', true);
+    try {
+      runner.forwardDiscard(pos.size);
+    } finally {
+      env().set('WEBGPU_ENGINE_COMPILE_ONLY', false);
     }
-    candidates = rebuildAll();
-    const gpuEngine = new KataEngine({ getNet: async (k) => candidates!.get(k) ?? Promise.reject(new Error('net')) });
-    const got = await gpuEngine.evaluate(pos, {}, NO_STOP);
-    if (!sameEvaluation(reference, got)) throw new Error('WebGPU result differs from WASM');
-    swapRunners(candidates);
-    candidates = null;
-    active = 'webgpu';
-    post({ type: 'backend', backend: 'webgpu', decided: true });
-  } catch (e) {
-    if (candidates) for (const r of candidates.values()) r.model.dispose();
-    if (getBackend() !== from) await setBackend(from);
-    await ready();
-    post({ type: 'backend', backend: 'wasm', decided: true, note: describe(e) });
-  } finally {
-    release();
+    await (tfBackend() as unknown as { checkCompileCompletionAsync(): Promise<void> }).checkCompileCompletionAsync();
   }
-}
-
-/** After a WebGPU failure in a job: back to WASM for good. */
-async function fallBackToWasm(reason: string): Promise<void> {
-  active = await startWasm();
-  swapRunners(rebuildAll());
-  post({ type: 'backend', backend: 'wasm', decided: true, note: reason });
+  const evaluation = await engine.evaluate(pos, { net }, ctl);
+  const t0 = performance.now();
+  await engine.evaluate(pos, { net }, ctl);
+  return { evaluation, ms: performance.now() - t0 };
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -271,6 +230,10 @@ async function execute(job: Job, ctl: EngineControl): Promise<{ result: unknown;
       return { result: await engine.analyze(job.pos, job.n, job.opts, ctl), transfer: [] };
     case 'genmove':
       return { result: await engine.genmove(job.pos, job.level, job.clock, job.opts, ctl), transfer: [] };
+    case 'warm': {
+      const r = await warm(job.pos, job.net, ctl);
+      return { result: r, transfer: [r.evaluation.ownership.buffer, r.evaluation.policy.buffer] };
+    }
   }
 }
 
@@ -286,14 +249,7 @@ async function run(job: Job): Promise<void> {
   try {
     if (!initPromise) throw new Error('engine worker not initialised');
     await initPromise;
-    let out: { result: unknown; transfer: Transferable[] };
-    try {
-      out = await execute(job, ctl);
-    } catch (e) {
-      if (active !== 'webgpu') throw e;
-      await fallBackToWasm(`WebGPU failed: ${describe(e)}`);
-      out = await execute(job, ctl);
-    }
+    const out = await execute(job, ctl);
     post({ type: 'result', id: job.id, result: out.result }, out.transfer);
   } catch (e) {
     post({ type: 'error', id: job.id, message: describe(e) });
@@ -302,22 +258,13 @@ async function run(job: Job): Promise<void> {
   }
 }
 
-/**
- * Loads run beside the search queue (a large-net download must not hold up a hint or the guard).
- * After the small net, a first launch probes WebGPU, queued between searches.
- */
+/** Loads run beside the search queue (a large-net download must not hold up a hint or the guard). */
 function load(id: number, net: NetKind): void {
   const ready = initPromise ?? Promise.reject(new Error('engine worker not initialised'));
   ready
     .then(() => getNet(net))
     .then(
-      () => {
-        post({ type: 'result', id, result: null });
-        if (probeWanted && net === 'small') {
-          probeWanted = false;
-          enqueue(probe);
-        }
-      },
+      () => post({ type: 'result', id, result: null }),
       (e) => post({ type: 'error', id, message: describe(e) }),
     );
 }
@@ -328,7 +275,6 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
     case 'init':
       if (initPromise) return;
       base = m.base;
-      probeWanted = m.backend === null;
       initPromise = init(m.backend);
       initPromise.catch((err) => post({ type: 'error', id: null, message: describe(err), fatal: true }));
       return;

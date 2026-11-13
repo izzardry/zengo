@@ -52,11 +52,35 @@ export function symmetryMap(size: number, sym: number): Int32Array {
 
 export class NetRunner {
   readonly model: KataModel;
+  /**
+   * Every forward pass runs at least this many rows (the rest padding), so a backend that compiles
+   * a shader per tensor shape (WebGPU) compiles once per board size, not once per batch length.
+   */
+  readonly padTo: number;
   private spatial = new Float32Array(0);
   private global = new Float32Array(0);
 
-  constructor(model: KataModel) {
+  constructor(model: KataModel, opts: { padTo?: number } = {}) {
     this.model = model;
+    this.padTo = Math.max(1, opts.padTo ?? 1);
+  }
+
+  /**
+   * One forward pass of padding rows on a `size` board whose outputs are never read: with TF.js's
+   * WebGPU compile-only mode on, this only creates the pipelines (in parallel).
+   */
+  forwardDiscard(size: number): void {
+    const rows = this.padTo;
+    const ts = tensor4d(new Float32Array(rows * size * size * SPATIAL_CHANNELS), [rows, size, size, SPATIAL_CHANNELS]);
+    const tg = tensor2d(new Float32Array(rows * GLOBAL_CHANNELS), [rows, GLOBAL_CHANNELS]);
+    const out = this.model.forward(ts, tg);
+    ts.dispose();
+    tg.dispose();
+    out.policy.dispose();
+    out.policyPass.dispose();
+    out.value.dispose();
+    out.scoreValue.dispose();
+    out.ownership.dispose();
   }
 
   /**
@@ -73,10 +97,11 @@ export class NetRunner {
   ): Promise<RawEval[]> {
     const area = size * size;
     const rowS = area * SPATIAL_CHANNELS;
-    if (this.spatial.length < count * rowS) this.spatial = new Float32Array(count * rowS);
-    if (this.global.length < count * GLOBAL_CHANNELS) this.global = new Float32Array(count * GLOBAL_CHANNELS);
-    const sp = this.spatial.subarray(0, count * rowS);
-    const gl = this.global.subarray(0, count * GLOBAL_CHANNELS);
+    const rows = Math.max(count, this.padTo);
+    if (this.spatial.length < rows * rowS) this.spatial = new Float32Array(rows * rowS);
+    if (this.global.length < rows * GLOBAL_CHANNELS) this.global = new Float32Array(rows * GLOBAL_CHANNELS);
+    const sp = this.spatial.subarray(0, rows * rowS);
+    const gl = this.global.subarray(0, rows * GLOBAL_CHANNELS);
     gl.set(global.subarray(0, count * GLOBAL_CHANNELS));
     for (let i = 0; i < count; i++) {
       const map = symmetryMap(size, syms[i] ?? 0);
@@ -88,8 +113,8 @@ export class NetRunner {
       }
     }
 
-    const ts = tensor4d(sp, [count, size, size, SPATIAL_CHANNELS]);
-    const tg = tensor2d(gl, [count, GLOBAL_CHANNELS]);
+    const ts = tensor4d(sp, [rows, size, size, SPATIAL_CHANNELS]);
+    const tg = tensor2d(gl, [rows, GLOBAL_CHANNELS]);
     const out = this.model.forward(ts, tg);
     ts.dispose();
     tg.dispose();

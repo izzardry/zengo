@@ -1,13 +1,13 @@
 /**
- * The WebGPU check of the engine worker (DESIGN 10.1): a fixed position, evaluated on WASM and on
- * WebGPU, must give the same answer before WebGPU is used.
+ * The WebGPU check (DESIGN 10.1): a fixed position, evaluated on WASM and on WebGPU, must give the
+ * same answer before WebGPU is used for a board size and network (EngineDriver's warm-up).
  */
-import type { EngineEvaluation, Position } from '../types.ts';
+import type { EngineEvaluation, Position, Size } from '../types.ts';
 import { newGame, play, position } from '../zigo.ts';
 
-/** A 9×9 middle-game position every device evaluates the same way. */
-export function probePosition(): Position {
-  let g = newGame({ size: 9, rules: 'area', handicap: 0, komi2: 15 });
+/** A small opening position (on any board size) every device evaluates the same way. */
+export function probePosition(size: Size = 9): Position {
+  let g = newGame({ size, rules: 'area', handicap: 0, komi2: 15 });
   for (const m of ['cc', 'gg', 'cg', 'gc', 'ee', 'dg', 'fd', 'ec']) g = play(g, m, 0);
   return position(g);
 }

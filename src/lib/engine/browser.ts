@@ -10,6 +10,8 @@ export function createBrowserEngine(): EngineDriver {
     createWorker: () =>
       new Worker(new URL('../../workers/engine.worker.ts', import.meta.url), { type: 'module', name: 'zigo-engine' }) as unknown as WorkerLike,
     base: () => document.baseURI,
+    // WebGPU is tried beside WASM in workers (DESIGN 10.1); the worker checks for an adapter itself.
+    gpu: () => typeof navigator !== 'undefined' && 'gpu' in navigator,
     storage: {
       get: () => readEngineBackend(store),
       set: (b) => writeEngineBackend(store, b),

@@ -23,13 +23,25 @@
  *   `failed`; pending searches settle (evaluate → null, others reject with
  *   `EngineUnavailableError`); the worker is terminated. The next `load()` or search retries with a
  *   new worker.
- * - Backend: the remembered choice is read from `storage` and sent to the worker; a decision the
- *   worker reports (WebGPU probe) is written back.
+ * - Backends: WASM always plays; WebGPU takes over once it is warm. The main worker runs WASM and
+ *   answers every search from the first move. When `gpu()` says WebGPU exists and `storage` does not
+ *   say `wasm`, a second worker starts on WebGPU once the small net is loaded. For every board size
+ *   and net the searches ask for, it is warmed up in the background (`warm`: shaders compiled, then
+ *   the probe position evaluated and compared with WASM's, and one network call timed on both).
+ *   Once warm, a search goes to WebGPU when WebGPU is faster for its kind: a single evaluation
+ *   (levels 1–9, the guard, the dame check) compares one WebGPU call with one WASM call, a search
+ *   with many visits compares a WebGPU call's 8 rows with 8 WASM calls. Everything else, and
+ *   everything while WebGPU warms up, goes to WASM.
+ * - A WebGPU worker that errors, crashes, hangs in a search (`gpuWatchdogMs`) or disagrees with WASM
+ *   is dropped for good on this device (`wasm` remembered); its running search goes back to the head
+ *   of the queue and runs on WASM. A warm-up slower than `warmTimeoutMs` drops it for this page only.
+ *   No WebGPU trouble ever fails the engine or reaches the player.
  */
 import type { ClockInfo, EngineEvaluation, EngineGenmoveOptions, EngineMove, EngineNet, EngineSearchOptions, EngineState, Position } from '../types';
 import { EngineAbortError, EngineUnavailableError, type EngineHandle, type EngineSnapshot } from './handle';
-import type { EngineBackendChoice, FromWorker, ToWorker } from './protocol';
-import { needsLargeNet } from '../levels';
+import type { EngineBackendChoice, FromWorker, ToWorker, WarmResult } from './protocol';
+import { levelSpec, needsLargeNet } from '../levels';
+import { probePosition, sameEvaluation } from './probe';
 
 /** The part of `Worker` the driver uses. */
 export interface WorkerLike {
@@ -54,9 +66,30 @@ export interface EngineDriverOptions {
   initTimeoutMs?: number;
   /** A search that has not answered this long after its expected time is stopped, then the engine is failed. Default 30 s. */
   watchdogMs?: number;
+  /** Whether to try WebGPU beside WASM (the browser: `'gpu' in navigator`). Default: never. */
+  gpu?: () => boolean;
+  /** The same slack for a search on the WebGPU worker, before that worker is dropped. Default 10 s. */
+  gpuWatchdogMs?: number;
+  /** The longest one WebGPU warm-up (a board size and net) may take before WebGPU is dropped for this page. Default 180 s. */
+  warmTimeoutMs?: number;
 }
 
-type JobKind = 'genmove' | 'evaluate' | 'analyze';
+/** The WebGPU worker beside the WASM one (see the file comment). */
+interface GpuLane {
+  readonly worker: WorkerLike;
+  /** `size:net` keys warmed up and checked against WASM, with one network call's time on each. */
+  readonly warm: Map<string, { readonly gpuMs: number; readonly wasmMs: number }>;
+  /** The warm-up in progress, until its check against WASM is done. */
+  warming: { readonly key: string; readonly id: number; readonly timer: ReturnType<typeof setTimeout> } | null;
+}
+
+const gpuKey = (size: number, net: EngineNet) => `${size}:${net}`;
+
+/** Rows in one WebGPU network call (the worker's padded batch). */
+const GPU_ROWS = 8;
+
+/** `warm`: the WASM side of a WebGPU warm-up (reference evaluation and timing), always on WASM. */
+type JobKind = 'genmove' | 'evaluate' | 'analyze' | 'warm';
 
 type Outcome =
   | { readonly status: 'done'; readonly result: unknown }
@@ -68,6 +101,12 @@ interface Job {
   readonly kind: JobKind;
   /** The net the search runs on; the job is sent only once the worker has it. */
   readonly net: EngineNet;
+  /** The board size (WebGPU is warmed up per size). */
+  readonly size: number;
+  /** Many visits (batched on WebGPU), not a single network call. */
+  readonly search: boolean;
+  /** The worker the job was sent to. */
+  lane: 'main' | 'gpu' | null;
   readonly build: (id: number) => ToWorker;
   /** The longest the search should take (for the watchdog). */
   readonly expectedMs: number;
@@ -86,6 +125,8 @@ export class EngineDriver implements EngineHandle {
   private readonly opts: EngineDriverOptions;
   private readonly initTimeoutMs: number;
   private readonly watchdogMs: number;
+  private readonly gpuWatchdogMs: number;
+  private readonly warmTimeoutMs: number;
 
   private snapshot: EngineSnapshot = Object.freeze({ state: 'idle', progress: 0, backend: null, nets: NO_NETS });
   private readonly listeners = new Set<() => void>();
@@ -95,6 +136,13 @@ export class EngineDriver implements EngineHandle {
   private nextId = 1;
   private disposed = false;
   private initTimer?: ReturnType<typeof setTimeout>;
+
+  private gpu: GpuLane | null = null;
+  private gpuGeneration = 0;
+  /** WebGPU is not tried again on this page. */
+  private gpuOff = false;
+  /** `size:net` keys searches asked for that the WebGPU worker has not warmed up yet, in order. */
+  private readonly gpuWants: string[] = [];
 
   /** Pending net loads: resolved when the worker reports the net, rejected on failure. */
   private readonly netWaits = new Map<EngineNet, { promise: Promise<void>; resolve: () => void; reject: (e: Error) => void; id: number }>();
@@ -110,6 +158,8 @@ export class EngineDriver implements EngineHandle {
     this.opts = opts;
     this.initTimeoutMs = opts.initTimeoutMs ?? 60_000;
     this.watchdogMs = opts.watchdogMs ?? 30_000;
+    this.gpuWatchdogMs = opts.gpuWatchdogMs ?? 10_000;
+    this.warmTimeoutMs = opts.warmTimeoutMs ?? 180_000;
   }
 
   /* ---------------------------------------------------------------- state */
@@ -171,14 +221,177 @@ export class EngineDriver implements EngineHandle {
       this.fail(new EngineUnavailableError(msg ? `Engine worker error: ${msg}` : 'Engine worker error'));
     };
     this.worker = w;
-    let remembered: EngineBackendChoice | null = null;
-    try {
-      remembered = this.opts.storage?.get() ?? null;
-    } catch {
-      remembered = null;
-    }
-    w.postMessage({ type: 'init', base: this.opts.base(), backend: remembered });
+    w.postMessage({ type: 'init', base: this.opts.base(), backend: 'wasm' });
     return w;
+  }
+
+  /* ---------------------------------------------------------------- WebGPU worker */
+
+  private rememberBackend(b: EngineBackendChoice): void {
+    try {
+      this.opts.storage?.set(b);
+    } catch {
+      /* storage blocked: decide again next time */
+    }
+  }
+
+  /** Starts the WebGPU worker once the small net is on the main worker (see the file comment). */
+  private startGpu(): void {
+    if (this.gpu || this.gpuOff || this.disposed || !this.snapshot.nets.small) return;
+    if (!this.gpuWanted()) {
+      this.gpuWants.length = 0;
+      return;
+    }
+    const gen = ++this.gpuGeneration;
+    const alive = () => gen === this.gpuGeneration && !this.disposed;
+    const w = this.opts.createWorker();
+    const lane: GpuLane = { worker: w, warm: new Map(), warming: null };
+    w.onmessage = (e) => {
+      if (alive()) this.onGpuMessage(lane, e.data);
+    };
+    w.onerror = (e) => {
+      if (!alive()) return;
+      const msg = (e as ErrorEvent).message;
+      this.dropGpu(msg ? `worker error: ${msg}` : 'worker error', true);
+    };
+    this.gpu = lane;
+    w.postMessage({ type: 'init', base: this.opts.base(), backend: 'webgpu' });
+    this.pumpGpu();
+  }
+
+  /** WebGPU exists here and has not been found broken on this device before. */
+  private gpuWanted(): boolean {
+    try {
+      return (this.opts.gpu?.() ?? false) && this.opts.storage?.get() !== 'wasm';
+    } catch {
+      return false;
+    }
+  }
+
+  /** Asks for a warm-up of `size` and `net` on the WebGPU worker, if it is not warm for them yet. */
+  private wantGpu(size: number, net: EngineNet): void {
+    if (this.gpuOff || !this.gpuWanted()) return;
+    const key = gpuKey(size, net);
+    if (this.gpu?.warm.has(key) || this.gpu?.warming?.key === key || this.gpuWants.includes(key)) return;
+    this.gpuWants.push(key);
+    this.pumpGpu();
+  }
+
+  /** Starts the next warm-up whose net the main worker has (so it is on the device). */
+  private pumpGpu(): void {
+    const lane = this.gpu;
+    if (!lane || lane.warming || this.running?.lane === 'gpu') return;
+    const i = this.gpuWants.findIndex((k) => this.snapshot.nets[k.split(':')[1] as EngineNet]);
+    if (i < 0) return;
+    const key = this.gpuWants.splice(i, 1)[0];
+    const [sizeText, netText] = key.split(':');
+    const net = netText as EngineNet;
+    const pos = probePosition(Number(sizeText) as Position['size']);
+    const id = this.nextId++;
+    const timer = setTimeout(() => this.dropGpu('warm-up took too long', false), this.warmTimeoutMs);
+    lane.warming = { key, id, timer };
+    // WASM's answer and timing for the same position, to check WebGPU's against.
+    const reference = this.enqueue('warm', net, pos.size, false, (jid) => ({ type: 'warm', id: jid, pos, net }), 10_000).then((o) =>
+      o.status === 'done' ? (o.result as WarmResult) : null,
+    );
+    lane.worker.postMessage({ type: 'warm', id, pos, net });
+    this.warmReference.set(id, reference);
+  }
+
+  /** WASM's side of the warm-ups in progress, by warm-up id. */
+  private readonly warmReference = new Map<number, Promise<WarmResult | null>>();
+
+  /** Whether the WebGPU worker is warm for `job` and faster at it than WASM (see the file comment). */
+  private gpuTakes(job: Job): boolean {
+    const gpu = this.gpu;
+    if (!gpu || gpu.warming || job.kind === 'warm') return false;
+    const speed = gpu.warm.get(gpuKey(job.size, job.net));
+    if (!speed) return false;
+    return job.search ? speed.gpuMs < speed.wasmMs * GPU_ROWS : speed.gpuMs < speed.wasmMs;
+  }
+
+  private onGpuMessage(lane: GpuLane, m: FromWorker): void {
+    if (m.type !== 'result' && m.type !== 'error') return;
+    if (m.id === null) {
+      if (m.type === 'error' && m.fatal) this.dropGpu(m.message, true);
+      return;
+    }
+    const warming = lane.warming;
+    if (warming && m.id === warming.id) {
+      clearTimeout(warming.timer);
+      const reference = this.warmReference.get(m.id);
+      this.warmReference.delete(m.id);
+      if (m.type === 'error') {
+        this.dropGpu(`warm-up failed: ${m.message}`, true);
+        return;
+      }
+      const got = m.result as WarmResult;
+      void (reference ?? Promise.resolve(null)).then((ref) => {
+        if (this.gpu !== lane) return;
+        // No WASM answer to compare with (WASM failed meanwhile): try again with the next search.
+        if (!ref) {
+          lane.warming = null;
+          this.wantGpu(Number(warming.key.split(':')[0]), warming.key.split(':')[1] as EngineNet);
+          return;
+        }
+        if (!sameEvaluation(ref.evaluation, got.evaluation)) {
+          this.dropGpu('WebGPU result differs from WASM', true);
+          return;
+        }
+        lane.warming = null;
+        lane.warm.set(warming.key, { gpuMs: got.ms, wasmMs: ref.ms });
+        this.rememberBackend('webgpu');
+        if (got.ms < ref.ms * GPU_ROWS) this.set({ backend: 'webgpu' });
+        this.pump();
+        this.pumpGpu();
+      });
+      return;
+    }
+    const job = this.running;
+    if (!job || job.lane !== 'gpu' || job.id !== m.id) return;
+    clearTimeout(this.watchdog);
+    if (m.type === 'error') {
+      this.dropGpu(`search failed: ${m.message}`, true);
+      return;
+    }
+    this.running = null;
+    job.settle({ status: 'done', result: m.result });
+    this.pump();
+    this.pumpGpu();
+  }
+
+  /**
+   * Drops the WebGPU worker. Its running search goes back to the head of the queue and runs on WASM.
+   * `remember`: WebGPU is broken here, so later launches do not try it (`wasm` stored).
+   */
+  private dropGpu(reason: string, remember: boolean): void {
+    this.gpuOff = true;
+    this.gpuWants.length = 0;
+    const lane = this.gpu;
+    if (!lane) return;
+    this.gpu = null;
+    this.gpuGeneration++;
+    if (lane.warming) clearTimeout(lane.warming.timer);
+    try {
+      lane.worker.terminate();
+    } catch {
+      /* already gone */
+    }
+    if (remember) this.rememberBackend('wasm');
+    console.warn(`Zigo engine: WebGPU dropped (${reason}); the computer plays on WASM.`);
+    const job = this.running;
+    if (job && job.lane === 'gpu') {
+      clearTimeout(this.watchdog);
+      this.running = null;
+      if (!job.settled) {
+        job.sent = false;
+        job.stopSent = false;
+        job.lane = null;
+        this.queue.unshift(job);
+      }
+    }
+    this.set({ backend: 'wasm' });
+    this.pump();
   }
 
   private armInitTimer(): void {
@@ -208,17 +421,13 @@ export class EngineDriver implements EngineHandle {
         w?.resolve();
         this.armInitTimer();
         this.pump();
+        this.startGpu();
+        this.pumpGpu();
         return;
       }
       case 'backend':
-        this.set({ backend: m.backend });
-        if (m.decided) {
-          try {
-            this.opts.storage?.set(m.backend);
-          } catch {
-            /* storage blocked: decide again next time */
-          }
-        }
+        // The main worker runs WASM; the figure says WebGPU once a WebGPU warm-up has passed.
+        if (!this.gpu || this.gpu.warm.size === 0) this.set({ backend: m.backend });
         return;
       case 'result':
       case 'error': {
@@ -233,7 +442,7 @@ export class EngineDriver implements EngineHandle {
           return;
         }
         const job = this.running;
-        if (!job || job.id !== m.id) return;
+        if (!job || job.lane !== 'main' || job.id !== m.id) return;
         this.running = null;
         clearTimeout(this.watchdog);
         if (m.type === 'result') job.settle({ status: 'done', result: m.result });
@@ -274,6 +483,19 @@ export class EngineDriver implements EngineHandle {
     clearTimeout(this.initTimer);
     clearTimeout(this.watchdog);
     this.generation++;
+    // The WebGPU worker goes with the engine (not for good: the next load starts it again).
+    const lane = this.gpu;
+    this.gpu = null;
+    this.gpuGeneration++;
+    if (lane) {
+      if (lane.warming) clearTimeout(lane.warming.timer);
+      try {
+        lane.worker.terminate();
+      } catch {
+        /* already gone */
+      }
+    }
+    this.gpuWants.length = 0;
     const w = this.worker;
     this.worker = null;
     try {
@@ -327,11 +549,22 @@ export class EngineDriver implements EngineHandle {
 
   /* ---------------------------------------------------------------- queue */
 
-  private enqueue(kind: JobKind, net: EngineNet, build: (id: number) => ToWorker, expectedMs: number, timeoutMs?: number): Promise<Outcome> {
+  private enqueue(
+    kind: JobKind,
+    net: EngineNet,
+    size: number,
+    search: boolean,
+    build: (id: number) => ToWorker,
+    expectedMs: number,
+    timeoutMs?: number,
+  ): Promise<Outcome> {
     return new Promise<Outcome>((resolve) => {
       const job: Job = {
         kind,
         net,
+        size,
+        search,
+        lane: null,
         build,
         expectedMs,
         id: 0,
@@ -351,6 +584,7 @@ export class EngineDriver implements EngineHandle {
       }
       if (timeoutMs !== undefined) job.timer = setTimeout(() => this.onDeadline(job), Math.max(0, timeoutMs));
       this.queue.push(job);
+      if (kind !== 'warm') this.wantGpu(size, net);
       if (!this.snapshot.nets.small) this.loadNet('small').catch(() => undefined);
       if (net === 'large' && !this.snapshot.nets.large) {
         // A failed large net fails this search only; the engine stays ready on the small net.
@@ -367,16 +601,21 @@ export class EngineDriver implements EngineHandle {
   }
 
   private pump(): void {
-    if (this.running || !this.worker || !this.snapshot.nets.small) return;
+    if (this.running) return;
     while (this.queue.length > 0 && this.queue[0].settled) this.queue.shift();
     const head = this.queue[0];
+    if (!head) return;
+    // A warm WebGPU worker that is not busy warming up takes the search when it is faster; else WASM.
+    const onGpu = this.gpuTakes(head);
+    const worker = onGpu ? this.gpu!.worker : this.worker;
     // Searches run in call order: one waiting for its net holds back the ones behind it.
-    if (!head || !this.snapshot.nets[head.net]) return;
+    if (!worker || !this.snapshot.nets.small || !this.snapshot.nets[head.net]) return;
     const job = this.queue.shift()!;
     job.id = this.nextId++;
     job.sent = true;
+    job.lane = onGpu ? 'gpu' : 'main';
     this.running = job;
-    this.worker.postMessage(job.build(job.id));
+    worker.postMessage(job.build(job.id));
     this.armWatchdog(job);
   }
 
@@ -386,15 +625,17 @@ export class EngineDriver implements EngineHandle {
       if (this.running !== job) return;
       this.sendStop(job);
       this.watchdog = setTimeout(() => {
-        if (this.running === job) this.fail(new EngineUnavailableError('Engine stopped answering'));
+        if (this.running !== job) return;
+        if (job.lane === 'gpu') this.dropGpu('a search stopped answering', true);
+        else this.fail(new EngineUnavailableError('Engine stopped answering'));
       }, STOP_GRACE_MS);
-    }, job.expectedMs + this.watchdogMs);
+    }, job.expectedMs + (job.lane === 'gpu' ? this.gpuWatchdogMs : this.watchdogMs));
   }
 
   private sendStop(job: Job): void {
     if (job.stopSent || !job.sent || this.running !== job) return;
     job.stopSent = true;
-    this.worker?.postMessage({ type: 'stop', id: job.id });
+    (job.lane === 'gpu' ? this.gpu?.worker : this.worker)?.postMessage({ type: 'stop', id: job.id });
   }
 
   private onDeadline(job: Job): void {
@@ -427,13 +668,15 @@ export class EngineDriver implements EngineHandle {
 
   readonly genmove = async (pos: Position, level: number, clock?: ClockInfo, opts: EngineGenmoveOptions = {}): Promise<EngineMove> => {
     const expected = clock ? Math.max(10_000, clock.left.mainMs / 10) : 10_000;
-    const o = await this.enqueue('genmove', needsLargeNet(level) ? 'large' : 'small', (id) => ({ type: 'genmove', id, pos, level, clock, opts }), expected);
+    const search = levelSpec(level).method === 'search';
+    const o = await this.enqueue('genmove', needsLargeNet(level) ? 'large' : 'small', pos.size, search, (id) => ({ type: 'genmove', id, pos, level, clock, opts }), expected);
     return valueOf(o) as EngineMove;
   };
 
   readonly evaluate = async (pos: Position, opts: EngineSearchOptions, timeoutMs?: number): Promise<EngineEvaluation | null> => {
     const expected = opts.timeMs ?? 10_000;
-    const o = await this.enqueue('evaluate', opts.net ?? 'small', (id) => ({ type: 'evaluate', id, pos, opts }), expected, timeoutMs);
+    const search = (opts.visits ?? (opts.timeMs ? 2 : 1)) > 1;
+    const o = await this.enqueue('evaluate', opts.net ?? 'small', pos.size, search, (id) => ({ type: 'evaluate', id, pos, opts }), expected, timeoutMs);
     return o.status === 'done' ? (o.result as EngineEvaluation) : null;
   };
 
@@ -443,7 +686,7 @@ export class EngineDriver implements EngineHandle {
     opts: EngineSearchOptions = {},
   ): Promise<{ move: string; winrate: number; scoreLead: number; prior?: number; visits?: number }[]> => {
     const expected = opts.timeMs ?? 10_000;
-    const o = await this.enqueue('analyze', opts.net ?? 'small', (id) => ({ type: 'analyze', id, pos, n, opts }), expected);
+    const o = await this.enqueue('analyze', opts.net ?? 'small', pos.size, true, (id) => ({ type: 'analyze', id, pos, n, opts }), expected);
     return valueOf(o) as { move: string; winrate: number; scoreLead: number }[];
   };
 }

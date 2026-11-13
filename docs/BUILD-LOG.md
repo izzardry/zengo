@@ -18,6 +18,23 @@ The run's memory (PLAN.md section 1, rule 5). Updated after every package and ev
 
 The final gate, as re-run by the orchestrator at `bc271fc`: `npm run lint` clean, `npm run typecheck` clean, `npm test` 81 files / 2054 tests, `npm run build` ok (33 precache entries; only the chunk-size warning), chess grep 0 hits, `caffeinate -i npx playwright test` 55/55 (smoke 5, chrome 9, m1 22, m2 13, m3 6).
 
+### After the run: computer failed in Safari (fixed 2026-11-13, not yet confirmed in Safari)
+
+The owner reported "The computer could not be loaded." after the first stone, in Safari on the Mac and on iOS; Chrome played. Cause:
+- On a first launch the worker probed WebGPU right after loading, with no time limit, and every search queued behind the probe.
+- With shader compilation, the first WebGPU reply in Chrome came after about 20 s; Safari, which compiles more slowly, ran into the 40 s watchdog.
+- The e2e suite never saw this: the headless browser has no WebGPU, so it always ran WASM.
+
+Fix:
+- WASM always plays from the first move. A second worker warms WebGPU up in the background for each board size and net: parallel shader compile, one fixed batch shape, a result check against WASM and a timing.
+- A search goes to WebGPU only when it is warm and faster for that kind of search.
+- A WebGPU worker that errors, crashes, hangs or disagrees is dropped and WASM carries on, so no WebGPU fault reaches the player.
+
+Results:
+- Measured in Chromium: first reply about 0.4 s (was about 20 s), WebGPU warm-up 5.3 s down to 0.1 s.
+- The headless test browser reads GPU results in about 300 ms, so there WebGPU correctly takes nothing.
+- Real Safari could not be driven (safaridriver sessions time out), so the owner has to confirm the fix in Safari and on iOS.
+
 ### Switched off by flag
 
 Nothing. `flags.computer`, `flags.rooms` and the broker flag are on; `COMPUTER_ENABLED` and `ROOMS_ENABLED` are true.
@@ -430,6 +447,13 @@ _(One line each: where the design was silent, what was chosen and why.)_
 - Gate 3 fix (e2e timing under load (m1/m2 suites)): The m1 share-URL test and both m1 screenshot tests get test.setTimeout(120_000): since Gate 2, their passTwice waits for the engine (up to 60 s) and then the proposal (up to 7 s), which the Gate 1 default of 60 s did not allow for. m2's engine tests already use 120-240 s.
 - Gate 3 fix (e2e timing under load (m1/m2 suites)): The m2 byo-yomi test opens the link with Black's first move only (C3) and waits for the computer's reply, so Black's main time starts after the engine has loaded. Engine loading time no longer counts against the `main > 50_000` check, which is unchanged. The rest of the test (quietPoint, 4 plies, ·3/·2, Out of time, W+T) is unchanged; only the white stone is now the computer's choice instead of G7.
 
+**After the run (Safari fix)**
+- WASM is the main backend on every device. WebGPU is never in the path of a reply until it has been warmed up and checked for that board size and net.
+- WebGPU runs every network call at a fixed batch of 8 rows, so each board size compiles one set of shaders. Its pipelines are created in parallel with TF.js's `WEBGPU_ENGINE_COMPILE_ONLY` and `checkCompileCompletionAsync`.
+- Routing by measured speed: a single evaluation (levels 1–9, the guard, the dame check) compares one WebGPU call with one WASM call; a search compares one WebGPU call with 8 WASM calls.
+- A WebGPU error, crash, mismatch or hung search remembers `wasm` in `zigo:engine-backend` and is not retried on that device. A warm-up slower than 180 s drops WebGPU for that page only, so a slow first compile is retried on the next launch.
+- The worker no longer probes or falls back by itself; one worker runs one backend.
+
 **Final phase**
 - Orchestrator: PLAN's "`/code-review high` on the whole branch" runs as three high-effort review agents inside the final workflow (rules/sync/room, engine/assistance, UI/hooks), because the skill reviews a diff and the whole repo is new; each finding is checked by a skeptic like the audit findings.
 - Orchestrator: final workflow `wf_f5761ffc-978`: 5 design auditors (DESIGN 4–6, 7–8, 9, 10–11, 12–14), a Ztyle auditor, 3 code reviewers and a visual pass, each followed by a skeptic; then triage into fix clusters, fixes and the README in parallel, and the full gate with up to three fix rounds.
@@ -496,7 +520,8 @@ _(Features switched off in `src/lib/flags.ts`, and anything left unfinished.)_
 - M1: a URL with `o=c&p=1` still opens a computer session that never moves (only the Start pill and history are gated by `COMPUTER_ENABLED`); M2 replaces it.
 - ~~M1: 1G's room scoring is a first cut~~ — resolved in M3 (3A rule 6 without forks, 3B head probes on a resend timer, seat-1 hand-over).
 - M2: no rank line yet. `src/lib/ranks.json` was not written: the 9×9 ladder against GNU Go level 10 (10 games per level) placed only levels 5 (≈6k) and 7 (≈3k), with about ±4 kyu uncertainty, and DESIGN 10.2 asks for 19×19 ranks. Run `node scripts/calibrate.mjs --size 19 --write` with more games to fill it.
-- M2: the worker does not warm the network up after loading, so the first WebGPU evaluation on a new board size includes shader compile time.
+- ~~M2: the worker does not warm the network up after loading~~ — fixed after the run (WASM first, WebGPU warmed up in the background); this was the cause of the Safari failure.
+- After the run: the e2e suite still runs without WebGPU. The WebGPU lane is covered by driver unit tests and by manual runs in Chromium (full and headless shell) and Playwright WebKit, not by real Safari or a phone.
 - M2: the search is a compact port of Web KaTrain's (no graph search, subtree value bias, noise pruning, uncertainty weighting or human-SL exploration); numbers match KataGo's formulas for exploration, first-play reduction and LCB.
 - M2: in review, byo-yomi clock faces have no spoken label (review uses `reviewClockView`, which bypasses useClock).
 - M3: the room e2e tests run under Playwright's exclusive lock (one at a time after the parallel tests): in parallel with the engine suites at a machine load average of 150–210 the manual exchange stalled. The root cause (CPU starvation vs concurrent WebRTC) was not established; Zhess's identical transport passed fully parallel. Worth a look if rooms ever feel slow to connect on a busy phone.
