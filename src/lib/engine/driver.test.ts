@@ -130,6 +130,107 @@ describe('EngineDriver', () => {
     expect(w().sent.length).toBe(before);
   });
 
+  it('stage 2 from idle: progress follows the large net, not the small net finishing first', async () => {
+    const { driver, w } = setup();
+    const two = driver.load(2);
+    expect(w().of('load').map((m) => (m as Extract<ToWorker, { type: 'load' }>).net)).toEqual(['small', 'large']);
+    expect(driver.state).toBe('loading');
+    expect(driver.progress).toBe(0);
+    // The small net (cached) reports and finishes; the large one is what the pill waits for.
+    w().emit({ type: 'progress', net: 'small', loaded: 100, total: 100 });
+    expect(driver.progress).toBe(0);
+    w().loaded('small');
+    expect(driver.state).toBe('ready');
+    expect(driver.progress).toBe(0);
+    w().emit({ type: 'progress', net: 'large', loaded: 500_000, total: 11_138_361 });
+    expect(driver.progress).toBeGreaterThan(0);
+    expect(driver.progress).toBeLessThan(0.1);
+    w().emit({ type: 'progress', net: 'large', loaded: 20, total: 100 });
+    expect(driver.progress).toBeCloseTo(0.18);
+    w().emit({ type: 'progress', net: 'large', loaded: 50, total: 100 });
+    expect(driver.progress).toBeCloseTo(0.45);
+    w().emit({ type: 'progress', net: 'large', loaded: 100, total: 100 });
+    expect(driver.progress).toBeCloseTo(0.9);
+    w().loaded('large');
+    await two;
+    expect(driver.progress).toBe(1);
+  });
+
+  it('stage 2 from idle: the large net finishing first still shows the small net loading', async () => {
+    const { driver, w } = setup();
+    const two = driver.load(2);
+    w().emit({ type: 'progress', net: 'small', loaded: 30, total: 100 });
+    w().loaded('large');
+    expect(driver.progress).toBeCloseTo(0.27);
+    expect(driver.state).toBe('loading');
+    w().loaded('small');
+    await two;
+    expect(driver.progress).toBe(1);
+  });
+
+  it('a level 8–12 genmove loads the large net under the loading timer, not the search watchdog', async () => {
+    vi.useFakeTimers();
+    const { driver, w } = setup({ initTimeoutMs: 20_000, watchdogMs: 1000 });
+    const r = driver.genmove(POS, 10);
+    expect(w().of('load').map((m) => (m as Extract<ToWorker, { type: 'load' }>).net)).toEqual(['small', 'large']);
+    w().loaded('small');
+    expect(w().of('genmove')).toHaveLength(0);
+    // A slow but working 11 MB download: 60 s of steady progress, far past the search's 10 s + 1 s.
+    for (let s = 1; s <= 12; s++) {
+      vi.advanceTimersByTime(5000);
+      w().emit({ type: 'progress', net: 'large', loaded: s * 900_000, total: 11_138_361 });
+    }
+    expect(driver.state).toBe('ready');
+    expect(w().terminated).toBe(false);
+    expect(w().of('genmove')).toHaveLength(0);
+    w().loaded('large');
+    const g = w().last('genmove')!;
+    expect(g).toMatchObject({ level: 10 });
+    const loadLarge = w().sent.findIndex((m) => m.type === 'load' && m.net === 'large');
+    expect(w().sent.indexOf(g)).toBeGreaterThan(loadLarge);
+    w().emit({ type: 'result', id: g.id, result: { move: 'ee' } });
+    await expect(r).resolves.toEqual({ move: 'ee' });
+  });
+
+  it('a large-net search waits in call order and holds back the small-net searches behind it', async () => {
+    const { driver, w } = setup();
+    void driver.load(1);
+    w().loaded('small');
+    const g = driver.genmove(POS, 9);
+    const e = driver.evaluate(POS, {});
+    expect(w().last('load')?.net).toBe('large');
+    expect(w().of('genmove')).toHaveLength(0);
+    expect(w().of('evaluate')).toHaveLength(0);
+    w().loaded('large');
+    const gm = w().last('genmove')!;
+    expect(w().of('evaluate')).toHaveLength(0);
+    w().emit({ type: 'result', id: gm.id, result: { move: 'cc' } });
+    await expect(g).resolves.toEqual({ move: 'cc' });
+    const ev = w().last('evaluate')!;
+    w().emit({ type: 'result', id: ev.id, result: { winrate: 0.5, scoreLead: 0, ownership: new Float32Array(81), policy: new Float32Array(82) } });
+    await expect(e).resolves.toMatchObject({ winrate: 0.5 });
+  });
+
+  it('an evaluate on the large net loads it first; a failed large net fails only that search', async () => {
+    const { driver, w } = setup();
+    void driver.load(1);
+    w().loaded('small');
+    const big = driver.evaluate(POS, { net: 'large', visits: 10 });
+    const next = driver.analyze(POS, 2);
+    expect(w().last('load')?.net).toBe('large');
+    w().emit({ type: 'error', id: w().last('load')!.id, message: 'offline' });
+    await expect(big).resolves.toBeNull();
+    expect(driver.state).toBe('ready');
+    const an = w().last('analyze')!;
+    expect(an).toBeDefined();
+    w().emit({ type: 'result', id: an.id, result: [] });
+    await expect(next).resolves.toEqual([]);
+    const g = driver.genmove(POS, 11);
+    w().emit({ type: 'error', id: w().last('load')!.id, message: 'offline again' });
+    await expect(g).rejects.toThrow('offline again');
+    expect(driver.state).toBe('ready');
+  });
+
   it('a search loads stage 1 itself and waits for it', async () => {
     const { driver, w } = setup();
     const r = driver.genmove(POS, 3);
@@ -302,8 +403,10 @@ describe('EngineDriver', () => {
 
   it('passes genmove options and the clock through', async () => {
     const { driver, w } = setup();
-    void driver.load(1);
+    // Level 12 plays on the large net, so its search is sent once stage 2 is loaded.
+    void driver.load(2);
     w().loaded('small');
+    w().loaded('large');
     const clock = { tc: { kind: 'fischer' as const, baseMs: 60_000, incMs: 2000 }, left: { mainMs: 30_000, periodMs: 0, periods: 0 } };
     void driver.genmove(POS, 12, clock, { avoid: ['ee'], seed: 4 });
     expect(w().last('genmove')).toMatchObject({ level: 12, clock, opts: { avoid: ['ee'], seed: 4 } });

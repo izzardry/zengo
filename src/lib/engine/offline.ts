@@ -17,6 +17,11 @@
  * which the service worker precaches with the app shell; only the WASM binaries and the networks
  * live here. The worker reads the networks from `engine-cache` itself (src/workers/engine.worker.ts).
  *
+ * A stage's files reach `engine-cache` only when the whole stage is downloaded, so the engine must
+ * not load a stage while the page downloads it, or the worker fetches the same files a second time.
+ * `runningDownload(stage)` exposes the download in flight (its percent and a promise of its end) so
+ * the Start pill can wait for it (`useEngineStart` in hooks/useComputer.ts).
+ *
  * Framework-free; `hooks/useEngineOffline.ts` drives it.
  */
 
@@ -109,16 +114,80 @@ export function checkAsset(kind: AssetKind, contentType: string | null, body: Ui
     throw new EngineAssetError(`engine download: ${url} is not a ${kind} file`);
 }
 
+/** A stage download in flight (`runningDownload`). */
+export interface StageDownload {
+  readonly stage: EngineStage;
+  /** 0–99 while it runs, as the status line shows it. */
+  readonly percent: number;
+  /** Resolves true once the stage is in `engine-cache`, false when the download failed or was aborted. Never rejects. */
+  readonly done: Promise<boolean>;
+}
+
+const running = new Map<EngineStage, StageDownload>();
+const runningListeners = new Set<() => void>();
+
+function notifyRunning(): void {
+  for (const cb of [...runningListeners]) cb();
+}
+
+/** The download of `stage` the page is running now, or null. */
+export function runningDownload(stage: EngineStage): StageDownload | null {
+  return running.get(stage) ?? null;
+}
+
+/** Called whenever a stage download starts, reports progress or ends. Returns the unsubscribe. */
+export function subscribeRunningDownloads(cb: () => void): () => void {
+  runningListeners.add(cb);
+  return () => {
+    runningListeners.delete(cb);
+  };
+}
+
 /**
  * Downloads every file of `stage` into `engine-cache`, reporting 0–100. Rejects on a network error,
  * a non-200 response, a file that fails `checkAsset`, or an abort; nothing of the stage is stored then.
+ * While it runs, `runningDownload(stage)` returns it. Its `done` settles after the promise returned
+ * here, so a caller's own `.then` on this promise runs before anyone waiting on `done` resumes.
  */
-export async function downloadStage(
+export function downloadStage(
   stage: EngineStage,
   base: string,
   onProgress: (percent: number) => void,
   signal?: AbortSignal,
   deps: EngineOfflineDeps = {},
+): Promise<void> {
+  const entry: { stage: EngineStage; percent: number; done: Promise<boolean> } = { stage, percent: 0, done: Promise.resolve(false) };
+  const p = fetchStage(
+    stage,
+    base,
+    (percent) => {
+      entry.percent = percent;
+      if (running.get(stage) === entry) notifyRunning();
+      onProgress(percent);
+    },
+    signal,
+    deps,
+  );
+  entry.done = p.then(
+    () => true,
+    () => false,
+  );
+  running.set(stage, entry);
+  notifyRunning();
+  void entry.done.then(() => {
+    if (running.get(stage) !== entry) return;
+    running.delete(stage);
+    notifyRunning();
+  });
+  return p;
+}
+
+async function fetchStage(
+  stage: EngineStage,
+  base: string,
+  onProgress: (percent: number) => void,
+  signal: AbortSignal | undefined,
+  deps: EngineOfflineDeps,
 ): Promise<void> {
   const store = deps.caches ?? globalThis.caches;
   const doFetch = deps.fetch ?? globalThis.fetch.bind(globalThis);

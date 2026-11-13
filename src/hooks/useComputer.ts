@@ -27,6 +27,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { EngineUnavailableError, isEngineAbort } from '@/lib/engine/handle';
+import { runningDownload, subscribeRunningDownloads, type EngineStage } from '@/lib/engine/offline';
 import {
   MIN_REPLY_MS,
   avoidFor,
@@ -303,6 +304,12 @@ export interface UseEngineStartOptions {
  * DESIGN 10.1 / 14: the engine is loaded on the first computer game; meanwhile the Start pill shows
  * the spinner with progress. Usage on the Start tap for a computer game:
  * `if (await engineStart.prepare(level)) gs.start();`
+ *
+ * When the page is downloading a stage the level needs (`runningDownload` of lib/engine/offline.ts:
+ * stage 1, and for levels 8–12 stage 2), `prepare` first waits for that download, with its percent
+ * on the pill (the status line's figure), and only then loads the engine, which reads the files from
+ * `engine-cache` instead of fetching them a second time. When that download fails, the engine loads
+ * (and fetches) as before.
  */
 export function useEngineStart(engine: EngineApi, opts: UseEngineStartOptions = {}): EngineStart {
   const engineRef = useRef(engine);
@@ -311,6 +318,8 @@ export function useEngineStart(engine: EngineApi, opts: UseEngineStartOptions = 
   onFailRef.current = opts.onFail;
   const gen = useRef(0);
   const [waiting, setWaiting] = useState(false);
+  /** The pill's figure while the page's download of a stage runs (0–1), then the floor it reached. */
+  const [download, setDownload] = useState<{ readonly running: boolean; readonly progress: number } | null>(null);
 
   // Unmount: a `prepare` still waiting resolves false.
   useEffect(() => {
@@ -326,14 +335,28 @@ export function useEngineStart(engine: EngineApi, opts: UseEngineStartOptions = 
     if (e.state === 'ready' && e.nets.small && (!large || e.nets.large)) return true;
     const my = ++gen.current;
     setWaiting(true);
+    setDownload(null);
     try {
+      // Stage 2 starts the moment stage 1's download ends (useEngineOffline), so it is seen here.
+      for (const stage of (large ? [1, 2] : [1]) as EngineStage[]) {
+        if (engineRef.current.nets[stage === 1 ? 'small' : 'large']) continue;
+        const ok = await waitForDownload(stage, (percent) => {
+          if (my === gen.current) setDownload({ running: true, progress: percent / 100 });
+        });
+        if (my !== gen.current) return false;
+        // Downloaded: the engine now only reads and builds, so keep the pill near the end. Failed: the
+        // engine fetches the files itself, with its own progress.
+        if (ok !== null) setDownload(ok ? { running: false, progress: 0.99 } : null);
+      }
       await e.load(large ? 2 : 1);
       if (my !== gen.current) return false;
       setWaiting(false);
+      setDownload(null);
       return true;
     } catch (err) {
       if (my !== gen.current) return false;
       setWaiting(false);
+      setDownload(null);
       onFailRef.current?.(err);
       return false;
     }
@@ -342,10 +365,31 @@ export function useEngineStart(engine: EngineApi, opts: UseEngineStartOptions = 
   const cancel = useCallback(() => {
     gen.current++;
     setWaiting(false);
+    setDownload(null);
   }, []);
 
   const loading = waiting;
-  return { loading, progress: loading ? engine.progress : 0, prepare, cancel };
+  const progress = !loading ? 0 : !download ? engine.progress : download.running ? download.progress : Math.max(download.progress, engine.progress);
+  return { loading, progress, prepare, cancel };
+}
+
+/**
+ * Waits for the page's running download of `stage`, reporting its percent. Resolves null at once when
+ * none runs, else true when it cached the stage, false when it failed or was aborted.
+ */
+async function waitForDownload(stage: EngineStage, onPercent: (percent: number) => void): Promise<boolean | null> {
+  const running = runningDownload(stage);
+  if (!running) return null;
+  onPercent(running.percent);
+  const unsubscribe = subscribeRunningDownloads(() => {
+    const now = runningDownload(stage);
+    if (now === running) onPercent(now.percent);
+  });
+  try {
+    return await running.done;
+  } finally {
+    unsubscribe();
+  }
 }
 
 export default useComputer;

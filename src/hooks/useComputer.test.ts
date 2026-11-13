@@ -1,5 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { FakeEngine, movesKey } from '@/lib/engine/fake';
+import { ENGINE_STAGES, downloadStage, runningDownload, type EngineStage } from '@/lib/engine/offline';
 import { seededRng } from '@/lib/levels';
 import type { ClockInfo, EngineApi, EngineGenmoveOptions, EngineMove, Game, Position } from '@/lib/types';
 import { PASS, fromDiagram, indexToPoint, isLegal, makeSettings, newGame, pass, play, undo } from '@/lib/zigo';
@@ -352,6 +353,128 @@ describe('useEngineStart', () => {
     });
     expect(again).toBe(true);
     expect(engine.calls.filter((c) => c.method === 'load')).toHaveLength(2);
+  });
+
+  /**
+   * The page's download of `stage` (lib/engine/offline.ts), fed by hand: `feed(fraction)` delivers that
+   * share of every file, `end()` the rest, `fail()` errors every file.
+   */
+  function pageDownload(stage: EngineStage) {
+    const BASE = 'https://example.test/zigo/';
+    const SIZE = 1000;
+    const streams: ReadableStreamDefaultController<Uint8Array>[] = [];
+    const sent: number[] = [];
+    const fetch = (async (url: string) => {
+      const asset = ENGINE_STAGES[stage].find((a) => BASE + a.path === url)!;
+      const head = asset.kind === 'wasm' ? [0x00, 0x61, 0x73, 0x6d] : [0x1f, 0x8b];
+      const body = new ReadableStream<Uint8Array>({
+        start(c) {
+          streams.push(c);
+          sent.push(0);
+          const first = new Uint8Array(head.length);
+          first.set(head);
+          c.enqueue(first);
+          sent[sent.length - 1] = head.length;
+        },
+      });
+      return new Response(body, { status: 200, headers: { 'content-type': 'application/octet-stream', 'content-length': String(SIZE) } });
+    }) as unknown as typeof globalThis.fetch;
+    const store = new Map<string, Response>();
+    const cache = { match: async (u: string) => store.get(u), put: async (u: string, r: Response) => void store.set(u, r) };
+    const caches = { open: async () => cache } as unknown as CacheStorage;
+    const done = downloadStage(stage, BASE, () => undefined, undefined, { caches, fetch }).then(
+      () => true,
+      () => false,
+    );
+    const feed = (to: number) =>
+      streams.forEach((c, i) => {
+        const n = Math.round(SIZE * to) - sent[i];
+        if (n > 0) c.enqueue(new Uint8Array(n));
+        sent[i] += Math.max(0, n);
+      });
+    return {
+      done,
+      feed,
+      end: () => {
+        feed(1);
+        streams.forEach((c) => c.close());
+      },
+      fail: () => streams.forEach((c) => c.error(new Error('network'))),
+    };
+  }
+
+  const loads = (engine: FakeEngine) => engine.calls.filter((c) => c.method === 'load').map((c) => c.args[0]);
+
+  it('waits for the page\'s running stage 1 download, with its percent on the pill, then loads the engine', async () => {
+    const engine = new FakeEngine({ loadMs: 100 });
+    const page = pageDownload(1);
+    await advance(0);
+    page.feed(0.5);
+    await advance(0);
+    expect(runningDownload(1)!.percent).toBe(50);
+    const hook = renderHook((e: EngineApi) => useEngineStart(e), { initialProps: engine as EngineApi });
+    let ok: boolean | undefined;
+    act(() => {
+      void hook.result.current.prepare(5).then((r) => (ok = r));
+    });
+    expect(hook.result.current.loading).toBe(true);
+    expect(hook.result.current.progress).toBeCloseTo(0.5);
+    page.feed(0.8);
+    await advance(0);
+    expect(hook.result.current.progress).toBeCloseTo(0.8);
+    // The engine is not asked while the page downloads (it would fetch the same files again).
+    expect(loads(engine)).toEqual([]);
+    page.end();
+    await advance(0);
+    expect(await page.done).toBe(true);
+    expect(loads(engine)).toEqual([1]);
+    // Building from engine-cache: the pill stays at the end, it does not drop back to 0.
+    expect(hook.result.current.progress).toBeGreaterThanOrEqual(0.99);
+    hook.rerender(engine);
+    await advance(100);
+    expect(ok).toBe(true);
+    expect(hook.result.current.loading).toBe(false);
+  });
+
+  it('a level 8–12 waits for the page\'s running stage 2 download before loading stage 2', async () => {
+    const engine = new FakeEngine({ loadMs: 100 });
+    const page = pageDownload(2);
+    await advance(0);
+    page.feed(0.25);
+    await advance(0);
+    const hook = renderHook((e: EngineApi) => useEngineStart(e), { initialProps: engine as EngineApi });
+    let ok: boolean | undefined;
+    act(() => {
+      void hook.result.current.prepare(10).then((r) => (ok = r));
+    });
+    await advance(0);
+    expect(hook.result.current.progress).toBeCloseTo(0.25);
+    expect(loads(engine)).toEqual([]);
+    page.end();
+    await advance(0);
+    expect(loads(engine)).toEqual([2]);
+    await advance(100);
+    expect(ok).toBe(true);
+    expect(engine.nets.large).toBe(true);
+  });
+
+  it('when the page\'s download fails, the engine loads (and fetches) by itself', async () => {
+    const engine = new FakeEngine({ loadMs: 100 });
+    const page = pageDownload(1);
+    await advance(0);
+    const hook = renderHook((e: EngineApi) => useEngineStart(e), { initialProps: engine as EngineApi });
+    let ok: boolean | undefined;
+    act(() => {
+      void hook.result.current.prepare(3).then((r) => (ok = r));
+    });
+    page.fail();
+    await advance(0);
+    expect(await page.done).toBe(false);
+    expect(loads(engine)).toEqual([1]);
+    hook.rerender(engine);
+    expect(hook.result.current.progress).toBe(engine.progress);
+    await advance(100);
+    expect(ok).toBe(true);
   });
 
   it('reports a failure and resolves false; cancel() drops a waiting prepare', async () => {

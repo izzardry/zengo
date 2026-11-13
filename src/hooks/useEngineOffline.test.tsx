@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { useEngineOffline } from './useEngineOffline';
-import { ENGINE_STAGES, LARGE_NET_PATH, SMALL_NET_PATH } from '@/lib/engine/offline';
+import { ENGINE_STAGES, LARGE_NET_PATH, SMALL_NET_PATH, runningDownload } from '@/lib/engine/offline';
 
 const base = 'https://example.test/app/';
 const LARGE_URL = base + LARGE_NET_PATH;
@@ -99,6 +99,29 @@ describe('useEngineOffline (DESIGN 14)', () => {
     act(() => gates.get(LARGE_URL)!());
     await waitFor(() => expect(result.current.line).toEqual({ kind: 'ready' }));
     expect(store.has(SMALL_URL) && store.has(LARGE_URL)).toBe(true);
+  });
+
+  it('starts stage 2 in the same step stage 1 ends, before anyone waiting on stage 1 resumes', async () => {
+    const store = fakeCaches();
+    const inner = okFetch();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url !== LARGE_URL) await gate;
+      return inner(url, init);
+    }) as unknown as typeof globalThis.fetch;
+    const { result } = renderHook(() => useEngineOffline({ ...on, large: true, caches: store.caches, fetch }));
+    await waitFor(() => expect(runningDownload(1)).not.toBeNull());
+    const stage1 = runningDownload(1)!;
+    let stage2AtResume: unknown = 'unset';
+    const waiter = stage1.done.then(() => (stage2AtResume = runningDownload(2)));
+    act(() => release());
+    await act(async () => {
+      await waiter;
+    });
+    expect(stage2AtResume).not.toBeNull();
+    expect((stage2AtResume as { stage: number }).stage).toBe(2);
+    await waitFor(() => expect(result.current.stage2).toEqual({ status: 'ready' }));
   });
 
   it('asks for persistent storage once, after the first successful download', async () => {

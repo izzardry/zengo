@@ -6,9 +6,13 @@
  * instance so the computer, the hint, the guard and the scoring proposal use one worker.
  *
  * Rules:
- * - Lazy: nothing is fetched until `load()` or the first search; a search loads stage 1 itself. A
- *   search started while the engine loads waits in the queue; its timeout (if any) counts from the
- *   call.
+ * - Lazy: nothing is fetched until `load()` or the first search; a search loads stage 1 itself, and a
+ *   search that needs the large net (a level 8–12 `genmove`, or `opts.net === 'large'`) loads that
+ *   too. A search waits in the queue until its net is loaded, so a download runs under the loading
+ *   rules (`initTimeoutMs`, re-armed by progress), never under the search watchdog. Its timeout (if
+ *   any) counts from the call.
+ * - `progress` follows the net that is being waited for: the large net while it loads (stage 2),
+ *   else the small net. The small net finishing does not show 100 % while the large one loads.
  * - One search at a time. Searches queue in call order; the next is sent only after the worker has
  *   answered the previous one (also a stopped or timed-out one).
  * - `stop()` cancels everything: queued searches and the running one settle at once (`genmove` and
@@ -25,6 +29,7 @@
 import type { ClockInfo, EngineEvaluation, EngineGenmoveOptions, EngineMove, EngineNet, EngineSearchOptions, EngineState, Position } from '../types';
 import { EngineAbortError, EngineUnavailableError, type EngineHandle, type EngineSnapshot } from './handle';
 import type { EngineBackendChoice, FromWorker, ToWorker } from './protocol';
+import { needsLargeNet } from '../levels';
 
 /** The part of `Worker` the driver uses. */
 export interface WorkerLike {
@@ -61,6 +66,8 @@ type Outcome =
 
 interface Job {
   readonly kind: JobKind;
+  /** The net the search runs on; the job is sent only once the worker has it. */
+  readonly net: EngineNet;
   readonly build: (id: number) => ToWorker;
   /** The longest the search should take (for the watchdog). */
   readonly expectedMs: number;
@@ -92,6 +99,8 @@ export class EngineDriver implements EngineHandle {
   /** Pending net loads: resolved when the worker reports the net, rejected on failure. */
   private readonly netWaits = new Map<EngineNet, { promise: Promise<void>; resolve: () => void; reject: (e: Error) => void; id: number }>();
   private readonly loadIds = new Map<number, EngineNet>();
+  /** Each net's own load progress (0..1), so one net's messages never move the other's figure. */
+  private readonly netProgress: Record<EngineNet, number> = { small: 0, large: 0 };
 
   private readonly queue: Job[] = [];
   private running: Job | null = null;
@@ -186,17 +195,17 @@ export class EngineDriver implements EngineHandle {
         this.armInitTimer();
         const total = m.total > 0 ? m.total : 1;
         // The download is most of the loading; building the network takes the rest.
-        this.set({ progress: Math.max(this.snapshot.progress, Math.min(1, m.loaded / total) * 0.9) });
+        this.netProgress[m.net] = Math.max(this.netProgress[m.net], Math.min(1, m.loaded / total) * 0.9);
+        if (m.net === this.progressNet()) this.set({ progress: this.netProgress[m.net] });
         return;
       }
       case 'net': {
         const nets = { ...this.snapshot.nets, [m.net]: true };
-        this.set({ nets, ...(m.net === 'small' ? { state: 'ready' as const } : {}), progress: 1 });
+        this.netProgress[m.net] = 1;
         const w = this.netWaits.get(m.net);
-        if (w) {
-          this.netWaits.delete(m.net);
-          w.resolve();
-        }
+        if (w) this.netWaits.delete(m.net);
+        this.set({ nets, ...(m.net === 'small' ? { state: 'ready' as const } : {}), progress: this.pendingProgress() });
+        w?.resolve();
         this.armInitTimer();
         this.pump();
         return;
@@ -235,6 +244,19 @@ export class EngineDriver implements EngineHandle {
     }
   }
 
+  /** The net whose load the progress figure shows: the large one while it loads, else the small one. */
+  private progressNet(): EngineNet {
+    return this.netWaits.has('large') ? 'large' : 'small';
+  }
+
+  /**
+   * The progress figure after a net finished or failed: the figure of the net still loading (so the
+   * small net done while the large one loads does not show 100 %), or 1 when nothing loads.
+   */
+  private pendingProgress(): number {
+    return this.netWaits.size > 0 ? this.netProgress[this.progressNet()] : 1;
+  }
+
   private onLoadError(net: EngineNet, error: Error): void {
     const w = this.netWaits.get(net);
     if (w) {
@@ -243,7 +265,7 @@ export class EngineDriver implements EngineHandle {
     }
     if (net === 'small') this.fail(error);
     else {
-      this.set({ progress: 1 });
+      this.set({ progress: this.pendingProgress() });
       this.armInitTimer();
     }
   }
@@ -267,6 +289,7 @@ export class EngineDriver implements EngineHandle {
     this.netWaits.clear();
     this.loadIds.clear();
     for (const wt of waits) wt.reject(error);
+    this.netProgress.small = this.netProgress.large = 0;
     this.set({ state: this.disposed ? 'idle' : 'failed', progress: 0, nets: NO_NETS, backend: this.disposed ? null : this.snapshot.backend });
   }
 
@@ -287,9 +310,9 @@ export class EngineDriver implements EngineHandle {
     const id = this.nextId++;
     this.netWaits.set(net, { promise, resolve, reject, id });
     this.loadIds.set(id, net);
-    if (net === 'small') this.set({ state: 'loading', progress: 0 });
-    else if (this.snapshot.state !== 'ready') this.set({ state: 'loading' });
-    else this.set({ progress: 0 });
+    this.netProgress[net] = 0;
+    const progress = this.netProgress[this.progressNet()];
+    this.set(this.snapshot.state === 'ready' ? { progress } : { state: 'loading', progress });
     this.armInitTimer();
     w.postMessage({ type: 'load', id, net });
     return promise;
@@ -304,10 +327,11 @@ export class EngineDriver implements EngineHandle {
 
   /* ---------------------------------------------------------------- queue */
 
-  private enqueue(kind: JobKind, build: (id: number) => ToWorker, expectedMs: number, timeoutMs?: number): Promise<Outcome> {
+  private enqueue(kind: JobKind, net: EngineNet, build: (id: number) => ToWorker, expectedMs: number, timeoutMs?: number): Promise<Outcome> {
     return new Promise<Outcome>((resolve) => {
       const job: Job = {
         kind,
+        net,
         build,
         expectedMs,
         id: 0,
@@ -328,15 +352,27 @@ export class EngineDriver implements EngineHandle {
       if (timeoutMs !== undefined) job.timer = setTimeout(() => this.onDeadline(job), Math.max(0, timeoutMs));
       this.queue.push(job);
       if (!this.snapshot.nets.small) this.loadNet('small').catch(() => undefined);
+      if (net === 'large' && !this.snapshot.nets.large) {
+        // A failed large net fails this search only; the engine stays ready on the small net.
+        this.loadNet('large').catch((error: Error) => {
+          if (job.settled) return;
+          const i = this.queue.indexOf(job);
+          if (i >= 0) this.queue.splice(i, 1);
+          job.settle({ status: 'failed', error: error instanceof EngineUnavailableError ? error : new EngineUnavailableError(error.message) });
+          this.pump();
+        });
+      }
       this.pump();
     });
   }
 
   private pump(): void {
     if (this.running || !this.worker || !this.snapshot.nets.small) return;
-    let job = this.queue.shift();
-    while (job && job.settled) job = this.queue.shift();
-    if (!job) return;
+    while (this.queue.length > 0 && this.queue[0].settled) this.queue.shift();
+    const head = this.queue[0];
+    // Searches run in call order: one waiting for its net holds back the ones behind it.
+    if (!head || !this.snapshot.nets[head.net]) return;
+    const job = this.queue.shift()!;
     job.id = this.nextId++;
     job.sent = true;
     this.running = job;
@@ -391,13 +427,13 @@ export class EngineDriver implements EngineHandle {
 
   readonly genmove = async (pos: Position, level: number, clock?: ClockInfo, opts: EngineGenmoveOptions = {}): Promise<EngineMove> => {
     const expected = clock ? Math.max(10_000, clock.left.mainMs / 10) : 10_000;
-    const o = await this.enqueue('genmove', (id) => ({ type: 'genmove', id, pos, level, clock, opts }), expected);
+    const o = await this.enqueue('genmove', needsLargeNet(level) ? 'large' : 'small', (id) => ({ type: 'genmove', id, pos, level, clock, opts }), expected);
     return valueOf(o) as EngineMove;
   };
 
   readonly evaluate = async (pos: Position, opts: EngineSearchOptions, timeoutMs?: number): Promise<EngineEvaluation | null> => {
     const expected = opts.timeMs ?? 10_000;
-    const o = await this.enqueue('evaluate', (id) => ({ type: 'evaluate', id, pos, opts }), expected, timeoutMs);
+    const o = await this.enqueue('evaluate', opts.net ?? 'small', (id) => ({ type: 'evaluate', id, pos, opts }), expected, timeoutMs);
     return o.status === 'done' ? (o.result as EngineEvaluation) : null;
   };
 
@@ -407,7 +443,7 @@ export class EngineDriver implements EngineHandle {
     opts: EngineSearchOptions = {},
   ): Promise<{ move: string; winrate: number; scoreLead: number; prior?: number; visits?: number }[]> => {
     const expected = opts.timeMs ?? 10_000;
-    const o = await this.enqueue('analyze', (id) => ({ type: 'analyze', id, pos, n, opts }), expected);
+    const o = await this.enqueue('analyze', opts.net ?? 'small', (id) => ({ type: 'analyze', id, pos, n, opts }), expected);
     return valueOf(o) as { move: string; winrate: number; scoreLead: number }[];
   };
 }

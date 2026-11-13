@@ -9,7 +9,9 @@ import {
   downloadStage,
   isStageCached,
   requestPersistence,
+  runningDownload,
   statusLine,
+  subscribeRunningDownloads,
   type EngineOfflineStatus,
 } from './offline';
 
@@ -165,6 +167,44 @@ describe('downloadStage', () => {
     const p = downloadStage(1, BASE, () => ctrl.abort(), ctrl.signal, { caches, fetch });
     await expect(p).rejects.toThrow();
     expect(await isStageCached(1, BASE, { caches })).toBe(false);
+  });
+});
+
+describe('runningDownload', () => {
+  it('exposes a stage download while it runs, with its percent, and a done that settles after the call', async () => {
+    const { caches } = fakeCaches();
+    const { fetch } = fakeFetch();
+    const seen: number[] = [];
+    const off = subscribeRunningDownloads(() => {
+      const d = runningDownload(2);
+      if (d) seen.push(d.percent);
+    });
+    expect(runningDownload(2)).toBeNull();
+    const order: string[] = [];
+    const p = downloadStage(2, BASE, () => undefined, undefined, { caches, fetch });
+    const running = runningDownload(2)!;
+    expect(running.stage).toBe(2);
+    expect(runningDownload(1)).toBeNull();
+    void p.then(() => order.push('caller'));
+    const ok = await running.done.then((v) => (order.push('done'), v));
+    off();
+    expect(ok).toBe(true);
+    // The caller's own .then runs first (useEngineOffline starts stage 2 there).
+    expect(order).toEqual(['caller', 'done']);
+    expect(runningDownload(2)).toBeNull();
+    expect(seen.length).toBeGreaterThan(2);
+    expect(seen[seen.length - 1]).toBe(100);
+    expect(seen.every((v, i) => i === 0 || v >= seen[i - 1])).toBe(true);
+  });
+
+  it('done resolves false (never rejects) when the download fails', async () => {
+    const { caches } = fakeCaches();
+    const { fetch } = fakeFetch({ status: 404 });
+    const p = downloadStage(1, BASE, () => undefined, undefined, { caches, fetch });
+    const running = runningDownload(1)!;
+    await expect(p).rejects.toThrow('404');
+    await expect(running.done).resolves.toBe(false);
+    expect(runningDownload(1)).toBeNull();
   });
 });
 

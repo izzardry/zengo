@@ -6,7 +6,10 @@
  *   for the `online` event. With Save-Data on, it waits for a tap (`download(1)`). A failed download
  *   also waits for a tap.
  * - Stage 2 (large net): checked on launch too; downloaded once stage 1 is ready and it is wanted:
- *   a level 8–12 is selected (`large`) or the app runs installed (`display-mode: standalone`).
+ *   a level 8–12 is selected (`large`) or the app runs installed (`display-mode: standalone`). When
+ *   stage 1's download ends, stage 2 starts in the same step, before anyone waiting on stage 1's
+ *   `runningDownload(1).done` resumes; so the Start pill, which waits for a running stage 1 and then
+ *   for a running stage 2, never has the engine fetch the large net beside this download.
  * - After a successful download the page asks for persistent storage (`navigator.storage.persist()`).
  *
  * Nothing runs while `enabled` is false (default `COMPUTER_ENABLED` from `lib/flags.ts`): both stages
@@ -89,12 +92,18 @@ export function useEngineOffline(options: UseEngineOfflineOptions = {}): EngineO
   const persisted = useRef(false);
   /** Stage 2 asked for by a tap (beyond `large` / standalone). */
   const [requested2, setRequested2] = useState(false);
+  const wanted2 = supported && (!!options.large || requested2 || (options.standalone ?? defaultStandalone)());
+  const want2 = useRef({ wanted: wanted2, requested: requested2 });
+  want2.current = { wanted: wanted2, requested: requested2 };
 
   const setStage = useCallback((stage: EngineStage, s: EngineOfflineStatus) => {
     if (!alive.current) return;
     states.current = { ...states.current, [stage]: s };
     (stage === 1 ? setStage1 : setStage2)(s);
   }, []);
+
+  /** Starts stage 2 when stage 1 is ready, stage 2 is wanted and was not looked at yet (Save-Data asks for a tap). */
+  const startWanted2Ref = useRef<() => void>(() => undefined);
 
   const start = useCallback(
     (stage: EngineStage) => {
@@ -112,6 +121,7 @@ export function useEngineOffline(options: UseEngineOfflineOptions = {}): EngineO
       downloadStage(stage, base, (percent) => setStage(stage, { status: 'downloading', percent }), ctrl.signal, o)
         .then(() => {
           setStage(stage, { status: 'ready' });
+          if (stage === 1) startWanted2Ref.current();
           if (!persisted.current) {
             persisted.current = true;
             void (o.persist ?? (() => requestPersistence()))().catch(() => false);
@@ -184,17 +194,22 @@ export function useEngineOffline(options: UseEngineOfflineOptions = {}): EngineO
   }, [supported, start, setStage]);
 
   /* ---- stage 2 on demand, once stage 1 is ready ---- */
-  const wanted2 = supported && (!!options.large || requested2 || (options.standalone ?? defaultStandalone)());
-  useEffect(() => {
-    if (!wanted2 || stage1.status !== 'ready') return;
-    if (stage2.status !== 'missing' || stage2.reason !== 'idle') return;
+  const startWanted2 = useCallback(() => {
+    if (!alive.current || !want2.current.wanted || states.current[1].status !== 'ready') return;
+    const s2 = states.current[2];
+    if (s2.status !== 'missing' || s2.reason !== 'idle') return;
     const saveData = optsRef.current.saveData ?? defaultSaveData;
-    if (saveData() && !requested2) {
+    if (saveData() && !want2.current.requested) {
       setStage(2, { status: 'missing', reason: 'saveData' });
       return;
     }
     start(2);
-  }, [wanted2, requested2, stage1.status, stage2, start, setStage]);
+  }, [start, setStage]);
+  startWanted2Ref.current = startWanted2;
+
+  useEffect(() => {
+    startWanted2();
+  }, [wanted2, requested2, stage1.status, stage2, startWanted2]);
 
   const line = statusLine(stage1, stage2, !!options.large);
   return { stage1, stage2, line, download };
