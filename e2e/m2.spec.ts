@@ -474,8 +474,11 @@ test.describe('milestone 2 · computer', () => {
   test('byo-yomi 1m 3×10s from a prepared position: main time runs out (·3), a move inside a period keeps it, the last period ends the game Out of time', async ({ page }) => {
     test.setTimeout(120_000);
     await page.clock.install();
-    // Each side's first move is untimed; from Black's second move on, Black's clock runs.
-    await openLink(page, `s=BYOYO1&p=1&o=c&d=1&w=B&t=1m3x10&n=9&m=${moves(9, ['C3', 'G7'])}`);
+    // Each side's first move is untimed; from Black's second move on, Black's clock runs. The link
+    // holds Black's first move only, so Black's clock starts with the computer's reply, after the
+    // engine has loaded: the loading time (long when the machine is busy) never eats main time.
+    await openLink(page, `s=BYOYO1&p=1&o=c&d=1&w=B&t=1m3x10&n=9&m=${moves(9, ['C3'])}`);
+    await expectPlies(page, 2, 30_000);
     const black = timer(page, 'B');
     await expect(black).toHaveAttribute('data-running', 'true');
     // The face reads `m:ss` in main time; its spoken reading follows for screen readers.

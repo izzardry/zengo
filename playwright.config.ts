@@ -8,6 +8,11 @@ export default defineConfig({
   testDir: "e2e",
   outputDir: "test-results",
   fullyParallel: true,
+  // Every game page runs the engine in a worker (loading, hint searches, the dead-stone proposal)
+  // and the room tests drive two pages each. Playwright's default of half the cores (7 here) made
+  // the machine so busy that pages stalled for seconds and timed tests failed; 4 keeps it stable.
+  // `--workers` on the command line still overrides this.
+  workers: 4,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   reporter: [["list"]],

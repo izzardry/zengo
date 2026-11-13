@@ -268,6 +268,9 @@ for (const vp of VIEWPORTS) {
     });
 
     test('a share URL with moves and n=13 opens in a fresh context; Copy SGF has SZ[13] and the result', async ({ page, context, browser }) => {
+      // The fresh context downloads and loads the engine before its scoring phase settles
+      // (passTwice: up to 60 s, then up to 7 s): the 60 s default is too short when the machine is busy.
+      test.setTimeout(120_000);
       await forceClipboardShare(context);
       await startTwoPlayers(page, { size: 13 });
       await playMoves(page, ['D4', 'K10', 'K4']);
@@ -314,6 +317,10 @@ for (const vp of VIEWPORTS) {
 
     for (const theme of ['light', 'dark'] as const) {
       test(`screenshots: start, game at each size, scoring, overlay and history (${theme})`, async ({ page }) => {
+        // Three games, 30 stones and a scoring phase that waits for the engine to load and for its
+        // dead-stone proposal (passTwice: up to 60 s, then up to 7 s): the 60 s default is too short
+        // when the machine is busy.
+        test.setTimeout(120_000);
         const shot = async (name: string) => {
           await page.waitForTimeout(700);
           await page.screenshot({ path: `${SHOTS}/${name}-${theme}-${vp.width}x${vp.height}.png`, animations: 'disabled' });
