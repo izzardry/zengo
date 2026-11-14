@@ -3,10 +3,10 @@ The files in this folder (src/lib/engine/katago/) are a port of the KataGo engin
 src/store/gameStore.ts), source commit a6a67d645048a996d606a410c4e4c4b1051ffd43 (2026-10-28),
 which itself reimplements parts of KataGo (https://github.com/lightvector/KataGo: the network
 format, the v7 input features, the search and its parameters) and of KaTrain
-(https://github.com/sanderland/katrain: the calibrated-rank strategy). Zigo's changes are covered
-by Zigo's MIT licence (see the repository's LICENSE).
+(https://github.com/sanderland/katrain: the calibrated-rank strategy). Zengo's changes are covered
+by Zengo's MIT licence (see the repository's LICENSE).
 
-The KataGo networks Zigo runs (public/engine/nets/) are CC0; see public/engine/nets/README.md.
+The KataGo networks Zengo runs (public/engine/nets/) are CC0; see public/engine/nets/README.md.
 
 ========================================================================================
 Web KaTrain

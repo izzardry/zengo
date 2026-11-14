@@ -1,9 +1,9 @@
 /**
- * Shared steps for the Zigo end-to-end suites: the start screen, the Go board by GTP coordinate,
+ * Shared steps for the Zengo end-to-end suites: the start screen, the Go board by GTP coordinate,
  * the toolbar, history and fresh browser contexts.
  */
 import { expect, type Browser, type BrowserContext, type BrowserContextOptions, type Locator, type Page } from '@playwright/test';
-import { fromGtp } from '../src/lib/zigo';
+import { fromGtp } from '../src/lib/zengo';
 import type { Point, Size } from '../src/lib/types';
 
 export const BASE_URL = 'http://localhost:4173';
@@ -13,7 +13,7 @@ export const SHOTS = 'docs/screenshots/m1';
 export async function skipTutorial(context: BrowserContext) {
   await context.addInitScript(() => {
     try {
-      localStorage.setItem('zigo:tutorial-seen', 'true');
+      localStorage.setItem('zengo:tutorial-seen', 'true');
     } catch {
       /* storage blocked */
     }

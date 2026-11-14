@@ -2,12 +2,12 @@ import { render } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { translate } from '@/lib/i18n';
 import boardTable from '@/lib/i18n/board';
-import { boardFromDiagram, fromGtp, starPoints } from '@/lib/zigo';
+import { boardFromDiagram, fromGtp, starPoints } from '@/lib/zengo';
 import type { Language, Size } from '@/lib/types';
 import { BoardThumbnail } from './BoardThumbnail';
 import { countCaptures, describeAtari, describeMove, describePoint, type Translate } from './describe';
 import { goBoardGameProps } from './gameProps';
-import { fromDiagram, play } from '@/lib/zigo';
+import { fromDiagram, play } from '@/lib/zengo';
 import {
   BOARD_SIZE_LANDSCAPE,
   BOARD_SIZE_PORTRAIT,

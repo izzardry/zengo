@@ -343,7 +343,7 @@ describe('StatusBar layout', () => {
     const top = (railHeight: number, h: number, toasts?: number) => {
       const js = railVars({ height: railHeight })['--rail-top']
         .replace(RAIL_TOP, '76')
-        .replace(/var\(--zigo-rail-toasts, 0px\)/, String(toasts ?? 0))
+        .replace(/var\(--zengo-rail-toasts, 0px\)/, String(toasts ?? 0))
         .replace(/100%/g, String(h))
         .replace(/50%/g, String(h / 2))
         .replace(/(\d+(?:\.\d+)?)px/g, '$1')

@@ -16,7 +16,7 @@
  * board (1A), the game chrome (1C), the start screen (1D), history, tutorial and the live-region
  * texts (1E), the clock (1F, 2B), and the engine (2A) with the computer's turn, the hint bulb, the
  * territory preview, the blunder guard and the dead-stone proposal (2C). All of them share the one
- * engine of `useZigoEngine`.
+ * engine of `useZengoEngine`.
  *
  * Rooms (DESIGN 9, milestone 3): `useGameState` runs the room (`gs.room`, `useRoom` over the room
  * controller) and derives the session from it. This file adds the room chrome: the presence dot
@@ -86,7 +86,7 @@ import { useSavedGames } from '@/hooks/useSavedGames';
 import { useSeating } from '@/hooks/useSeating';
 import { useSWUpdate } from '@/hooks/useSWUpdate';
 import { useTutorial } from '@/hooks/useTutorial';
-import { useZigoEngine } from '@/hooks/useZigoEngine';
+import { useZengoEngine } from '@/hooks/useZengoEngine';
 import { withSpokenLabels } from '@/lib/clock';
 import { flags } from '@/lib/flags';
 import { DEFAULT_LEVEL, opponentOf, undoPassIndex } from '@/lib/gameRecord';
@@ -97,7 +97,7 @@ import scoringApi from '@/lib/scoring';
 import { bankTurn, bankedTurnMs } from '@/lib/turnBank';
 import type { Color, Game, IllegalReason, LockReason, Opponent, Point, SavedGame } from '@/lib/types';
 import { cn } from '@/lib/utils';
-import { formatTc, isPass, parseTc } from '@/lib/zigo';
+import { formatTc, isPass, parseTc } from '@/lib/zengo';
 import {
   ENGINE_ON,
   PLAYABLE_MODES,
@@ -147,7 +147,7 @@ function isTypingTarget(t: EventTarget | null): boolean {
 export default function Index() {
   const { t } = useI18n();
   // The one engine (DESIGN 10.1): computer moves, hints, the guard and the scoring proposal.
-  const engine = useZigoEngine();
+  const engine = useZengoEngine();
   const engineRef = useRef(engine);
   engineRef.current = engine;
   // The dead-stone proposal when a game enters scoring (DESIGN 8.4), in every solo mode.
@@ -275,7 +275,7 @@ export default function Index() {
   /* ---- engine trouble: one calm toast with Try again (DESIGN 10.1) ---- */
   const engineFailed = useCallback(
     (source: string, error: unknown, retry?: () => void) => {
-      console.error(`Zigo engine: ${source} failed:`, error instanceof Error ? `${error.name}: ${error.message}` : error);
+      console.error(`Zengo engine: ${source} failed:`, error instanceof Error ? `${error.name}: ${error.message}` : error);
       toast(t(isOnline() ? 'engine.failed' : 'engine.failedOffline'), {
         id: 'engine-failed',
         action: retry ? { label: t('engine.retry'), onClick: retry } : undefined,
@@ -863,7 +863,7 @@ export default function Index() {
 
         {/* ---- the stage: board always centered ---- */}
         <main
-          aria-label="Zigo"
+          aria-label="Zengo"
           onClick={onStageClick}
           data-testid="stage"
           data-phase={phase}

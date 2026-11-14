@@ -2,7 +2,7 @@ import { act, renderHook } from '@testing-library/react';
 import { FakeEngine, movesKey, type FakeEval } from '@/lib/engine/fake';
 import { BEFORE_TIMEOUT_MS, CONFIRM_WINDOW_MS } from '@/lib/blunder';
 import type { EngineApi, Game, Position } from '@/lib/types';
-import { fromDiagram, play } from '@/lib/zigo';
+import { fromDiagram, play } from '@/lib/zengo';
 import { useBlunderGuard, type BlunderCheck, type UseBlunderGuardOptions } from './useBlunderGuard';
 
 /**

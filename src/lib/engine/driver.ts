@@ -2,7 +2,7 @@
  * The engine driver: `EngineApi` over the engine worker (DESIGN 10.1), with the sibling app's driver rules.
  *
  * Framework-free. The browser plugs in the Vite-bundled module worker (./browser.ts), tests plug in
- * a scripted fake worker. React access goes through `hooks/useZigoEngine.ts`, which keeps one shared
+ * a scripted fake worker. React access goes through `hooks/useZengoEngine.ts`, which keeps one shared
  * instance so the computer, the hint, the guard and the scoring proposal use one worker.
  *
  * Rules:
@@ -60,7 +60,7 @@ export interface EngineDriverOptions {
   createWorker: () => WorkerLike;
   /** The page's base URL (`document.baseURI`); the worker resolves `engine/…` against it. */
   base: () => string;
-  /** `zigo:engine-backend`. Default: nothing remembered. */
+  /** `zengo:engine-backend`. Default: nothing remembered. */
   storage?: BackendStorage;
   /** Give up loading when the worker shows no sign of life (progress or answer) for this long. Default 60 s. */
   initTimeoutMs?: number;
@@ -340,7 +340,7 @@ export class EngineDriver implements EngineHandle {
         }
         lane.warming = null;
         lane.warm.set(warming.key, { gpuMs: got.ms, wasmMs: ref.ms });
-        console.info(`Zigo engine: WebGPU ready for ${warming.key} (one call ${got.ms.toFixed(1)} ms; WASM ${ref.ms.toFixed(1)} ms).`);
+        console.info(`Zengo engine: WebGPU ready for ${warming.key} (one call ${got.ms.toFixed(1)} ms; WASM ${ref.ms.toFixed(1)} ms).`);
         this.rememberBackend('webgpu');
         if (got.ms < ref.ms * GPU_ROWS) this.set({ backend: 'webgpu' });
         this.pump();
@@ -379,7 +379,7 @@ export class EngineDriver implements EngineHandle {
       /* already gone */
     }
     if (remember) this.rememberBackend('wasm');
-    console.warn(`Zigo engine: WebGPU dropped (${reason}); the computer plays on WASM.`);
+    console.warn(`Zengo engine: WebGPU dropped (${reason}); the computer plays on WASM.`);
     const job = this.running;
     if (job && job.lane === 'gpu') {
       clearTimeout(this.watchdog);
@@ -427,7 +427,7 @@ export class EngineDriver implements EngineHandle {
         return;
       }
       case 'backend':
-        if (m.note) console.warn(`Zigo engine: ${m.backend} worker note: ${m.note}.`);
+        if (m.note) console.warn(`Zengo engine: ${m.backend} worker note: ${m.note}.`);
         // The main worker runs WASM; the figure says WebGPU once a WebGPU warm-up has passed.
         if (!this.gpu || this.gpu.warm.size === 0) this.set({ backend: m.backend });
         return;
@@ -441,7 +441,7 @@ export class EngineDriver implements EngineHandle {
         if (net) {
           this.loadIds.delete(m.id);
           if (m.type === 'error') {
-            console.error(`Zigo engine: loading the ${net} net failed: ${m.message}`);
+            console.error(`Zengo engine: loading the ${net} net failed: ${m.message}`);
             this.onLoadError(net, new EngineUnavailableError(m.message));
           }
           return;
@@ -452,7 +452,7 @@ export class EngineDriver implements EngineHandle {
         clearTimeout(this.watchdog);
         if (m.type === 'result') job.settle({ status: 'done', result: m.result });
         else {
-          console.error(`Zigo engine: ${job.kind} failed in the worker: ${m.message}`);
+          console.error(`Zengo engine: ${job.kind} failed in the worker: ${m.message}`);
           job.settle({ status: 'failed', error: new EngineUnavailableError(m.message) });
         }
         this.pump();
@@ -512,7 +512,7 @@ export class EngineDriver implements EngineHandle {
       /* already gone */
     }
     const error = err instanceof EngineUnavailableError ? err : new EngineUnavailableError(err.message);
-    if (!this.disposed) console.error(`Zigo engine failed: ${error.message}`);
+    if (!this.disposed) console.error(`Zengo engine failed: ${error.message}`);
     const jobs = [...(this.running ? [this.running] : []), ...this.queue.splice(0)];
     this.running = null;
     for (const j of jobs) j.settle({ status: 'failed', error });

@@ -4,15 +4,15 @@ import { describe, expect, it, vi } from 'vitest';
 import { createFakeController, fakeRoomState, type FakeController } from '@/components/room/testUtils';
 import type { RoomControllerOptions } from '@/lib/room';
 import type { Game, Point, RoomNotice, Scoring } from '@/lib/types';
-import zigo, { makeSettings } from '@/lib/zigo';
+import zengo, { makeSettings } from '@/lib/zengo';
 import { IDLE_ROOM_VIEW, markingChange, roomScoringOf, roomSettingsOf, useRoom, type ManualApi, type UseRoomOptions } from './useRoom';
 
 /** A 9×9 game in scoring: black cc, cg; white gg, gc; two passes. */
 function scoringGame(scoring?: Partial<Scoring>): Game {
-  let g = zigo.newGame(makeSettings(9));
-  for (const p of ['cc', 'gg', 'cg', 'gc']) g = zigo.play(g, p, 0);
-  g = zigo.pass(zigo.pass(g, 0), 0);
-  return scoring ? zigo.setScoring(g, { ...g.scoring!, ...scoring }) : g;
+  let g = zengo.newGame(makeSettings(9));
+  for (const p of ['cc', 'gg', 'cg', 'gc']) g = zengo.play(g, p, 0);
+  g = zengo.pass(zengo.pass(g, 0), 0);
+  return scoring ? zengo.setScoring(g, { ...g.scoring!, ...scoring }) : g;
 }
 
 function setup(extra: Partial<UseRoomOptions> = {}) {
@@ -227,7 +227,7 @@ describe('useRoom', () => {
     expect(result.current.scoring).toMatchObject({ mine: true, theirs: false, proposing: 'me' });
     // Over: no scoring view, no toggle.
     const g = scoringGame({ rev: 3, dead: ['gg'], accepted: [3, 3] });
-    act(() => c.set({ game: zigo.end(g, { winner: 'B', by: 'score', margin: 9 }) }));
+    act(() => c.set({ game: zengo.end(g, { winner: 'B', by: 'score', margin: 9 }) }));
     expect(result.current.scoring).toBeNull();
     expect(result.current.lastToggle).toBeNull();
   });
@@ -257,14 +257,14 @@ describe('useRoom', () => {
     expect(result.current.lastToggle).toMatchObject({ points: ['cc'], dead: [], alive: ['cc'] });
     expect(result.current.lastToggle!.key).toBeGreaterThan(first.key);
     // A resume (no scoring) clears it.
-    const resumed = zigo.resume(scoringGame({ rev: 4, dead: ['gc', 'gg'] }));
+    const resumed = zengo.resume(scoringGame({ rev: 4, dead: ['gc', 'gg'] }));
     act(() => c.set({ game: resumed }));
     expect(result.current.lastToggle).toBeNull();
     // Round 2 has no marking round: a change of its dead stones is no toggle.
-    let r2 = zigo.pass(zigo.pass(zigo.play(resumed, 'ee', 0), 0), 0);
+    let r2 = zengo.pass(zengo.pass(zengo.play(resumed, 'ee', 0), 0), 0);
     expect(r2.scoring?.round).toBe(2);
     act(() => c.set({ game: r2 }));
-    r2 = zigo.setScoring(r2, { ...r2.scoring!, rev: 1, dead: ['gg'] });
+    r2 = zengo.setScoring(r2, { ...r2.scoring!, rev: 1, dead: ['gg'] });
     act(() => c.set({ game: r2 }));
     expect(result.current.lastToggle).toBeNull();
   });
@@ -275,7 +275,7 @@ describe('useRoom', () => {
     const c = made[0];
     act(() => c.set({ seat: null }));
     expect(result.current.settings).toBeNull();
-    const g = zigo.newGame(makeSettings(19, 'territory', 4));
+    const g = zengo.newGame(makeSettings(19, 'territory', 4));
     act(() => c.set({ seat: 1, color: 'B', game: g, tc: { kind: 'fischer', baseMs: 300_000, incMs: 7000 } }));
     expect(result.current.settings).toEqual({
       size: 19,

@@ -96,7 +96,7 @@ describe('useSavedGames', () => {
     const { result } = renderHook(() => useSavedGames({ store }));
     store.saveGame(game('OTHER', NOW));
     expect(result.current.games).toHaveLength(0);
-    act(() => void window.dispatchEvent(new StorageEvent('storage', { key: 'zigo:games' })));
+    act(() => void window.dispatchEvent(new StorageEvent('storage', { key: 'zengo:games' })));
     expect(result.current.games.map((g) => g.id)).toEqual(['OTHER']);
   });
 

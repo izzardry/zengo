@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EngineDriver, type WorkerLike } from './driver';
 import { isEngineAbort } from './handle';
 import type { EngineBackendChoice, FromWorker, ToWorker } from './protocol';
-import { makeSettings, newGame, position } from '../zigo';
+import { makeSettings, newGame, position } from '../zengo';
 import type { EngineApi } from '../types';
 
 const POS = position(newGame(makeSettings(9)));
@@ -62,7 +62,7 @@ function setup(
       workers.push(w);
       return w;
     },
-    base: () => 'https://example.test/zigo/',
+    base: () => 'https://example.test/zengo/',
     storage: { get: () => opts.remembered ?? null, set: (b) => stored.push(b) },
     initTimeoutMs: opts.initTimeoutMs,
     watchdogMs: opts.watchdogMs,
@@ -95,7 +95,7 @@ describe('EngineDriver', () => {
     const seen: string[] = [];
     driver.subscribe(() => seen.push(`${driver.state}:${driver.progress}`));
     const p = driver.load(1);
-    expect(w().sent[0]).toEqual({ type: 'init', base: 'https://example.test/zigo/', backend: 'wasm' });
+    expect(w().sent[0]).toEqual({ type: 'init', base: 'https://example.test/zengo/', backend: 'wasm' });
     expect(w().last('load')?.net).toBe('small');
     expect(driver.state).toBe('loading');
     w().emit({ type: 'progress', net: 'small', loaded: 50, total: 100 });
@@ -461,7 +461,7 @@ describe('EngineDriver WebGPU beside WASM', () => {
   it('starts a WebGPU worker once the small net is in, and warms it for the size a search needs', async () => {
     const { driver, main, gpu, workers } = ready();
     expect(workers).toHaveLength(2);
-    expect(gpu().sent[0]).toEqual({ type: 'init', base: 'https://example.test/zigo/', backend: 'webgpu' });
+    expect(gpu().sent[0]).toEqual({ type: 'init', base: 'https://example.test/zengo/', backend: 'webgpu' });
     const g = driver.genmove(POS, 1);
     // The search goes to WASM at once; the warm-up runs beside it on WebGPU.
     const gm = main.last('genmove')!;

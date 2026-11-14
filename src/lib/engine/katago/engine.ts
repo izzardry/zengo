@@ -33,7 +33,7 @@ import type {
   Point,
   Position,
 } from '../../types.ts';
-import { PASS, pointToIndex } from '../../zigo.ts';
+import { PASS, pointToIndex } from '../../zengo.ts';
 import { engineKomi, isLegalInPosition, playableGame, pointOfIndex } from '../position.ts';
 import { PASS_MOVE, playMove, setBoardSize, type SimPosition, type StoneColor } from './fastBoard.ts';
 import { KATA_RULES, type RecentMove } from './features.ts';
@@ -47,7 +47,7 @@ export type SearchOptions = EngineSearchOptions;
 export type GenmoveOptions = EngineGenmoveOptions;
 
 export interface GenmoveInfo {
-  /** Always legal by `ZigoApi.isLegal`, or `tt` (pass). */
+  /** Always legal by `ZengoApi.isLegal`, or `tt` (pass). */
   readonly move: Point;
   /** The position's win rate and score lead for the side to move (root of the search, or the raw network). */
   readonly winrate: number;

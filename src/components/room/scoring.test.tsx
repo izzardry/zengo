@@ -6,7 +6,7 @@ import { useRoom, type RoomScoringView, type RoomToggle, type UseRoomOptions } f
 import { dictionaries } from '@/lib/i18n';
 import type { RoomControllerOptions } from '@/lib/room';
 import type { Game, Scoring } from '@/lib/types';
-import zigo, { makeSettings } from '@/lib/zigo';
+import zengo, { makeSettings } from '@/lib/zengo';
 import { RoomScoringBar, ToggleFlash, roomScoringBar } from './index';
 import { createFakeController, renderRoom, type FakeController } from './testUtils';
 
@@ -152,7 +152,7 @@ describe('ToggleFlash', () => {
     expect(rings[0].getAttribute('cx')).toBe('2');
     expect(rings[0].getAttribute('cy')).toBe('2');
     expect(rings[1].getAttribute('cy')).toBe('3');
-    expect(rings[0].getAttribute('class')).toBe('zigo-toggle-flash');
+    expect(rings[0].getAttribute('class')).toBe('zengo-toggle-flash');
   });
 
   it('says what the opponent marked, and again for each new change', () => {
@@ -190,10 +190,10 @@ describe('ToggleFlash', () => {
 /* ---------------------------------------------------------------------------------------------- */
 
 function scoringGame(scoring: Partial<Scoring>): Game {
-  let g = zigo.newGame(makeSettings(9));
-  for (const p of ['cc', 'gg', 'cg', 'gc']) g = zigo.play(g, p, 0);
-  g = zigo.pass(zigo.pass(g, 0), 0);
-  return zigo.setScoring(g, { ...g.scoring!, ...scoring });
+  let g = zengo.newGame(makeSettings(9));
+  for (const p of ['cc', 'gg', 'cg', 'gc']) g = zengo.play(g, p, 0);
+  g = zengo.pass(zengo.pass(g, 0), 0);
+  return zengo.setScoring(g, { ...g.scoring!, ...scoring });
 }
 
 function ScoringScreen({ opts }: { opts: UseRoomOptions }) {

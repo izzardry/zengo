@@ -258,7 +258,7 @@ async function run(job: Job): Promise<void> {
   } catch (e) {
     // A warning: the page decides whether this matters (a WebGPU worker that cannot start is expected
     // on many devices) and logs real failures as errors itself.
-    console.warn(`Zigo engine worker (${active}): ${job.type} failed`, e);
+    console.warn(`Zengo engine worker (${active}): ${job.type} failed`, e);
     post({ type: 'error', id: job.id, message: describe(e) });
   } finally {
     current = null;

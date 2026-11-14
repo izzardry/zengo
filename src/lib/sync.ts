@@ -4,7 +4,7 @@
  * - Log hashing and the `head` summary message.
  * - `reconcile`: the five reconcile rules plus the scoring rule of DESIGN 9.2, as one function used twice
  *   per connection: first with the other side's `head`, then with any `logs` it sends. Every adopted
- *   log is validated by replaying it from the start through `ZigoApi` (positional superko included).
+ *   log is validated by replaying it from the start through `ZengoApi` (positional superko included).
  * - Live-play helpers on a `GameLog`: applying a received ply (a point or `tt` for a pass),
  *   takeback, rematch, and the scoring phase (mark, accept, resume, the scored end), including the
  *   handlers of the live `mark`, `accept`, `resume` and round-2 `end` messages. Crossing scoring
@@ -34,10 +34,10 @@ import type {
   Settings,
   Size,
   Termination,
-  ZigoApi,
+  ZengoApi,
 } from './types';
 import { PROTOCOL_VERSION } from './types';
-import zigo, { isPoint, isValidMoves, makeSettings, MAX_PLIES, normalizeHandicap, parseTc, PASS, pointToIndex } from './zigo';
+import zengo, { isPoint, isValidMoves, makeSettings, MAX_PLIES, normalizeHandicap, parseTc, PASS, pointToIndex } from './zengo';
 import scoringApi from './scoring';
 
 /* ---------------------------------------------------------------------------------------------- */
@@ -270,20 +270,20 @@ function readScoring(raw: unknown, size: number): Scoring | string {
  * `api` (an illegal ply, positional superko included, aborts the sync).
  *
  * Rejects: wrong shapes, `n < 1`, a negative epoch, an unknown seat, an unreadable time control,
- * a size other than 9/13/19, unknown rules, a handicap Zigo does not offer on that size, more than
+ * a size other than 9/13/19, unknown rules, a handicap Zengo does not offer on that size, more than
  * `MAX_PLIES` plies, a point off the board, an illegal ply, a scoring state without two consecutive
  * passes at the end (or with dead points that are not stones), an end whose `by` differs from its
  * result's, a scored end that both seats did not accept, and a scored end whose result is not the
  * count of the marked dead stones.
  *
- * A ply that follows a double pass resumes scoring first (as `ZigoApi.replay`). A log that ends in a
+ * A ply that follows a double pass resumes scoring first (as `ZengoApi.replay`). A log that ends in a
  * double pass without `scoring` was resumed; with `scoring` it is in (or was ended in) scoring.
  *
  * The returned log is a fresh, normalized copy: whole, non-negative ms (as `api.play` stores them),
  * the scoring round derived from the plies and the dead set sorted. `game` is the replayed game with
  * its scoring state and end applied.
  */
-export function validateLog(raw: unknown, api: ZigoApi = zigo): ValidLog | InvalidLog {
+export function validateLog(raw: unknown, api: ZengoApi = zengo): ValidLog | InvalidLog {
   const bad = (error: string): InvalidLog => ({ ok: false, error });
   if (typeof raw !== 'object' || raw === null) return bad('not an object');
   const r = raw as Record<string, unknown>;
@@ -370,14 +370,14 @@ export function validateLog(raw: unknown, api: ZigoApi = zigo): ValidLog | Inval
 }
 
 /** The game of a log (replayed, scoring and end applied). Throws on an invalid log. */
-export function logToGame(log: GameLog, api: ZigoApi = zigo): Game {
+export function logToGame(log: GameLog, api: ZengoApi = zengo): Game {
   const v = validateLog(log, api);
   if (!v.ok) throw new Error(`Invalid game log: ${v.error}`);
   return v.game;
 }
 
 /** The game of a trusted log (this device's own), without the end: replay plus the scoring state. */
-function playable(log: GameLog, api: ZigoApi): Game {
+function playable(log: GameLog, api: ZengoApi): Game {
   let g = api.replay(settingsOf(log), log.plies);
   if (g.scoring) g = log.scoring ? api.setScoring(g, { ...log.scoring, round: g.scoring.round }) : api.resume(g);
   return g;
@@ -443,7 +443,7 @@ export function settleScoring(s0: Scoring | undefined, s1: Scoring | undefined, 
  * A copy of `log` with the settled scoring state; an open game whose marking both seats accepted
  * ends by score at once (DESIGN 9.5: each device counts the shared dead stones).
  */
-function withScoring(log: GameLog, s: Scoring, api: ZigoApi): GameLog {
+function withScoring(log: GameLog, s: Scoring, api: ZengoApi): GameLog {
   const out: GameLog = { ...log, plies: log.plies.map((p) => ({ m: p.m, ms: p.ms })), scoring: plainScoring(s) };
   if (log.end) {
     out.end = { result: { ...log.end.result }, by: log.end.by };
@@ -471,7 +471,7 @@ function withScoring(log: GameLog, s: Scoring, api: ZigoApi): GameLog {
  * continues it (an offline resignation crossing an offline move), and two finished copies of
  * different length or with different ends are a fork (rule 4).
  */
-export function compareLogs(local: GameLog, remote: GameLog, localSeat: Seat, api: ZigoApi = zigo): Comparison {
+export function compareLogs(local: GameLog, remote: GameLog, localSeat: Seat, api: ZengoApi = zengo): Comparison {
   const fork = (): Comparison => ({ winner: localSeat === 0 ? 'local' : 'remote', fork: true, rule: 4 });
   if (local.epoch !== remote.epoch) {
     return { winner: local.epoch > remote.epoch ? 'local' : 'remote', fork: false, rule: 2 };
@@ -573,7 +573,7 @@ export type RemoteSync = HeadMsg | LogsMsg | readonly GameLog[];
  * own current number on (its unfinished game, the finished games it missed, the current one).
  * Older games are not compared after a `head`, only when they arrive in `logs`.
  */
-export function reconcile(local: readonly GameLog[], remote: RemoteSync, localSeat: Seat, api: ZigoApi = zigo): SyncResult {
+export function reconcile(local: readonly GameLog[], remote: RemoteSync, localSeat: Seat, api: ZengoApi = zengo): SyncResult {
   if (isHead(remote)) return reconcileHead(local, remote, localSeat);
   const games = Array.isArray(remote) ? (remote as readonly GameLog[]) : (remote as LogsMsg).games;
   return reconcileLogs(local, games, localSeat, api);
@@ -634,7 +634,7 @@ function reconcileHead(local: readonly GameLog[], head: HeadMsg, localSeat: Seat
   return behind(3);
 }
 
-function reconcileLogs(local: readonly GameLog[], remoteRaw: readonly GameLog[], localSeat: Seat, api: ZigoApi): SyncResult {
+function reconcileLogs(local: readonly GameLog[], remoteRaw: readonly GameLog[], localSeat: Seat, api: ZengoApi): SyncResult {
   if (!Array.isArray(remoteRaw)) return { status: 'invalid', forked: false, error: 'logs is not a list' };
   const remote: GameLog[] = [];
   for (const raw of remoteRaw) {
@@ -743,7 +743,7 @@ export function isPly(m: unknown, size: number): m is Point {
  * enters scoring (`scoring` round 1, or 2 after a resume, rev 0). Throws on an illegal ply, while
  * scoring (resume first) and after the end.
  */
-export function appendPly(log: GameLog, m: Point, ms: number, api: ZigoApi = zigo): GameLog {
+export function appendPly(log: GameLog, m: Point, ms: number, api: ZengoApi = zengo): GameLog {
   if (log.end) throw new Error('Game is over');
   if (!isPly(m, log.size)) throw new Error(`Bad ply ${String(m)}`);
   const g = api.play(playable(log, api), m, ms);
@@ -778,7 +778,7 @@ export type MoveOutcome =
   | { kind: 'conflict'; error: string };
 
 /** Applies a live `move` message (`{n, epoch, i, m, ms}`) to the local copy of the game. */
-export function applyMoveMsg(log: GameLog, msg: Pick<MoveMsg, 'n' | 'epoch' | 'i' | 'm' | 'ms'>, api: ZigoApi = zigo): MoveOutcome {
+export function applyMoveMsg(log: GameLog, msg: Pick<MoveMsg, 'n' | 'epoch' | 'i' | 'm' | 'ms'>, api: ZengoApi = zengo): MoveOutcome {
   if (msg.n < log.n || (msg.n === log.n && msg.epoch < log.epoch)) return { kind: 'stale' };
   if (msg.n > log.n || msg.epoch > log.epoch) return { kind: 'gap' };
   if (!Number.isInteger(msg.i) || msg.i < 0) return { kind: 'conflict', error: 'bad index' };
@@ -828,7 +828,7 @@ export function isScoring(log: GameLog | undefined): log is GameLog & { scoring:
  * dead set (whole groups are the caller's business; only stones are kept), both acceptances
  * cleared. Null when the log is not in scoring or `rev` is not higher than the current one.
  */
-export function markLog(log: GameLog, dead: readonly Point[], rev?: number, api: ZigoApi = zigo): GameLog | null {
+export function markLog(log: GameLog, dead: readonly Point[], rev?: number, api: ZengoApi = zengo): GameLog | null {
   if (!isScoring(log)) return null;
   const next = rev ?? log.scoring.rev + 1;
   if (!isCount(next) || next <= log.scoring.rev) return null;
@@ -860,7 +860,7 @@ export function resumeLog(log: GameLog): GameLog | null {
 }
 
 /** The scored end of a log in scoring, counted from its marking. Null when not scoring. */
-export function scoreEnd(log: GameLog, api: ZigoApi = zigo): LogEnd | null {
+export function scoreEnd(log: GameLog, api: ZengoApi = zengo): LogEnd | null {
   if (!isScoring(log)) return null;
   const result = scoredResult(playable(log, api), log.scoring.dead);
   return { result, by: 'score' };
@@ -871,7 +871,7 @@ export function scoreEnd(log: GameLog, api: ZigoApi = zigo): LogEnd | null {
  * engine). The marking is stored as rev 1, accepted by both, so both devices hold the same log.
  * Null when the log is not in round-2 scoring.
  */
-export function roundTwoEnd(log: GameLog, dead: readonly Point[], api: ZigoApi = zigo): GameLog | null {
+export function roundTwoEnd(log: GameLog, dead: readonly Point[], api: ZengoApi = zengo): GameLog | null {
   if (!isScoring(log) || log.scoring.round !== 2) return null;
   const marked = markLog(log, dead, Math.max(1, log.scoring.rev + 1), api);
   if (!marked) return null;
@@ -885,7 +885,7 @@ export function roundTwoEnd(log: GameLog, dead: readonly Point[], api: ZigoApi =
  * same rev, the game ends by score from the shared dead stones (DESIGN 9.5). Null when not scoring,
  * in round 2 (no marking round) or before a proposal (rev 0).
  */
-export function acceptMarking(log: GameLog, seat: Seat, api: ZigoApi = zigo): GameLog | null {
+export function acceptMarking(log: GameLog, seat: Seat, api: ZengoApi = zengo): GameLog | null {
   if (!isScoring(log) || log.scoring.round === 2 || log.scoring.rev < 1) return null;
   const next = acceptLog(log, seat);
   if (!next) return null;
@@ -929,7 +929,7 @@ function placeMsg(log: GameLog, n: unknown, epoch?: unknown): 'stale' | 'reconci
 }
 
 /** The sorted, de-duplicated stones of a received dead list (anything else is dropped). */
-function deadStones(log: GameLog, dead: readonly unknown[], api: ZigoApi): Point[] {
+function deadStones(log: GameLog, dead: readonly unknown[], api: ZengoApi): Point[] {
   const g = playable(log, api);
   const pts = dead.filter((p): p is Point => typeof p === 'string' && isPoint(p, log.size));
   return [...new Set(pts)].filter((p) => g.board[pointToIndex(p, log.size)] !== 0).sort();
@@ -946,7 +946,7 @@ export function applyMarkMsg(
   log: GameLog,
   msg: { n: unknown; epoch: unknown; rev: unknown; dead: unknown },
   localSeat: Seat,
-  api: ZigoApi = zigo,
+  api: ZengoApi = zengo,
 ): ScoringOutcome {
   const at = placeMsg(log, msg.n, msg.epoch);
   if (at !== 'same') return { kind: at };
@@ -973,7 +973,7 @@ export function applyMarkMsg(
  * rev is stale (a toggle crossed it and cleared it on both sides); one of a newer rev means this
  * copy missed a marking: reconcile.
  */
-export function applyAcceptMsg(log: GameLog, msg: { n: unknown; rev: unknown }, fromSeat: Seat, api: ZigoApi = zigo): ScoringOutcome {
+export function applyAcceptMsg(log: GameLog, msg: { n: unknown; rev: unknown }, fromSeat: Seat, api: ZengoApi = zengo): ScoringOutcome {
   const at = placeMsg(log, msg.n);
   if (at !== 'same') return { kind: at };
   if (!isCount(msg.rev) || msg.rev < 1 || log.end) return { kind: 'stale' };
@@ -1004,7 +1004,7 @@ export function applyResumeMsg(log: GameLog, msg: { n: unknown; epoch: unknown }
  * is never asked) and the claimed result must equal their count. Null when the log is not in
  * round-2 scoring or the result does not match (then reconcile).
  */
-export function applyScoredEnd(log: GameLog, dead: readonly unknown[], claimed: unknown, api: ZigoApi = zigo): GameLog | null {
+export function applyScoredEnd(log: GameLog, dead: readonly unknown[], claimed: unknown, api: ZengoApi = zengo): GameLog | null {
   if (!Array.isArray(dead) || !isScoring(log) || log.scoring.round !== 2) return null;
   const want = readResult(claimed);
   if (!want || want.by !== 'score') return null;
@@ -1199,7 +1199,7 @@ export function roomGameId(code: string, n: number): string {
 export function logToSaved(
   log: GameLog,
   opts: { code: string; seat: Seat; now: number; prev?: SavedGame; lastPlayedAt?: number },
-  api: ZigoApi = zigo,
+  api: ZengoApi = zengo,
 ): SavedGame {
   const s: SavedGame = {
     id: roomGameId(opts.code, log.n),
@@ -1226,7 +1226,7 @@ export function logToSaved(
  * The `GameLog` of a stored room game, for this device's `seat`. Null when the record is not a room
  * game or does not replay.
  */
-export function savedToLog(saved: SavedGame, seat: Seat, api: ZigoApi = zigo): GameLog | null {
+export function savedToLog(saved: SavedGame, seat: Seat, api: ZengoApi = zengo): GameLog | null {
   if (saved.mode !== 'room' || !saved.room) return null;
   if (typeof saved.moves !== 'string' || !isValidMoves(saved.moves)) return null;
   const points = api.decodeMoves(saved.moves);

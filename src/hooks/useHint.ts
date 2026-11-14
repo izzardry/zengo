@@ -21,7 +21,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { isEngineAbort } from '@/lib/engine/handle';
 import type { EngineApi, Game, Point } from '@/lib/types';
-import zigo, { isPass } from '@/lib/zigo';
+import zengo, { isPass } from '@/lib/zengo';
 
 /** Visits of the hint search (`analyze`, small net); it also stops after `HINT_TIME_MS`. */
 export const HINT_VISITS = 32;
@@ -47,7 +47,7 @@ export interface TerritoryPreviewState {
 }
 
 export interface UseHintOptions {
-  /** The shared engine (`useZigoEngine()`). */
+  /** The shared engine (`useZengoEngine()`). */
   engine: EngineApi;
   /** The live game (`session.game`), or null. */
   game: Game | null;
@@ -173,13 +173,13 @@ export function useHint(opts: UseHintOptions): HintState {
       if (e.analysisP) return e.analysisP;
       let p: Promise<{ move: Point }[]>;
       try {
-        p = optsRef.current.engine.analyze(zigo.position(g), 4, { visits: HINT_VISITS, timeMs: HINT_TIME_MS, net: 'small' });
+        p = optsRef.current.engine.analyze(zengo.position(g), 4, { visits: HINT_VISITS, timeMs: HINT_TIME_MS, net: 'small' });
       } catch (err) {
         p = Promise.reject(err);
       }
       const out = p.then(
         (list) => {
-          const a: Analysis = { moves: list.map((c) => c.move).filter((m) => isPass(m) || zigo.isLegal(g, m)) };
+          const a: Analysis = { moves: list.map((c) => c.move).filter((m) => isPass(m) || zengo.isLegal(g, m)) };
           if (entry.current === e) {
             e.analysis = a;
             e.analysisP = undefined;
@@ -207,7 +207,7 @@ export function useHint(opts: UseHintOptions): HintState {
       if (e.ownershipP) return e.ownershipP;
       let p: Promise<{ scoreLead: number; ownership: Float32Array } | null>;
       try {
-        p = optsRef.current.engine.evaluate(zigo.position(g), { visits: PREVIEW_VISITS, timeMs: PREVIEW_TIME_MS, net: 'small' });
+        p = optsRef.current.engine.evaluate(zengo.position(g), { visits: PREVIEW_VISITS, timeMs: PREVIEW_TIME_MS, net: 'small' });
       } catch {
         p = Promise.resolve(null);
       }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { translate, type Language, type TranslationKey, type TranslationVars } from '@/lib/i18n';
-import { fromDiagram, fromGtp, makeSettings, newGame, pass, play } from '@/lib/zigo';
+import { fromDiagram, fromGtp, makeSettings, newGame, pass, play } from '@/lib/zengo';
 import type { Game } from '@/lib/types';
 import {
   atariAnnouncement,

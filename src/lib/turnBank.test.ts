@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import zigo, { makeSettings } from './zigo';
+import zengo, { makeSettings } from './zengo';
 import { MAX_AGE_MS, TURN_BANK_KEY, bankTurn, bankedTurnMs, clearBankedTurn, type BankStorage } from './turnBank';
 
 function memStorage(): BankStorage & { data: Map<string, string> } {
@@ -12,8 +12,8 @@ function memStorage(): BankStorage & { data: Map<string, string> } {
   };
 }
 
-const g0 = zigo.newGame(makeSettings(9));
-const g1 = zigo.play(g0, 'ee', 100);
+const g0 = zengo.newGame(makeSettings(9));
+const g1 = zengo.play(g0, 'ee', 100);
 
 describe('turn bank', () => {
   let s: ReturnType<typeof memStorage>;
@@ -33,10 +33,10 @@ describe('turn bank', () => {
     bankTurn('ABC123', g1, 5000, now, s);
     expect(bankedTurnMs('OTHER1', g1, now, s)).toBe(0);
     expect(bankedTurnMs('ABC123', g0, now, s)).toBe(0);
-    expect(bankedTurnMs('ABC123', zigo.play(g1, 'cc', 0), now, s)).toBe(0);
+    expect(bankedTurnMs('ABC123', zengo.play(g1, 'cc', 0), now, s)).toBe(0);
     // Same cursor, another position (undo, then a different move).
-    expect(bankedTurnMs('ABC123', zigo.play(g0, 'gg', 100), now, s)).toBe(0);
-    expect(bankedTurnMs('ABC123', zigo.end(g1, { winner: 'B', by: 'resign' }), now, s)).toBe(0);
+    expect(bankedTurnMs('ABC123', zengo.play(g0, 'gg', 100), now, s)).toBe(0);
+    expect(bankedTurnMs('ABC123', zengo.end(g1, { winner: 'B', by: 'resign' }), now, s)).toBe(0);
     t += MAX_AGE_MS + 1;
     expect(bankedTurnMs('ABC123', g1, now, s)).toBe(0);
   });

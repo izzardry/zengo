@@ -1,7 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { FakeEngine, movesKey, type FakeAnalysis } from '@/lib/engine/fake';
 import type { EngineApi, Position } from '@/lib/types';
-import { PASS, makeSettings, newGame, play } from '@/lib/zigo';
+import { PASS, makeSettings, newGame, play } from '@/lib/zengo';
 import { PRECOMPUTE_DELAY_MS, formatLead, useHint, type UseHintOptions } from './useHint';
 
 const G0 = newGame(makeSettings(9));

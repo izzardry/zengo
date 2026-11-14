@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Opponent, SavedGame, Size, TimeControl } from '@/lib/types';
-import { formatTc, parseTc } from '@/lib/zigo';
+import { formatTc, parseTc } from '@/lib/zengo';
 import {
   CLOCK_PRESETS,
   DEFAULT_OPPONENT,

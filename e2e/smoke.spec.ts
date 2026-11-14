@@ -8,9 +8,9 @@ test("start page shows the wordmark and tagline", async ({ page }) => {
 
   await page.goto("./");
 
-  await expect(page.getByRole("heading", { name: "ZIGO" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "ZENGO" })).toBeVisible();
   await expect(page.getByText("Zero Distractions. Just Go.")).toBeVisible();
-  await expect(page).toHaveTitle("Zigo - Zero Distractions. Just Go.");
+  await expect(page).toHaveTitle("Zengo - Zero Distractions. Just Go.");
   expect(errors).toEqual([]);
 });
 
@@ -66,7 +66,7 @@ test("theme follows the system color scheme", async ({ page }) => {
 
 test("the brand font is self-hosted and loaded", async ({ page }) => {
   await page.goto("./");
-  await expect(page.getByRole("heading", { name: "ZIGO" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "ZENGO" })).toBeVisible();
   const loaded = await page.evaluate(async () => {
     await document.fonts.ready;
     // fonts.check() alone is true for undeclared families, so look for a loaded face.

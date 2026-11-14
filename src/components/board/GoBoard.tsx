@@ -12,7 +12,7 @@
 import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
-import { indexToPoint, isPoint, pointToIndex } from '@/lib/zigo';
+import { indexToPoint, isPoint, pointToIndex } from '@/lib/zengo';
 import { DEAD_THRESHOLD } from '@/lib/scoring';
 import type { Color, Point } from '@/lib/types';
 import { useBoardInput } from '@/hooks/useBoardInput';
@@ -121,7 +121,7 @@ export function GoBoard({
   const rootRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   const instructionsId = useId();
-  const defs = useSvgId('zigo-stone');
+  const defs = useSvgId('zengo-stone');
   const scoringOn = !!scoring;
 
   const getBox = useCallback(() => gridRef.current?.getBoundingClientRect() ?? null, []);
@@ -407,7 +407,7 @@ export function GoBoard({
                 return c ? (
                   <circle
                     key={`${atariPulse.gen}:${p}`}
-                    className="zigo-atari-pulse"
+                    className="zengo-atari-pulse"
                     cx={c.col}
                     cy={c.row}
                     r={STONE_R}
@@ -435,7 +435,7 @@ export function GoBoard({
             aria-readonly={!interactive || undefined}
             aria-rowcount={size}
             aria-colcount={size}
-            className={cn('zigo-points absolute inset-0 flex flex-col', interactive && 'touch-none')}
+            className={cn('zengo-points absolute inset-0 flex flex-col', interactive && 'touch-none')}
             style={
               {
                 padding: 'calc(var(--pitch) * 0.3)',
@@ -484,7 +484,7 @@ export function GoBoard({
             key={typedError ?? 'typing'}
             className={cn(
               'rounded-full border border-border bg-card px-3 py-0.5 font-mono text-sm shadow-lg',
-              typedError && !typed && 'zigo-typed-error text-destructive line-through',
+              typedError && !typed && 'zengo-typed-error text-destructive line-through',
             )}
           >
             {typed || typedError}
@@ -515,7 +515,7 @@ const PointCell = memo(function PointCell({
       tabIndex={focusable ? 0 : -1}
       data-point={point}
       onFocus={() => onFocus(point)}
-      className="zigo-point relative flex-1 rounded-full"
+      className="zengo-point relative flex-1 rounded-full"
     />
   );
 });
@@ -620,7 +620,7 @@ function HintPulse({ p, size }: { p: Point; size: number }) {
   if (!c) return null;
   return (
     <circle
-      className="zigo-hint-pulse"
+      className="zengo-hint-pulse"
       cx={c.col}
       cy={c.row}
       r={STONE_R}
@@ -659,7 +659,7 @@ function BlunderPulse({ p, size, color, defs }: { p: Point; size: number; color:
   const c = pointToCell(p, size);
   if (!c) return null;
   return (
-    <g className="zigo-blunder" data-mark="blunder" data-point={p}>
+    <g className="zengo-blunder" data-mark="blunder" data-point={p}>
       <use href={`#${defs}-${color}`} x={c.col - 0.5} y={c.row - 0.5} width={1} height={1} />
       <circle cx={c.col} cy={c.row} r={STONE_R} fill="none" style={{ stroke: 'hsl(var(--destructive))', strokeWidth: 2.5 }} vectorEffect={NSS} />
     </g>

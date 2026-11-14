@@ -11,7 +11,7 @@
  *   844×390 and 740×360.
  */
 import { test, expect, type Page } from '@playwright/test';
-import { encodeMoves, fromGtp } from '../src/lib/zigo';
+import { encodeMoves, fromGtp } from '../src/lib/zengo';
 import { cell, sgf, skipTutorial, stage } from './helpers';
 
 /** 9×9 walls on E and F, a white invader at B5, then two passes: the link opens in scoring. */
@@ -35,7 +35,7 @@ function phone(width: number, height: number) {
   });
   test.beforeEach(async ({ context }) => {
     await skipTutorial(context);
-    await context.addInitScript(() => localStorage.setItem('zigo:seating', JSON.stringify('face')));
+    await context.addInitScript(() => localStorage.setItem('zengo:seating', JSON.stringify('face')));
   });
 }
 
@@ -142,11 +142,11 @@ for (const [width, height] of [
           if (sessionStorage.getItem('seeded')) return;
           sessionStorage.setItem('seeded', '1');
           const now = Date.now();
-          localStorage.setItem('zigo:donation-shown', 'true');
-          localStorage.setItem('zigo:install-dismissed', 'true');
-          localStorage.setItem('zigo:opponent', JSON.stringify({ mode: 'room' }));
-          localStorage.setItem('zigo:games', JSON.stringify([{ ...s.game, createdAt: now - 3600e3, lastPlayedAt: now - 60e3 }]));
-          localStorage.setItem('zigo:rooms', JSON.stringify([{ ...s.room, createdAt: now - 3600e3, lastSeenAt: now - 60e3 }]));
+          localStorage.setItem('zengo:donation-shown', 'true');
+          localStorage.setItem('zengo:install-dismissed', 'true');
+          localStorage.setItem('zengo:opponent', JSON.stringify({ mode: 'room' }));
+          localStorage.setItem('zengo:games', JSON.stringify([{ ...s.game, createdAt: now - 3600e3, lastPlayedAt: now - 60e3 }]));
+          localStorage.setItem('zengo:rooms', JSON.stringify([{ ...s.room, createdAt: now - 3600e3, lastSeenAt: now - 60e3 }]));
         }, seed);
         // Nothing leaves the machine: the broker is blocked, so the app shows the calm failure message.
         await context.routeWebSocket(/peerjs/, (ws) => ws.close());

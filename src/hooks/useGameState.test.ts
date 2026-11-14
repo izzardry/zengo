@@ -7,10 +7,10 @@ import type { RoomControllerOptions } from '@/lib/room';
 import { createStore, memoryStorage } from '@/lib/storage';
 import type { Game, Point, SavedGame, Store } from '@/lib/types';
 import { parseUrl } from '@/lib/url';
-import zigo, { makeSettings } from '@/lib/zigo';
+import zengo, { makeSettings } from '@/lib/zengo';
 import { useGameState, type UseGameStateOptions } from './useGameState';
 
-const BASE = 'https://example.test/zigo/';
+const BASE = 'https://example.test/zengo/';
 
 /** A short 9×9 opening. */
 const OPENING = ['ee', 'cc', 'gg', 'dd', 'ec', 'gc', 'cg'];
@@ -195,7 +195,7 @@ describe('pass-and-play', () => {
     const rec = stored('GAME01')!;
     expect(rec.ms).toEqual([1500, 2500]);
     expect(rec.lastPlayedAt).toBe(t);
-    expect(zigo.decodeMoves(rec.moves)).toEqual(['ee', 'cc']);
+    expect(zengo.decodeMoves(rec.moves)).toEqual(['ee', 'cc']);
     expect(url(result).moves).toBe(rec.moves);
     expect(result.current.gs.isPlayerTurn).toBe(true);
     expect(result.current.gs.isComputerTurn).toBe(false);
@@ -234,10 +234,10 @@ describe('pass-and-play', () => {
     expect(result.current.gs.view!.cursor).toBe(1);
     expect(result.current.gs.canRedo).toBe(true);
     expect(stored('GAME03')).toMatchObject({ assisted: true });
-    expect(zigo.decodeMoves(stored('GAME03')!.moves)).toEqual(['ee']);
+    expect(zengo.decodeMoves(stored('GAME03')!.moves)).toEqual(['ee']);
     act(() => void result.current.gs.redo());
     expect(result.current.gs.view!.cursor).toBe(2);
-    expect(zigo.decodeMoves(url(result).moves!)).toEqual(['ee', 'cc']);
+    expect(zengo.decodeMoves(url(result).moves!)).toEqual(['ee', 'cc']);
   });
 
   it('undo twice and redo once across a pass: the position and the passed state match', () => {
@@ -251,7 +251,7 @@ describe('pass-and-play', () => {
     act(() => void result.current.gs.redo());
     expect(result.current.gs.view!.cursor).toBe(2);
     expect(result.current.gs.view!.passes).toBe(1);
-    expect(zigo.lastMove(result.current.gs.view!)).toBe('tt');
+    expect(zengo.lastMove(result.current.gs.view!)).toBe('tt');
     expect(result.current.gs.view!.turn).toBe('B');
     expect(stored('GAME07')!.moves).toBe('eett');
   });
@@ -315,7 +315,7 @@ describe('pass-and-play', () => {
 });
 
 function idx(gtp: string, size: 9 | 13 | 19): number {
-  const p = zigo.fromGtp(gtp, size)!;
+  const p = zengo.fromGtp(gtp, size)!;
   return (p.charCodeAt(1) - 97) * size + (p.charCodeAt(0) - 97);
 }
 
@@ -755,7 +755,7 @@ describe('review and continue from here', () => {
 });
 
 describe('shared links', () => {
-  const moves = zigo.encodeMoves(['ee', 'cc', 'gg'].map((m) => ({ m, ms: 0 })));
+  const moves = zengo.encodeMoves(['ee', 'cc', 'gg'].map((m) => ({ m, ms: 0 })));
 
   it('open as a new game on this device with the link settings, times not carried', () => {
     const { result } = setup(`/?s=SHR001&d=4&p=1&o=c&w=W&t=5%2B7&n=13&g=t&h=2&m=${moves}`);
@@ -776,7 +776,7 @@ describe('shared links', () => {
     const sgf = gs.sgf()!;
     expect(sgf).toContain('SZ[13]');
     expect(sgf).toContain('RE[W+R]');
-    expect(sgf).toContain('AP[Zigo:test]');
+    expect(sgf).toContain('AP[Zengo:test]');
     expect(sgf).toContain(';B[ee];W[cc];B[gg]');
   });
 
@@ -878,7 +878,7 @@ describe('rooms (extension points for milestone 3)', () => {
   });
 
   it('an unfinished room game goes to onRoom; a finished one opens in review', () => {
-    const game = zigo.play(zigo.newGame(makeSettings(9)), 'ee', 0);
+    const game = zengo.play(zengo.newGame(makeSettings(9)), 'ee', 0);
     const rec = (n: number, finished: boolean): SavedGame => ({
       id: `RMD001.${n}`,
       code: 'RMD001',
@@ -888,7 +888,7 @@ describe('rooms (extension points for milestone 3)', () => {
       rules: 'area',
       handicap: 0,
       tc: null,
-      moves: zigo.encodeMoves(game.plies),
+      moves: zengo.encodeMoves(game.plies),
       ms: [0],
       ...(finished ? { result: { winner: 'B' as const, by: 'resign' as const } } : {}),
       assisted: false,
@@ -968,7 +968,7 @@ describe('rooms (milestone 3: the `rooms` option)', () => {
     expect(result.current.gs.phase).toBe('start');
 
     // A stored unfinished room game reconnects to its room (DESIGN 12.2).
-    const game = zigo.play(zigo.newGame(makeSettings(9)), 'ee', 0);
+    const game = zengo.play(zengo.newGame(makeSettings(9)), 'ee', 0);
     const rec: SavedGame = {
       id: 'RMH003.1',
       code: 'RMH003',
@@ -978,7 +978,7 @@ describe('rooms (milestone 3: the `rooms` option)', () => {
       rules: 'area',
       handicap: 0,
       tc: null,
-      moves: zigo.encodeMoves(game.plies),
+      moves: zengo.encodeMoves(game.plies),
       ms: [0],
       assisted: false,
       room: { n: 1, epoch: 0 },
@@ -1037,8 +1037,8 @@ describe('room review against the room game moving on', () => {
   }
 
   function gameOf(moves: string[]) {
-    let g = zigo.newGame(makeSettings(9));
-    for (const m of moves) g = zigo.play(g, m, 0);
+    let g = zengo.newGame(makeSettings(9));
+    for (const m of moves) g = zengo.play(g, m, 0);
     return g;
   }
 
@@ -1046,13 +1046,13 @@ describe('room review against the room game moving on', () => {
 
   it('a rematch ends the review of the finished game: the new game is live and playable', () => {
     const { result, c } = roomSetup();
-    const over = zigo.end(gameOf(['cc', 'gg', 'cg']), { winner: 'B', by: 'resign' });
+    const over = zengo.end(gameOf(['cc', 'gg', 'cg']), { winner: 'B', by: 'resign' });
     act(() => c().set({ ...live, game: over, n: 1, canMove: false, myTurn: false }));
     expect(result.current.gs.isOver).toBe(true);
     act(() => result.current.gs.goto(1));
     expect(result.current.gs.phase).toBe('review');
     // Game 2 starts with this device to move.
-    act(() => c().set({ game: zigo.newGame(makeSettings(9)), n: 2, canMove: true, myTurn: true }));
+    act(() => c().set({ game: zengo.newGame(makeSettings(9)), n: 2, canMove: true, myTurn: true }));
     expect(result.current.gs.phase).toBe('playing');
     expect(result.current.gs.reviewCursor).toBeNull();
     expect(result.current.gs.isPlayerTurn).toBe(true);

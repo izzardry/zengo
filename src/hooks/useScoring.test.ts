@@ -2,7 +2,7 @@ import { renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import scoringApi from '@/lib/scoring';
 import type { Game } from '@/lib/types';
-import zigo, { makeSettings } from '@/lib/zigo';
+import zengo, { makeSettings } from '@/lib/zengo';
 import { scoreLine, scoreTerms, useScoring } from './useScoring';
 
 /** Black's wall on e, White's on f, a black stone at aa, a white stone at bb inside Black's area. */
@@ -14,9 +14,9 @@ const WALLS: string[] = (() => {
 })();
 
 function scored(rules: 'area' | 'territory' = 'area', handicap = 0, extra: string[] = []): Game {
-  let g = zigo.newGame(makeSettings(9, rules, handicap));
-  for (const m of [...extra, ...WALLS]) g = zigo.play(g, m, 0);
-  return zigo.pass(zigo.pass(g, 0), 0);
+  let g = zengo.newGame(makeSettings(9, rules, handicap));
+  for (const m of [...extra, ...WALLS]) g = zengo.play(g, m, 0);
+  return zengo.pass(zengo.pass(g, 0), 0);
 }
 
 describe('score line (DESIGN 8.4 step 3)', () => {
@@ -51,7 +51,7 @@ describe('score line (DESIGN 8.4 step 3)', () => {
 describe('useScoring', () => {
   it('is inactive outside scoring and refuses every action', () => {
     const toggle = vi.fn(() => true);
-    const g = zigo.newGame(makeSettings(9));
+    const g = zengo.newGame(makeSettings(9));
     const { result } = renderHook(() => useScoring(g, { toggle }));
     expect(result.current).toMatchObject({ active: false, editable: false, round: null, rev: 0, dead: [], score: null, territory: null, line: '' });
     expect(result.current.toggle('ee')).toBe(false);
@@ -63,7 +63,7 @@ describe('useScoring', () => {
 
   it('derives the count, the territory and the result of the marking; passes actions through', () => {
     const base = scored();
-    const g = zigo.setScoring(base, { round: 1, rev: 1, dead: ['bb'], accepted: [1, 0] });
+    const g = zengo.setScoring(base, { round: 1, rev: 1, dead: ['bb'], accepted: [1, 0] });
     const toggle = vi.fn(() => true);
     const accept = vi.fn(() => true);
     const resume = vi.fn(() => true);
@@ -87,11 +87,11 @@ describe('useScoring', () => {
     const toggle = vi.fn(() => true);
     const g = scored();
     expect(renderHook(() => useScoring(g, { toggle }, { live: false })).result.current.editable).toBe(false);
-    const ended = zigo.end(zigo.setScoring(g, { round: 1, rev: 1, dead: ['bb'], accepted: [0, 0] }), { winner: 'B', by: 'score', margin: 3 });
+    const ended = zengo.end(zengo.setScoring(g, { round: 1, rev: 1, dead: ['bb'], accepted: [0, 0] }), { winner: 'B', by: 'score', margin: 3 });
     const done = renderHook(() => useScoring(ended, { toggle })).result.current;
     expect(done).toMatchObject({ active: true, editable: false, dead: ['bb'], result: { winner: 'B', by: 'score', margin: 3 } });
     expect(done.toggle('bb')).toBe(false);
-    const round2 = zigo.pass(zigo.pass(zigo.resume(g), 0), 0);
+    const round2 = zengo.pass(zengo.pass(zengo.resume(g), 0), 0);
     const r2 = renderHook(() => useScoring(round2, { toggle })).result.current;
     expect(r2.round).toBe(2);
     expect(r2.editable).toBe(false);

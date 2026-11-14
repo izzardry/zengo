@@ -3,7 +3,7 @@
  * same answer before WebGPU is used for a board size and network (EngineDriver's warm-up).
  */
 import type { EngineEvaluation, Position, Size } from '../types.ts';
-import { newGame, play, position } from '../zigo.ts';
+import { newGame, play, position } from '../zengo.ts';
 
 /** A small opening position (on any board size) every device evaluates the same way. */
 export function probePosition(size: Size = 9): Position {

@@ -24,7 +24,7 @@ describe('useDonationPrompt', () => {
     expect(result.current.showPrompt).toBe(false);
     act(() => vi.advanceTimersByTime(DONATION_DELAY_MS));
     expect(result.current.showPrompt).toBe(true);
-    expect(raw.dump()['zigo:donation-shown']).toBe('true');
+    expect(raw.dump()['zengo:donation-shown']).toBe('true');
 
     act(() => result.current.dismissPrompt());
     expect(result.current.showPrompt).toBe(false);
@@ -36,7 +36,7 @@ describe('useDonationPrompt', () => {
   });
 
   it('never shows when it was shown before', () => {
-    const { store } = mem({ 'zigo:donation-shown': 'true' });
+    const { store } = mem({ 'zengo:donation-shown': 'true' });
     const { result } = renderHook(() => useDonationPrompt({ store, enabled: true }));
     expect(result.current.hasShownPrompt).toBe(true);
     act(() => void result.current.triggerPrompt());
@@ -56,7 +56,7 @@ describe('useDonationPrompt', () => {
     act(() => void result.current.triggerPrompt(DONATION_DELAY_MS));
     unmount();
     act(() => vi.advanceTimersByTime(DONATION_DELAY_MS));
-    expect(raw.dump()['zigo:donation-shown']).toBeUndefined();
+    expect(raw.dump()['zengo:donation-shown']).toBeUndefined();
   });
 
   it('does nothing when the flag is off', () => {

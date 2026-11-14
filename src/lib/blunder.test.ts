@@ -11,7 +11,7 @@ import {
   scoreDropFor,
   selfAtariVerdict,
 } from './blunder';
-import { PASS, fromDiagram, makeSettings, replay } from './zigo';
+import { PASS, fromDiagram, makeSettings, replay } from './zengo';
 
 /**
  * Prepared positions (DESIGN 15.4), Black to move.

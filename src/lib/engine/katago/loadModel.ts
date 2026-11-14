@@ -1,6 +1,6 @@
 /**
  * Parser for KataGo `.bin` networks, model versions 8 to 14, without the human-SL meta encoder.
- * Zigo ships two version 8 networks (g170 b6c96 and b10c128).
+ * Zengo ships two version 8 networks (g170 b6c96 and b10c128).
  *
  * Ported from Web KaTrain `src/engine/katago/loadModelV8.ts` (MIT, see ./LICENSE).
  */

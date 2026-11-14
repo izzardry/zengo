@@ -13,10 +13,10 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Toaster } from '@/components/ui/sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
-import { setSharedEngine } from '@/hooks/useZigoEngine';
+import { setSharedEngine } from '@/hooks/useZengoEngine';
 import { FakeEngine, type FakeEngineOptions } from '@/lib/engine/fake';
 import { I18nProvider } from '@/lib/i18n';
-import zigo, { encodeMoves, fromGtp, makeSettings } from '@/lib/zigo';
+import zengo, { encodeMoves, fromGtp, makeSettings } from '@/lib/zengo';
 import type { Point } from '@/lib/types';
 import { cell, installPointerEvent, layoutGrid, tap } from '@/components/board/test-helpers';
 import Index from './Index';
@@ -83,7 +83,7 @@ function useEngine(opts: FakeEngineOptions = {}): FakeEngine {
 
 beforeEach(() => {
   localStorage.clear();
-  localStorage.setItem('zigo:tutorial-seen', 'true');
+  localStorage.setItem('zengo:tutorial-seen', 'true');
   useEngine();
 });
 
@@ -94,7 +94,7 @@ afterEach(() => {
 
 /** Starts a computer game as Black at the default level 5 on 9×9 and waits for the board. */
 async function startComputer() {
-  localStorage.setItem('zigo:color', JSON.stringify('B'));
+  localStorage.setItem('zengo:color', JSON.stringify('B'));
   renderStage();
   fireEvent.click(screen.getByRole('button', { name: 'Start' }));
   await waitFor(() => expect(stage()).toHaveAttribute('data-phase', 'playing'));
@@ -107,7 +107,7 @@ describe('Index stage', () => {
   it('shows the start screen with a blurred 9×9 preview and the Start pill', () => {
     renderStage();
     expect(stage()).toHaveAttribute('data-phase', 'start');
-    expect(screen.getByRole('heading', { name: 'ZIGO' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'ZENGO' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Start' })).toBeInTheDocument();
     expect(screen.getByTestId('board-preview').firstElementChild).toHaveAttribute('data-blurred', 'true');
     expect(screen.getAllByRole('gridcell', { hidden: true })).toHaveLength(81);
@@ -133,7 +133,7 @@ describe('Index stage', () => {
     expect(screen.getAllByRole('gridcell', { hidden: true })).toHaveLength(169);
     fireEvent.click(screen.getByRole('button', { name: /13×13/ }));
     expect(screen.getAllByRole('gridcell', { hidden: true })).toHaveLength(361);
-    expect(localStorage.getItem('zigo:size')).toBe('19');
+    expect(localStorage.getItem('zengo:size')).toBe('19');
   });
 
   it('plays pass-and-play with undo and redo from the toolbar and the keyboard', () => {
@@ -284,7 +284,7 @@ describe('Index stage', () => {
   });
 
   it('face to face, the game ends when both players have accepted (DESIGN 8.4)', async () => {
-    localStorage.setItem('zigo:seating', JSON.stringify('face'));
+    localStorage.setItem('zengo:seating', JSON.stringify('face'));
     renderStage();
     startTwoPlayers();
     place('E5');
@@ -342,12 +342,12 @@ describe('Index stage', () => {
   });
 
   it('starts a handicap game with the stones on the star points and White to move', () => {
-    localStorage.setItem('zigo:size', '13');
-    localStorage.setItem('zigo:handicap', JSON.stringify({ 13: 3 }));
+    localStorage.setItem('zengo:size', '13');
+    localStorage.setItem('zengo:handicap', JSON.stringify({ 13: 3 }));
     renderStage();
     startTwoPlayers();
     const name = (s: string) => cell(pt(s, 13)).getAttribute('aria-label');
-    const expected = zigo.newGame(makeSettings(13, 'area', 3));
+    const expected = zengo.newGame(makeSettings(13, 'area', 3));
     expect(expected.turn).toBe('W');
     for (const s of ['D4', 'K10', 'D10']) expect(name(s)).toMatch(/^black stone/);
     // Komi 0.5 on White's strip.
@@ -361,7 +361,7 @@ describe('Index stage', () => {
 describe('Index stage against the computer (milestone 2)', () => {
   it('Start loads the engine first, then the computer answers a stone (DESIGN 10, 14)', async () => {
     useEngine({ loadMs: 30 });
-    localStorage.setItem('zigo:color', JSON.stringify('B'));
+    localStorage.setItem('zengo:color', JSON.stringify('B'));
     renderStage();
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
     // The Start pill shows the spinner while stage 1 loads.
@@ -479,7 +479,7 @@ describe('Index stage: final-phase fixes', () => {
     Object.defineProperty(e, 'evaluate', {
       value: (...args: Parameters<typeof evaluate>) => (args[1].visits === 100 ? gate.then(() => evaluate(...args)) : evaluate(...args)),
     });
-    localStorage.setItem('zigo:seating', JSON.stringify('face'));
+    localStorage.setItem('zengo:seating', JSON.stringify('face'));
     renderStage();
     startTwoPlayers();
     place('E5');

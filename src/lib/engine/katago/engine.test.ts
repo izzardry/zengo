@@ -5,7 +5,7 @@
 import { tensor2d, tensor4d } from '@tensorflow/tfjs-core';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { createNodeEngine, loadNodeNet, NODE_NET_PATHS, type NodeEngine } from '../node';
-import { fromDiagram, illegalReason, isLegal, makeSettings, newGame, pass, play, pointToIndex, position, replay } from '../../zigo';
+import { fromDiagram, illegalReason, isLegal, makeSettings, newGame, pass, play, pointToIndex, position, replay } from '../../zengo';
 import type { Position, Size } from '../../types';
 import { postprocessKataGoV8 } from './evalV8';
 import {
@@ -23,8 +23,8 @@ import { playableGame } from '../position';
 // Ground truth from KataGo itself (ported from Web KaTrain's test/engineGolden.test.ts, MIT).
 //
 // cpp/tests/results/runNNOnTinyBoardTest.txt in the KataGo repo is the recorded output of real
-// KataGo running g170-b6c96-s175395328-d26788732 (Zigo's small net) on a 5×5 board, White to play,
-// Tromp-Taylor rules, komi 7.5, no move history, symmetry 3. 5×5 is not a Zigo board size; the engine
+// KataGo running g170-b6c96-s175395328-d26788732 (Zengo's small net) on a 5×5 board, White to play,
+// Tromp-Taylor rules, komi 7.5, no move history, symmetry 3. 5×5 is not a Zengo board size; the engine
 // layer allows any size, the app offers 9, 13 and 19.
 //
 //   .....

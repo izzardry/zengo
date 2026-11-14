@@ -22,7 +22,7 @@
  * | `x`,`y` | manual signalling offer and answer (transient, reserved) |
  *
  * `r` carries the result of a finished game, so a shared finished game opens in review. It is
- * written as SGF writes `RE` (`formatResult` in `lib/zigo.ts`): `B+4.5` (by score, the margin),
+ * written as SGF writes `RE` (`formatResult` in `lib/zengo.ts`): `B+4.5` (by score, the margin),
  * `W+R` (resignation), `B+T` (time). The `+` is percent-encoded in the query; a raw `+` that
  * arrives decoded as a space is accepted too.
  */
@@ -30,7 +30,7 @@ import { useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { isValidCode, normalizeCode } from './codes';
 import type { Color, Mode, Result, Rules, Size, TcString } from './types';
-import { formatResult, formatTc, MAX_PLIES, maxHandicap, parseTc } from './zigo';
+import { formatResult, formatTc, MAX_PLIES, maxHandicap, parseTc } from './zengo';
 
 /** Parsed query parameters. Absent or invalid values are `undefined`. */
 export interface UrlParams {
@@ -184,7 +184,7 @@ export function urlQuery(p: UrlParams): string {
 /* ---------------------------------------------------------------------------------------------- */
 
 /**
- * The app's base address without hash or query, e.g. `https://izzardry.github.io/zigo/`.
+ * The app's base address without hash or query, e.g. `https://izzardry.github.io/zengo/`.
  * Pass a location for tests; defaults to `window.location`.
  */
 export function appBaseUrl(loc?: Pick<Location, 'origin' | 'pathname'>): string {
@@ -260,7 +260,7 @@ export function gameParams(g: ShareableGame): UrlParams {
 /* ---------------------------------------------------------------------------------------------- */
 
 /**
- * `useSearchParams` with Zigo's rules: `write(p)` serializes `p`, keeps the current `x` and `y`
+ * `useSearchParams` with Zengo's rules: `write(p)` serializes `p`, keeps the current `x` and `y`
  * unless `p` sets them, and navigates with `replace: true` only when the query actually changes.
  * `isOwnWrite(search)` tells a query this hook wrote itself from one that arrived from outside
  * (a pasted link, the back button).

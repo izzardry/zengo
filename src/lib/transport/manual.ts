@@ -30,10 +30,10 @@ import {
 import { decodeSignal, encodeSdp, rebuildSdp, SdpError, type ReducedSdp } from './sdp';
 
 /** Data channel label. */
-export const MANUAL_CHANNEL_LABEL = 'zigo';
+export const MANUAL_CHANNEL_LABEL = 'zengo';
 
 export type ManualErrorReason =
-  /** Not a Zigo link or signal, or damaged. */
+  /** Not a Zengo link or signal, or damaged. */
   | 'invalid'
   /** A valid signal of the wrong kind (an offer where an answer was expected, or the reverse). */
   | 'wrong-kind'
@@ -339,7 +339,7 @@ export function waitForGathering(pc: RTCPeerConnection, timeoutMs: number, timer
 
 /** Channel name of the answer hand-over for `code`. */
 export function handOverChannelName(code: string): string {
-  return `zigo:manual:${code}`;
+  return `zengo:manual:${code}`;
 }
 
 type HandOverMsg = { t: 'answer'; id: string; answer: string } | { t: 'took'; id: string };

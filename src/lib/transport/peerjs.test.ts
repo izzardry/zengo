@@ -256,7 +256,7 @@ describe('classifyPeerError', () => {
 });
 
 describe('PeerJS transport: anchor or dial (DESIGN 9.2)', () => {
-  it('waits the random pre-delay, then claims zigo-<CODE> with STUN-only ICE', async () => {
+  it('waits the random pre-delay, then claims zengo-<CODE> with STUN-only ICE', async () => {
     const make = factory({ rng: () => 0.8 });
     void make();
     await vi.advanceTimersByTimeAsync(399);
@@ -264,7 +264,7 @@ describe('PeerJS transport: anchor or dial (DESIGN 9.2)', () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(broker.created).toHaveLength(1);
     const p = broker.created[0];
-    expect(p.id).toBe('zigo-K7QW2M');
+    expect(p.id).toBe('zengo-K7QW2M');
     expect(p.opts.config?.iceServers).toBe(ICE_SERVERS);
     const urls = ICE_SERVERS.flatMap((s) => (Array.isArray(s.urls) ? s.urls : [s.urls]));
     expect(urls.length).toBeGreaterThan(0);
@@ -290,7 +290,7 @@ describe('PeerJS transport: anchor or dial (DESIGN 9.2)', () => {
 
     // The dialer registered a random id of its own and dialled the anchor.
     const dialerPeer = broker.created[2];
-    expect(dialerPeer.id).toMatch(/^zigo-K7QW2M-[0-9a-z]{10}$/);
+    expect(dialerPeer.id).toMatch(/^zengo-K7QW2M-[0-9a-z]{10}$/);
 
     a.send(ping);
     b.send({ t: 'pong', v: 1 });

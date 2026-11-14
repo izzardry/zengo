@@ -43,12 +43,12 @@ import {
   type GameSession,
 } from './gameRecord';
 import type { Game, SavedGame } from './types';
-import zigo, { makeSettings } from './zigo';
+import zengo, { makeSettings } from './zengo';
 
 const S9 = makeSettings(9);
 
 function playAll(g: Game, points: string[]): Game {
-  return points.reduce((acc, m) => zigo.play(acc, m, 100), g);
+  return points.reduce((acc, m) => zengo.play(acc, m, 100), g);
 }
 
 function session(over: Partial<Parameters<typeof createSession>[0]> = {}, at = 1000): GameSession {
@@ -161,56 +161,56 @@ describe('undo and redo rules', () => {
   });
 
   it('pass-and-play steps one ply', () => {
-    const g = playAll(zigo.newGame(S9), ['ee', 'cc', 'gg']);
+    const g = playAll(zengo.newGame(S9), ['ee', 'cc', 'gg']);
     expect(undoTarget(g, 'ply', 'B')).toBe(2);
-    const back = zigo.undo(g, 1);
+    const back = zengo.undo(g, 1);
     expect(redoTarget(back, 'ply', 'B')).toBe(3);
-    expect(undoTarget(zigo.newGame(S9), 'ply', 'B')).toBe(0);
+    expect(undoTarget(zengo.newGame(S9), 'ply', 'B')).toBe(0);
   });
 
   it('computer: one full turn back when the player is to move', () => {
-    const g = playAll(zigo.newGame(S9), ['ee', 'cc', 'gg', 'dd']);
+    const g = playAll(zengo.newGame(S9), ['ee', 'cc', 'gg', 'dd']);
     expect(undoTarget(g, 'turn', 'B')).toBe(2);
-    const back = zigo.undo(g, 2);
+    const back = zengo.undo(g, 2);
     // Redo replays both plies.
     expect(redoTarget(back, 'turn', 'B')).toBe(4);
   });
 
   it('computer: only the player move while the computer is thinking', () => {
-    const g = playAll(zigo.newGame(S9), ['ee', 'cc', 'gg']);
+    const g = playAll(zengo.newGame(S9), ['ee', 'cc', 'gg']);
     expect(undoTarget(g, 'turn', 'B')).toBe(2);
   });
 
   it('computer: White undoing the first turn goes to the start (the computer moves again)', () => {
-    const g1 = playAll(zigo.newGame(S9), ['ee']);
+    const g1 = playAll(zengo.newGame(S9), ['ee']);
     expect(undoTarget(g1, 'turn', 'W')).toBe(0);
-    const g3 = playAll(zigo.newGame(S9), ['ee', 'cc', 'gg']);
+    const g3 = playAll(zengo.newGame(S9), ['ee', 'cc', 'gg']);
     expect(undoTarget(g3, 'turn', 'W')).toBe(1);
   });
 
   it('computer: in a handicap game White moves first, so Black undoing the first turn goes to the start', () => {
-    const g = playAll(zigo.newGame(makeSettings(9, 'area', 2)), ['ee']);
+    const g = playAll(zengo.newGame(makeSettings(9, 'area', 2)), ['ee']);
     expect(g.turn).toBe('B');
     expect(undoTarget(g, 'turn', 'B')).toBe(0);
   });
 
   it('redo to the end of a tail that stops on the computer turn', () => {
-    const g = zigo.undo(playAll(zigo.newGame(S9), ['ee', 'cc', 'gg']), 3);
+    const g = zengo.undo(playAll(zengo.newGame(S9), ['ee', 'cc', 'gg']), 3);
     expect(redoTarget(g, 'turn', 'B')).toBe(2);
-    expect(redoTarget(zigo.redo(g, 2), 'turn', 'B')).toBe(3);
+    expect(redoTarget(zengo.redo(g, 2), 'turn', 'B')).toBe(3);
   });
 
   it('passes are plies like stones', () => {
-    const g = playAll(zigo.newGame(S9), ['ee', 'tt', 'gg']);
+    const g = playAll(zengo.newGame(S9), ['ee', 'tt', 'gg']);
     expect(undoTarget(g, 'ply', 'B')).toBe(2);
     expect(undoTarget(g, 'turn', 'B')).toBe(2);
-    expect(undoTarget(zigo.undo(g, 1), 'turn', 'B')).toBe(0);
+    expect(undoTarget(zengo.undo(g, 1), 'turn', 'B')).toBe(0);
   });
 
   it('rooms have no local undo', () => {
-    const g = playAll(zigo.newGame(S9), ['ee']);
+    const g = playAll(zengo.newGame(S9), ['ee']);
     expect(undoTarget(g, 'request', 'B')).toBe(1);
-    expect(redoTarget(zigo.undo(g, 1), 'request', 'B')).toBe(0);
+    expect(redoTarget(zengo.undo(g, 1), 'request', 'B')).toBe(0);
   });
 });
 
@@ -265,7 +265,7 @@ describe('session transitions', () => {
     expect(u.game.cursor).toBe(2);
     expect(u.lastPlayedAt).toBe(50);
     const rec = toSavedGame(u);
-    expect(zigo.decodeMoves(rec.moves)).toEqual(['ee', 'cc']);
+    expect(zengo.decodeMoves(rec.moves)).toEqual(['ee', 'cc']);
     expect(rec.ms).toEqual([10, 10]);
     const r = applyRedo(u, 60)!;
     expect(r.game.cursor).toBe(3);
@@ -613,7 +613,7 @@ describe('review', () => {
     expect(spec.game!.settings).toEqual({ size: 13, rules: 'territory', handicap: 3, komi2: 1 });
     expect(spec.game!.scoring).toMatchObject({ round: 1, rev: 0, dead: [] });
     expect(spec.game!.end).toBeUndefined();
-    const mid = continueSpec(zigo.goto(s.game, 1), { mode: 'local' }, 'CONT02', null)!;
+    const mid = continueSpec(zengo.goto(s.game, 1), { mode: 'local' }, 'CONT02', null)!;
     expect([...mid.game!.board].filter((v) => v === 1)).toHaveLength(3);
     expect(mid.game!.turn).toBe('B');
   });
@@ -626,9 +626,9 @@ describe('SGF export (DESIGN 13.3)', () => {
     s = playS(s, ['dd', 'jj']);
     s = applyResign(s, at)!;
     const text = sgfOf(s, 'abc123');
-    expect(text).toContain('AP[Zigo:abc123]');
+    expect(text).toContain('AP[Zengo:abc123]');
     expect(text).toContain('SZ[13]');
-    expect(text).toContain('PW[Zigo Level 5]');
+    expect(text).toContain('PW[Zengo Level 5]');
     expect(text).not.toContain('PB[');
     expect(text).toContain('DT[2026-11-12]');
     expect(text).toContain('RE[W+R]');

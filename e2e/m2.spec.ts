@@ -22,7 +22,7 @@
  */
 import { test, expect, type BrowserContext, type Page } from '@playwright/test';
 import type { Game, Point, Size } from '../src/lib/types';
-import { decodeMoves, encodeMoves, gtp, handicapPoints, indexToPoint, isLegal, libertiesOf, makeSettings, play, pointToIndex, replay, selfAtariSize } from '../src/lib/zigo';
+import { decodeMoves, encodeMoves, gtp, handicapPoints, indexToPoint, isLegal, libertiesOf, makeSettings, play, pointToIndex, replay, selfAtariSize } from '../src/lib/zengo';
 import {
   accept,
   backToStart,

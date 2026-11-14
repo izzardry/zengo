@@ -15,7 +15,7 @@
  */
 import scoring from './scoring';
 import type { EngineApi, EngineNet, Game, Point } from './types';
-import zigo from './zigo';
+import zengo from './zengo';
 
 /** Visits of the proposal search (DESIGN 8.4: about 100). */
 export const PROPOSAL_VISITS = 100;
@@ -46,7 +46,7 @@ export async function proposeDeadStones(engine: EngineApi, g: Game, opts: Propos
   if (engine.state === 'failed') return null;
   try {
     const e = await engine.evaluate(
-      zigo.position(g),
+      zengo.position(g),
       { visits: opts.visits ?? PROPOSAL_VISITS, timeMs: opts.timeMs ?? PROPOSAL_TIME_MS, net: proposalNet(engine) },
       opts.timeoutMs ?? PROPOSAL_TIMEOUT_MS,
     );

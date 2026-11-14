@@ -108,7 +108,7 @@ describe('outcome', () => {
 });
 
 describe('share', () => {
-  const data = { title: 'Zigo', text: 'Look', url: 'https://x/#/?s=ABC' };
+  const data = { title: 'Zengo', text: 'Look', url: 'https://x/#/?s=ABC' };
 
   it('uses the share sheet when there is one', async () => {
     const share = vi.fn().mockResolvedValue(undefined);

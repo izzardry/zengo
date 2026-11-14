@@ -3,7 +3,7 @@
  *
  * `triggerPrompt(1500)` after the first win (1.5 s after the overlay appears), or
  * `triggerPrompt()` from the 3-second help-button easter egg. The prompt is shown at most once
- * per device, ever: `zigo:donation-shown` is written the moment it opens.
+ * per device, ever: `zengo:donation-shown` is written the moment it opens.
  * Ported from Zudoku `useDonationPrompt.ts` with the storage key fix (Ztyle audit #13) and a
  * delay that is cancelled on unmount.
  */

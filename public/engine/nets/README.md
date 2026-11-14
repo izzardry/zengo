@@ -11,6 +11,6 @@ Both are KataGo model version 8, from the g170 training run.
 
 **Source:** <https://katagoarchive.org/g170/neuralnets/index.html> (downloaded 2026-11-12 from `https://katagoarchive.org/g170/neuralnets/<file>`).
 
-**Licence:** CC0 1.0 (public domain dedication) by Jane Street and David J. Wu ("lightvector"), see [`LICENSE.txt`](LICENSE.txt), copied from <https://katagoarchive.org/g170/LICENSE.txt>. They are not covered by Zigo's MIT licence.
+**Licence:** CC0 1.0 (public domain dedication) by Jane Street and David J. Wu ("lightvector"), see [`LICENSE.txt`](LICENSE.txt), copied from <https://katagoarchive.org/g170/LICENSE.txt>. They are not covered by Zengo's MIT licence.
 
 The 6-block net decompresses to the same bytes as Web KaTrain's `public/models/katago-small.bin.gz` (SHA-256 of the inflated file `2bcc7c4daac6e33e9b9f5f8a427e1536b50aa705cfdb7fe21bffacbcdbfc7242`); the gzip files differ only in the header timestamp.

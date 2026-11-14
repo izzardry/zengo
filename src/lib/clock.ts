@@ -2,7 +2,7 @@
  * Game clock math (DESIGN 11, 9.7). Pure: no React, no DOM, time is passed in.
  *
  * The clock is never accumulated from ticks. Each side's clock is derived from the ply log
- * (`zigo.clocks`: Fischer increment or byo-yomi periods, each side's first move untimed) and the
+ * (`zengo.clocks`: Fischer increment or byo-yomi periods, each side's first move untimed) and the
  * side to move's running turn is applied on top. The running turn is measured by a `TurnTimer`:
  * the ms already used plus the monotonic stamp (`performance.now()` in the app) at which it last
  * (re)started. A throttled background tab therefore cannot drift, and undo / redo restore the
@@ -12,13 +12,13 @@
  *
  * Japanese byo-yomi (DESIGN 11): main time, then P periods of S seconds. A move made inside a period
  * keeps it, each full period overrun uses one up, and time is up when the last period reads zero.
- * One rule (`byoyomiPeriodsLeft` in `lib/zigo.ts`) drives both the log (`byoyomiStep`, via
- * `zigo.clocks`) and the running turn (`liveClock`), so the live face, the flag and the clock after
+ * One rule (`byoyomiPeriodsLeft` in `lib/zengo.ts`) drives both the log (`byoyomiStep`, via
+ * `zengo.clocks`) and the running turn (`liveClock`), so the live face, the flag and the clock after
  * the move always agree. `clock.test.ts` checks this against a tick-by-tick simulation.
  */
 import { formatClock, formatElapsed, isLowTime } from './timeUtils';
 import type { ClockInfo, ClockState, Color, Game, TcString, TimeControl } from './types';
-import { byoyomiPeriodsLeft, clockRunning, clocks, encodeMoves, toTc } from './zigo';
+import { byoyomiPeriodsLeft, clockRunning, clocks, encodeMoves, toTc } from './zengo';
 
 const other = (c: Color): Color => (c === 'B' ? 'W' : 'B');
 

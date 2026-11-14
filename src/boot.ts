@@ -20,7 +20,7 @@ export const FONT_WAIT_MS = 1500;
 export const SETTLE_FRAMES = 2;
 
 /** The class on <html> that fades #root in (index.html). */
-export const READY_CLASS = 'zigo-ready';
+export const READY_CLASS = 'zengo-ready';
 
 /** Starts loading every weight of the brand font; resolves when all are in (or failed). */
 export function loadFonts(doc: Document = document): Promise<void> {
@@ -60,7 +60,7 @@ export const FALLBACK_MS = 10_000;
 export function reveal(doc: Document = document, now: number = performance.now()): void {
   const root = doc.documentElement;
   if (root.classList.contains(READY_CLASS)) return;
-  if (now >= FALLBACK_MS - 300) root.classList.add('zigo-late');
+  if (now >= FALLBACK_MS - 300) root.classList.add('zengo-late');
   root.classList.add(READY_CLASS);
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { makeSettings, newGame, pass, play, position, replay } from '../zigo';
+import { makeSettings, newGame, pass, play, position, replay } from '../zengo';
 import { engineKomi, gameFromPosition, handicapOf, isLegalInPosition, playableGame, pointOfIndex } from './position';
 
 describe('engine positions', () => {

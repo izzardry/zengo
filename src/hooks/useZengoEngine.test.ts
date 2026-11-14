@@ -1,16 +1,16 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
-import { setSharedEngine, sharedEngine, useZigoEngine } from './useZigoEngine';
+import { setSharedEngine, sharedEngine, useZengoEngine } from './useZengoEngine';
 import { FakeEngine } from '@/lib/engine/fake';
 import { EngineDriver } from '@/lib/engine/driver';
-import { makeSettings, newGame, position } from '@/lib/zigo';
+import { makeSettings, newGame, position } from '@/lib/zengo';
 import type { EngineApi } from '@/lib/types';
 
 const START = position(newGame(makeSettings(9)));
 
 afterEach(() => setSharedEngine(null));
 
-describe('useZigoEngine', () => {
+describe('useZengoEngine', () => {
   it('creates one lazy browser engine and shares it', () => {
     setSharedEngine(null);
     const a = sharedEngine();
@@ -22,7 +22,7 @@ describe('useZigoEngine', () => {
   it('re-renders on snapshot changes; methods stay stable', async () => {
     const fake = new FakeEngine({ backend: 'webgpu' });
     setSharedEngine(fake);
-    const { result } = renderHook(() => useZigoEngine());
+    const { result } = renderHook(() => useZengoEngine());
     expect(result.current.state).toBe('idle');
     expect(result.current.nets).toEqual({ small: false, large: false });
     const first = result.current;
@@ -43,8 +43,8 @@ describe('useZigoEngine', () => {
   it('two hook users share one engine', async () => {
     const fake = new FakeEngine();
     setSharedEngine(fake);
-    const a = renderHook(() => useZigoEngine());
-    const b = renderHook(() => useZigoEngine());
+    const a = renderHook(() => useZengoEngine());
+    const b = renderHook(() => useZengoEngine());
     let move = '';
     await act(async () => {
       move = (await a.result.current.genmove(START, 5)).move;
@@ -62,7 +62,7 @@ describe('useZigoEngine', () => {
 
   it('accepts an explicit engine and passes genmove options through', async () => {
     const fake = new FakeEngine();
-    const { result } = renderHook(() => useZigoEngine(fake));
+    const { result } = renderHook(() => useZengoEngine(fake));
     let m = '';
     await act(async () => {
       m = (await result.current.genmove(START, 1, undefined, { avoid: ['aa'] })).move;

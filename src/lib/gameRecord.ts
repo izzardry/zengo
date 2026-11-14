@@ -4,7 +4,7 @@
  *
  * No React, no DOM, no storage: every function takes what it needs (including `now`) and returns a
  * new value, so the rules are tested here without rendering anything. The rules of Go themselves
- * are in `lib/zigo.ts`, counting in `lib/scoring.ts`.
+ * are in `lib/zengo.ts`, counting in `lib/scoring.ts`.
  */
 import { generateCode } from './codes';
 import scoringApi from './scoring';
@@ -26,7 +26,7 @@ import type {
   TcString,
 } from './types';
 import { normalizeTc } from './url';
-import zigo, { PASS, isPass, makeSettings, normalizeHandicap } from './zigo';
+import zengo, { PASS, isPass, makeSettings, normalizeHandicap } from './zengo';
 
 /* ---------------------------------------------------------------------------------------------- */
 /* Settings                                                                                         */
@@ -63,7 +63,7 @@ export function clampLevel(v: unknown): number | undefined {
   return n >= 1 && n <= 12 ? n : undefined;
 }
 
-/** Validates a stored opponent value (`zigo:opponent`); anything unreadable is the default. */
+/** Validates a stored opponent value (`zengo:opponent`); anything unreadable is the default. */
 export function parseOpponent(v: unknown): Opponent {
   if (typeof v === 'object' && v !== null) {
     const o = v as { mode?: unknown; level?: unknown };
@@ -74,7 +74,7 @@ export function parseOpponent(v: unknown): Opponent {
   return DEFAULT_OPPONENT;
 }
 
-/** Validates a stored color choice (`zigo:color`): `random`, `B` or `W`. Default random. */
+/** Validates a stored color choice (`zengo:color`): `random`, `B` or `W`. Default random. */
 export function parseColorChoice(v: unknown): ColorChoice {
   return v === 'B' || v === 'W' ? v : 'random';
 }
@@ -126,7 +126,7 @@ export function freshCode(games: readonly SavedGame[], rng: Rng): string {
  * on, or `fallback` without moves. Links always carry `n`; this only keeps a hand-cut link usable.
  */
 export function sizeForMoves(moves: string, fallback: Size): Size {
-  const points = zigo.decodeMoves(moves).filter((p) => !isPass(p));
+  const points = zengo.decodeMoves(moves).filter((p) => !isPass(p));
   if (points.length === 0) return fallback;
   let max = 0;
   for (const p of points) max = Math.max(max, p.charCodeAt(0) - 97, p.charCodeAt(1) - 97);
@@ -153,12 +153,12 @@ export function undoRuleFor(mode: Mode): UndoRule {
 
 /** Side to move after `cursor` plies of `g`. */
 export function turnAt(g: Game, cursor: number): Color {
-  return zigo.colorOfPly(g, cursor);
+  return zengo.colorOfPly(g, cursor);
 }
 
 /**
  * Cursor that undo goes back to, or `g.cursor` when there is nothing to undo. Passes are plies
- * like stones; undoing the second pass leaves scoring (`lib/zigo.ts`).
+ * like stones; undoing the second pass leaves scoring (`lib/zengo.ts`).
  * - `ply`: one back.
  * - `turn` (player `color`): back to the latest earlier position where the player is to move, so
  *   a computer reply and the player's move go together; when the computer is still thinking, only
@@ -234,7 +234,7 @@ export interface NewGameSpec {
 
 /** A brand-new game: saved at once, "last played" now (Zudoku: a new game counts as a change). */
 export function createSession(spec: NewGameSpec, now: number): GameSession {
-  const game = spec.game ?? zigo.newGame(settingsOf(spec.settings ?? { size: DEFAULT_SIZE, rules: 'area', handicap: 0 }));
+  const game = spec.game ?? zengo.newGame(settingsOf(spec.settings ?? { size: DEFAULT_SIZE, rules: 'area', handicap: 0 }));
   return {
     id: spec.code,
     code: spec.code,
@@ -260,12 +260,12 @@ export function savedSettings(saved: Pick<SavedGame, 'size' | 'rules' | 'handica
 /** Rebuilds a stored game, scoring marks and result included. Unreadable tails are cut (lenient), never thrown. */
 export function gameFromSaved(saved: SavedGame): Game {
   try {
-    return zigo.fromRecord(saved, { lenient: true });
+    return zengo.fromRecord(saved, { lenient: true });
   } catch {
     try {
-      return zigo.newGame(settingsOf(savedSettings(saved)));
+      return zengo.newGame(settingsOf(savedSettings(saved)));
     } catch {
-      return zigo.newGame(settingsOf({ size: DEFAULT_SIZE, rules: 'area', handicap: 0 }));
+      return zengo.newGame(settingsOf({ size: DEFAULT_SIZE, rules: 'area', handicap: 0 }));
     }
   }
 }
@@ -317,7 +317,7 @@ export function toSavedGame(s: GameSession): SavedGame {
     rules: g.settings.rules,
     handicap: g.settings.handicap,
     tc: s.tc,
-    moves: zigo.encodeMoves(plies),
+    moves: zengo.encodeMoves(plies),
     ms: plies.map((p) => p.ms),
     assisted: s.assisted,
     createdAt: s.createdAt,
@@ -367,9 +367,9 @@ export function computerToMove(s: GameSession): boolean {
 export function applyMove(s: GameSession, p: Point, ms: number, now: number): GameSession | null {
   if (s.game.scoring) return null;
   if (!canPlay(s) && !computerToMove(s)) return null;
-  if (!zigo.isLegal(s.game, p)) return null;
+  if (!zengo.isLegal(s.game, p)) return null;
   try {
-    return changed(s, zigo.play(s.game, p, ms), now);
+    return changed(s, zengo.play(s.game, p, ms), now);
   } catch {
     return null;
   }
@@ -385,7 +385,7 @@ export function applyUndo(s: GameSession, now: number): GameSession | null {
   if (s.review !== null || s.mode === 'room' || s.game.end) return null;
   const target = undoTarget(s.game, undoRuleFor(s.mode), s.color);
   if (target >= s.game.cursor) return null;
-  return changed(s, zigo.undo(s.game, s.game.cursor - target), now, { assisted: true });
+  return changed(s, zengo.undo(s.game, s.game.cursor - target), now, { assisted: true });
 }
 
 /** Redo per the mode's rule. Null if there is no redo tail. */
@@ -393,13 +393,13 @@ export function applyRedo(s: GameSession, now: number): GameSession | null {
   if (s.review !== null || s.mode === 'room' || s.game.end) return null;
   const target = redoTarget(s.game, undoRuleFor(s.mode), s.color);
   if (target <= s.game.cursor) return null;
-  return changed(s, zigo.redo(s.game, target - s.game.cursor), now);
+  return changed(s, zengo.redo(s.game, target - s.game.cursor), now);
 }
 
 /** The game cut back to its first `n` plies, with no redo tail (marks of a later scoring are gone). */
 function truncate(g: Game, n: number): Game {
   if (n >= g.plies.length && !g.end) return g;
-  return zigo.replay(g.settings, g.plies.slice(0, n));
+  return zengo.replay(g.settings, g.plies.slice(0, n));
 }
 
 /**
@@ -442,13 +442,13 @@ export function undoPassIndex(s: GameSession): number | null {
 export function applyResign(s: GameSession, now: number): GameSession | null {
   if (!canPlay(s) || s.game.scoring) return null;
   const loser: Color = s.mode === 'local' ? s.game.turn : s.color;
-  return changed(s, zigo.end(s.game, { winner: other(loser), by: 'resign' }), now);
+  return changed(s, zengo.end(s.game, { winner: other(loser), by: 'resign' }), now);
 }
 
 /** Ends the game with a result decided elsewhere (the computer resigning, DESIGN 10.4). */
 export function applyEnd(s: GameSession, result: Result, now: number): GameSession | null {
   if (s.mode === 'room' || s.game.end) return null;
-  return changed(s, zigo.end(s.game, result), now);
+  return changed(s, zengo.end(s.game, result), now);
 }
 
 /**
@@ -457,7 +457,7 @@ export function applyEnd(s: GameSession, result: Result, now: number): GameSessi
  */
 export function applyTimeout(s: GameSession, flagged: Color, now: number): GameSession | null {
   if (!isRunning(s)) return null;
-  return changed(s, zigo.end(s.game, { winner: other(flagged), by: 'time' }), now);
+  return changed(s, zengo.end(s.game, { winner: other(flagged), by: 'time' }), now);
 }
 
 /**
@@ -466,7 +466,7 @@ export function applyTimeout(s: GameSession, flagged: Color, now: number): GameS
  */
 export function applyReopen(s: GameSession, now: number): GameSession | null {
   if (s.mode === 'room' || !s.game.end || s.game.end.result.by === 'score') return null;
-  return changed(s, zigo.reopen(s.game), now, { review: null });
+  return changed(s, zengo.reopen(s.game), now, { review: null });
 }
 
 /** The 15-second rule: the session now counts as played. */
@@ -487,14 +487,14 @@ export function applyAssisted(s: GameSession): GameSession {
 /** New marks for a live scoring phase: `rev` up by one, both acceptances cleared. */
 function withMarks(g: Game, dead: readonly Point[]): Game {
   const sc = g.scoring as Scoring;
-  return zigo.setScoring(g, { round: sc.round, rev: sc.rev + 1, dead: [...dead], accepted: [0, 0] });
+  return zengo.setScoring(g, { round: sc.round, rev: sc.rev + 1, dead: [...dead], accepted: [0, 0] });
 }
 
 /** Toggles the whole group at `p` between alive and dead (DESIGN 8.4 step 2). Null if not scoring or `p` is empty. */
 export function applyToggle(s: GameSession, p: Point, now: number): GameSession | null {
   if (!isScoring(s) || s.review !== null) return null;
   const g = s.game;
-  if (zigo.groupAt(g, p).length === 0) return null;
+  if (zengo.groupAt(g, p).length === 0) return null;
   const dead = scoringApi.toggle(g, (g.scoring as Scoring).dead, p);
   return changed(s, withMarks(g, dead), now);
 }
@@ -504,7 +504,7 @@ export function applyMarks(s: GameSession, dead: readonly Point[], now: number):
   if (!isScoring(s)) return null;
   const g = s.game;
   // Only stones count; the set is sorted and de-duplicated by `setScoring`.
-  const stones = dead.filter((p) => zigo.groupAt(g, p).length > 0);
+  const stones = dead.filter((p) => zengo.groupAt(g, p).length > 0);
   return changed(s, withMarks(g, stones), now);
 }
 
@@ -522,7 +522,7 @@ export function applyScoreEnd(s: GameSession, dead: readonly Point[], now: numbe
   const sc = s.game.scoring as Scoring;
   const same = dead.length === sc.dead.length && [...dead].sort().every((p, i) => p === sc.dead[i]);
   const marked = same ? s.game : (applyMarks(s, dead, now)?.game ?? s.game);
-  return changed(s, zigo.end(marked, scoredResult(marked, (marked.scoring as Scoring).dead)), now, { review: null });
+  return changed(s, zengo.end(marked, scoredResult(marked, (marked.scoring as Scoring).dead)), now, { review: null });
 }
 
 /**
@@ -540,7 +540,7 @@ export function applyAccept(s: GameSession, side: Color | null, now: number): Ga
   const idx = side === 'B' ? 0 : 1;
   const accepted: [number, number] = [sc.accepted[0], sc.accepted[1]];
   accepted[idx] = rev;
-  const game = zigo.setScoring(s.game, { round: sc.round, rev, dead: [...sc.dead], accepted });
+  const game = zengo.setScoring(s.game, { round: sc.round, rev, dead: [...sc.dead], accepted });
   const next = changed(s, game, now);
   if (accepted[0] === rev && accepted[1] === rev) return applyScoreEnd(next, sc.dead, now);
   return next;
@@ -549,7 +549,7 @@ export function applyAccept(s: GameSession, side: Color | null, now: number): Ga
 /** Resume (DESIGN 8.4 step 5): back to play with the player to move; the next scoring is round 2. */
 export function applyResume(s: GameSession, now: number): GameSession | null {
   if (!isScoring(s) || s.review !== null) return null;
-  return changed(s, zigo.resume(s.game), now);
+  return changed(s, zengo.resume(s.game), now);
 }
 
 /* ---------------------------------------------------------------------------------------------- */
@@ -574,7 +574,7 @@ export function applyGoto(s: GameSession, cursor: number): GameSession {
 
 /** The game value the board shows: the review position, or the live game. */
 export function viewOf(s: GameSession): Game {
-  return s.review === null ? s.game : zigo.goto(s.game, s.review);
+  return s.review === null ? s.game : zengo.goto(s.game, s.review);
 }
 
 /**
@@ -593,7 +593,7 @@ export function continueSpec(
   const plies: Ply[] = view.plies.slice(0, view.cursor).map((p) => ({ m: p.m, ms: 0 }));
   let game: Game;
   try {
-    game = zigo.replay(view.settings, plies);
+    game = zengo.replay(view.settings, plies);
   } catch {
     return null;
   }
@@ -614,15 +614,15 @@ export function continueSpec(
 /* ---------------------------------------------------------------------------------------------- */
 
 /**
- * `Copy SGF` for a session: the whole game (`zigo.sgf`), with `PB`/`PW` naming the computer
- * (`Zigo Level 5`) against the computer, the date the game was created, and the time control.
+ * `Copy SGF` for a session: the whole game (`zengo.sgf`), with `PB`/`PW` naming the computer
+ * (`Zengo Level 5`) against the computer, the date the game was created, and the time control.
  */
 export function sgfOf(s: GameSession, version: string): string {
-  const level = s.mode === 'computer' ? `Zigo Level ${s.level ?? DEFAULT_LEVEL}` : undefined;
+  const level = s.mode === 'computer' ? `Zengo Level ${s.level ?? DEFAULT_LEVEL}` : undefined;
   const d = new Date(s.createdAt);
   const pad = (n: number) => String(n).padStart(2, '0');
   const date = Number.isFinite(d.getTime()) ? `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` : undefined;
-  return zigo.sgf(s.game, {
+  return zengo.sgf(s.game, {
     version,
     black: level && s.color === 'W' ? level : undefined,
     white: level && s.color === 'B' ? level : undefined,

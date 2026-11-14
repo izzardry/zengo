@@ -17,7 +17,7 @@
  * `CONFIRM_WINDOW_MS` of its refusal commits.
  */
 import type { EngineEvaluation, Game, Point, Size } from './types';
-import { isPass, selfAtariSize } from './zigo';
+import { isPass, selfAtariSize } from './zengo';
 
 /** Score-lead drop (points, from the player's view) that flags a stone, by board size (DESIGN 7.2). */
 export const SCORE_DROP: Readonly<Record<Size, number>> = Object.freeze({ 9: 6, 13: 8, 19: 12 });

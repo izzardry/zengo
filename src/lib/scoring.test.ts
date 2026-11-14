@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Game, Point, Rules, Settings } from './types';
 import scoringApi, { DEAD_THRESHOLD, formatTotals } from './scoring';
 import { finalAreaScore, finalTerritoryScore, type GoscorerColor } from './vendor/goscorer';
-import { fromDiagram, pass, play, pointToIndex, replay, makeSettings } from './zigo';
+import { fromDiagram, pass, play, pointToIndex, replay, makeSettings } from './zengo';
 
 const { score, territory, toggle, propose, result } = scoringApi;
 

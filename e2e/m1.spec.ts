@@ -4,7 +4,7 @@
  * and 390×844. The screenshots for the verifier are written to docs/screenshots/m1/.
  */
 import { test, expect, type Page } from '@playwright/test';
-import { encodeMoves } from '../src/lib/zigo';
+import { encodeMoves } from '../src/lib/zengo';
 import {
   BASE_URL,
   SHOTS,

@@ -41,7 +41,7 @@ import {
   type TurnView,
 } from '@/lib/levels';
 import type { Color, EngineApi, EngineMove, Game, Now, Point, Result, Size, TcString, TimeControl } from '@/lib/types';
-import zigo, { PASS, isPass, pointToIndex, toTc } from '@/lib/zigo';
+import zengo, { PASS, isPass, pointToIndex, toTc } from '@/lib/zengo';
 
 /* ---------------------------------------------------------------------------------------------- */
 /* Pure helpers                                                                                     */
@@ -88,7 +88,7 @@ const ABORT_RETRIES = 2;
 const DAME_CHECK_TIMEOUT_MS = 5000;
 
 export interface UseComputerOptions {
-  /** The shared engine (`useZigoEngine()`). */
+  /** The shared engine (`useZengoEngine()`). */
   engine: EngineApi;
   /** The live game (`session.game`), or null. */
   game: Game | null;
@@ -162,7 +162,7 @@ export function useComputer(opts: UseComputerOptions): ComputerState {
     const minReply = Math.max(0, o.minReplyMs ?? MIN_REPLY_MS);
     const tc = toTc(o.tc ?? null);
     const clock = engineClock(g, tc, color);
-    const pos = zigo.position(g);
+    const pos = zengo.position(g);
     const line = lineKey(g);
     const owner = `${o.sessionKey ?? ''}|${lvl}`;
     if (views.current.owner !== owner) views.current = { owner, map: new Map() };

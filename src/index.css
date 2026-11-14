@@ -5,7 +5,7 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Zigo-specific styles go below. Keep them in @layer components so utilities still win. */
+/* Zengo-specific styles go below. Keep them in @layer components so utilities still win. */
 
 /*
  * Colors that hold in both themes (DESIGN 5.1) come from Ztyle: `--ink-light` / `--ink-dark` for
@@ -28,11 +28,11 @@
  * py-2 px-3, like the rail's other text): a two-line message with an action then takes 84 px, and
  * the rail moves up for the rest (`RAIL_TOASTS_VAR`).
  */
-[data-sonner-toaster].zigo-toaster-rail [data-sonner-toast] { padding: 0.5rem 0.75rem; font-size: 0.75rem; row-gap: 0.375rem; }
-[data-sonner-toaster].zigo-toaster-rail [data-request] { font-size: 0.75rem; line-height: 1rem; }
+[data-sonner-toaster].zengo-toaster-rail [data-sonner-toast] { padding: 0.5rem 0.75rem; font-size: 0.75rem; row-gap: 0.375rem; }
+[data-sonner-toaster].zengo-toaster-rail [data-request] { font-size: 0.75rem; line-height: 1rem; }
 /* At the narrowest (160 px) a long action label (`MANUELL VERBINDEN`) still fits inside the frame. */
-[data-sonner-toaster].zigo-toaster-rail [data-sonner-toast] [data-button] { padding-left: 6px; padding-right: 6px; letter-spacing: 0.025em; max-width: 100%; }
+[data-sonner-toaster].zengo-toaster-rail [data-sonner-toast] [data-button] { padding-left: 6px; padding-right: 6px; letter-spacing: 0.025em; max-width: 100%; }
 @media (max-width: 600px) {
-  [data-sonner-toaster].zigo-toaster-rail { left: auto; width: var(--width); }
-  [data-sonner-toaster].zigo-toaster-rail [data-sonner-toast] { width: var(--width); }
+  [data-sonner-toaster].zengo-toaster-rail { left: auto; width: var(--width); }
+  [data-sonner-toaster].zengo-toaster-rail [data-sonner-toast] { width: var(--width); }
 }

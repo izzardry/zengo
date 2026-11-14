@@ -28,7 +28,7 @@ import {
   resignDecision,
   seededRng,
 } from '../src/lib/levels.ts';
-import { PASS, gtp, isPass, makeSettings, newGame, pass, play, position } from '../src/lib/zigo.ts';
+import { PASS, gtp, isPass, makeSettings, newGame, pass, play, position } from '../src/lib/zengo.ts';
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);

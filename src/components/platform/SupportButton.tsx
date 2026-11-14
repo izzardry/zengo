@@ -2,7 +2,7 @@
  * The Buy Me a Coffee button (Ztyle 13): in the donation dialog (50 px tall) and at the very
  * bottom of the start screen's scroll area (60 px).
  *
- * Zudoku loads the official button image from cdn.buymeacoffee.com. Zigo draws the same
+ * Zudoku loads the official button image from cdn.buymeacoffee.com. Zengo draws the same
  * yellow button locally instead, because the app must not touch outside services except npm,
  * the PeerJS broker and STUN (PLAN 1, rule 9). The link itself is only followed on a tap.
  */

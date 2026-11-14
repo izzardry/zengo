@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <title>Zigo - Zero Distractions. Just Go.</title>
+    <title>Zengo - Zero Distractions. Just Go.</title>
     <meta name="description" content="Zero Distractions. Just Go. A minimalist Go board for one or two players." />
     <meta name="author" content="izzardry" />
 
@@ -13,22 +13,22 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <meta name="apple-mobile-web-app-title" content="Zigo" />
+    <meta name="apple-mobile-web-app-title" content="Zengo" />
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="apple-touch-icon" href="/pwa-192x192.png" />
 
     <!-- Open Graph -->
-    <meta property="og:title" content="Zigo - Zero Distractions. Just Go." />
+    <meta property="og:title" content="Zengo - Zero Distractions. Just Go." />
     <meta property="og:description" content="A minimalist Go game. 9×9 to 19×19, 12 computer levels, serverless rooms for two, and zero ads." />
     <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://izzardry.github.io/zigo/" />
-    <meta property="og:image" content="https://izzardry.github.io/zigo/og-image.png" />
+    <meta property="og:url" content="https://izzardry.github.io/zengo/" />
+    <meta property="og:image" content="https://izzardry.github.io/zengo/og-image.png" />
 
     <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Zigo - Zero Distractions. Just Go." />
+    <meta name="twitter:title" content="Zengo - Zero Distractions. Just Go." />
     <meta name="twitter:description" content="A minimalist Go game. 9×9 to 19×19, 12 computer levels, serverless rooms for two, and zero ads." />
-    <meta name="twitter:image" content="https://izzardry.github.io/zigo/og-image.png" />
+    <meta name="twitter:image" content="https://izzardry.github.io/zengo/og-image.png" />
 
     <!--
       First paint (src/boot.ts): the theme and the background are set before anything loads, so a
@@ -45,13 +45,13 @@
     <style>
       html { background: #fafafa; }
       html.dark { background: #0d0d0d; }
-      @keyframes zigo-boot-fallback { from { opacity: 0; } to { opacity: 1; } }
-      @keyframes zigo-reveal { from { opacity: 0; } to { opacity: 1; } }
-      #root { opacity: 0; animation: zigo-boot-fallback 0.3s ease-out 10s forwards; }
-      html.zigo-ready #root { opacity: 1; animation: zigo-reveal 0.3s ease-out; }
-      html.zigo-ready.zigo-late #root { animation: none; }
+      @keyframes zengo-boot-fallback { from { opacity: 0; } to { opacity: 1; } }
+      @keyframes zengo-reveal { from { opacity: 0; } to { opacity: 1; } }
+      #root { opacity: 0; animation: zengo-boot-fallback 0.3s ease-out 10s forwards; }
+      html.zengo-ready #root { opacity: 1; animation: zengo-reveal 0.3s ease-out; }
+      html.zengo-ready.zengo-late #root { animation: none; }
       @media (prefers-reduced-motion: reduce) {
-        html.zigo-ready #root { animation: none; }
+        html.zengo-ready #root { animation: none; }
       }
     </style>
   </head>

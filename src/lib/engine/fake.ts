@@ -21,7 +21,7 @@
  * at the start). The function forms receive the whole position.
  */
 import type { ClockInfo, Color, EngineApi, EngineGenmoveOptions, EngineState, Point, Position } from '../types';
-import { PASS, indexToPoint, isLegal, isPass } from '../zigo';
+import { PASS, indexToPoint, isLegal, isPass } from '../zengo';
 import { gameFromPosition } from './position';
 import { EngineAbortError, EngineUnavailableError, type EngineHandle, type EngineSnapshot } from './handle';
 

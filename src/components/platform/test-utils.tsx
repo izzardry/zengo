@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { render, renderHook, type RenderOptions } from '@testing-library/react';
 import { I18nProvider } from '@/lib/i18n';
 import { createStore, memoryStorage } from '@/lib/storage';
-import { fromGtp } from '@/lib/zigo';
+import { fromGtp } from '@/lib/zengo';
 import type { Language, SavedGame, Size } from '@/lib/types';
 
 export function memStore(initial: Record<string, string> = {}): ReturnType<typeof createStore> & { raw: ReturnType<typeof memoryStorage> } {

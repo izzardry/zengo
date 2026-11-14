@@ -53,7 +53,7 @@ function room(code: string): Room {
 }
 
 describe('storage', () => {
-  it('uses the zigo: prefix and JSON values', () => {
+  it('uses the zengo: prefix and JSON values', () => {
     const mem = memoryStorage();
     const s = createStore(mem);
     s.saveGame(game('K7QW2M', 5));
@@ -61,9 +61,9 @@ describe('storage', () => {
     s.setPref('color', 'random');
     const dump = mem.dump();
     expect(Object.keys(dump).sort()).toEqual([`${PREFIX}color`, `${PREFIX}games`, `${PREFIX}helpers`]);
-    expect(dump['zigo:helpers']).toBe('false');
-    expect(dump['zigo:color']).toBe('"random"');
-    expect(JSON.parse(dump['zigo:games'])[0].id).toBe('K7QW2M');
+    expect(dump['zengo:helpers']).toBe('false');
+    expect(dump['zengo:color']).toBe('"random"');
+    expect(JSON.parse(dump['zengo:games'])[0].id).toBe('K7QW2M');
   });
 
   it('keeps games newest first, upserts by id, and caps at 100', () => {
@@ -118,11 +118,11 @@ describe('storage', () => {
 
   it('reads preferences with fallbacks', () => {
     const mem = memoryStorage({
-      'zigo:lang': 'de',
-      'zigo:clock': '"5+0"',
-      'zigo:helpers': 'true',
-      'zigo:seating': '42',
-      'zigo:opponent': '{"mode":"computer","level":7}',
+      'zengo:lang': 'de',
+      'zengo:clock': '"5+0"',
+      'zengo:helpers': 'true',
+      'zengo:seating': '42',
+      'zengo:opponent': '{"mode":"computer","level":7}',
     });
     const s = createStore(mem);
     expect(s.pref('lang', 'en')).toBe('de'); // bare string written by hand or older code
@@ -135,22 +135,22 @@ describe('storage', () => {
     s.setPref('tutorial-seen', true);
     expect(s.pref('tutorial-seen', false)).toBe(true);
     s.setPref('tutorial-seen', undefined);
-    expect(mem.getItem('zigo:tutorial-seen')).toBeNull();
+    expect(mem.getItem('zengo:tutorial-seen')).toBeNull();
   });
 
   it('survives corrupt data', () => {
     const s = createStore(
       memoryStorage({
-        'zigo:games': '{not json',
-        'zigo:rooms': '{"code":"X"}',
+        'zengo:games': '{not json',
+        'zengo:rooms': '{"code":"X"}',
       }),
     );
     expect(s.games()).toEqual([]);
     expect(s.rooms()).toEqual([]);
     const mixed = createStore(
       memoryStorage({
-        'zigo:games': JSON.stringify([game('OK', 1), { id: 'broken' }, oldGame('OLD', 2), null, 7]),
-        'zigo:rooms': JSON.stringify([room('R1'), { code: 'R2' }]),
+        'zengo:games': JSON.stringify([game('OK', 1), { id: 'broken' }, oldGame('OLD', 2), null, 7]),
+        'zengo:rooms': JSON.stringify([room('R1'), { code: 'R2' }]),
       }),
     );
     expect(mixed.games().map((g) => g.id)).toEqual(['OK']);
@@ -192,7 +192,7 @@ describe('storage', () => {
     Object.defineProperty(globalThis, 'localStorage', { value: mem, configurable: true, writable: true });
     try {
       defaultStore.setPref('color', 'B');
-      expect(mem.getItem('zigo:color')).toBe('"B"');
+      expect(mem.getItem('zengo:color')).toBe('"B"');
       expect(defaultStore.pref('color', 'random')).toBe('B');
       defaultStore.saveGame(game('LS0001', 1));
       expect(defaultStore.games().map((g) => g.id)).toEqual(['LS0001']);
@@ -229,7 +229,7 @@ describe('Go store and preferences (DESIGN 12.1, 13.1)', () => {
 
   it('drops stored games that are not Go games, or carry a malformed result or scoring', () => {
     const mem = memoryStorage({
-      'zigo:games': JSON.stringify([
+      'zengo:games': JSON.stringify([
         goGame('OK', 1),
         oldGame('OLD', 2),
         { ...goGame('BAD', 3), size: 7 },
@@ -274,11 +274,11 @@ describe('Go store and preferences (DESIGN 12.1, 13.1)', () => {
     s.setPref('color', 'W');
 
     expect(mem.dump()).toMatchObject({
-      'zigo:size': '19',
-      'zigo:rules': '"territory"',
-      'zigo:handicap': '{"9":5,"13":4}',
-      'zigo:clock': '{"9":null,"19":"20m5x30"}',
-      'zigo:engine-backend': '"wasm"',
+      'zengo:size': '19',
+      'zengo:rules': '"territory"',
+      'zengo:handicap': '{"9":5,"13":4}',
+      'zengo:clock': '{"9":null,"19":"20m5x30"}',
+      'zengo:engine-backend': '"wasm"',
     });
     expect(readSize(s)).toBe(19);
     expect(readRules(s)).toBe('territory');
@@ -291,18 +291,18 @@ describe('Go store and preferences (DESIGN 12.1, 13.1)', () => {
     expect(readEngineBackend(s)).toBe('wasm');
     expect(readColorChoice(s)).toBe('W');
     writeEngineBackend(s, null);
-    expect(mem.getItem('zigo:engine-backend')).toBeNull();
+    expect(mem.getItem('zengo:engine-backend')).toBeNull();
   });
 
   it('falls back on corrupt or older preference values', () => {
     const s = createGoStore(
       memoryStorage({
-        'zigo:size': '"13"',
-        'zigo:rules': '"chinese"',
-        'zigo:handicap': '[1,2]',
-        'zigo:clock': '"5+0"',
-        'zigo:engine-backend': '"cuda"',
-        'zigo:color': '"b"',
+        'zengo:size': '"13"',
+        'zengo:rules': '"chinese"',
+        'zengo:handicap': '[1,2]',
+        'zengo:clock': '"5+0"',
+        'zengo:engine-backend': '"cuda"',
+        'zengo:color': '"b"',
       }),
     );
     expect(readSize(s)).toBe(13); // a numeric string is accepted
@@ -311,7 +311,7 @@ describe('Go store and preferences (DESIGN 12.1, 13.1)', () => {
     expect(readClock(s, 9, '2+7')).toBe('2+7');
     expect(readEngineBackend(s)).toBeNull();
     expect(readColorChoice(s)).toBe('random');
-    const junk = createGoStore(memoryStorage({ 'zigo:clock': '{"9":"fast","13":42}', 'zigo:size': '7' }));
+    const junk = createGoStore(memoryStorage({ 'zengo:clock': '{"9":"fast","13":42}', 'zengo:size': '7' }));
     expect(readClock(junk, 9, null)).toBeNull();
     expect(readClock(junk, 13, '3+7')).toBe('3+7');
     expect(readSize(junk)).toBe(9);

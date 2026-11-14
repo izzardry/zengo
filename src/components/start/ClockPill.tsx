@@ -10,7 +10,7 @@ import { Timer } from 'lucide-react';
 import { useI18n } from '@/lib/i18n';
 import type { Size, TimeControl } from '@/lib/types';
 import { cn } from '@/lib/utils';
-import { formatTc } from '@/lib/zigo';
+import { formatTc } from '@/lib/zengo';
 import { nextClock } from './options';
 import { useClockText } from './text';
 import { HOLD_MS, useHold, type PillAnchor } from './useHold';

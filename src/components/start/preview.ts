@@ -8,7 +8,7 @@
  * same position as a static thumbnail where a full board is not wanted.
  */
 import type { Game, Rules, SavedGame, Size } from '@/lib/types';
-import { fromRecord, makeSettings, newGame } from '@/lib/zigo';
+import { fromRecord, makeSettings, newGame } from '@/lib/zengo';
 
 export interface PreviewSettings {
   readonly size: Size;

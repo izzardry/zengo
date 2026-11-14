@@ -21,7 +21,7 @@ import type {
   TcString,
   Transport,
   TransportFactory,
-  ZigoApi,
+  ZengoApi,
 } from '../types';
 import type { Timers, TransportFailureKind } from '../transport/common';
 
@@ -60,8 +60,8 @@ export interface RoomControllerOptions {
   readonly transport?: Transport | null;
   /** Creates the transport for `code` (PeerJS in the app, the memory network in tests). */
   readonly factory?: TransportFactory | null;
-  /** Rules API. Default: the `zigo` singleton. */
-  readonly zigo?: ZigoApi;
+  /** Rules API. Default: the `zengo` singleton. */
+  readonly zengo?: ZengoApi;
   /**
    * The scoring proposal of this device's engine (DESIGN 9.5): dead stones for a game that just
    * entered scoring, or null when the engine has no answer. Sync or async (`createDeadStoneProposer`

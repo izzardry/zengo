@@ -80,8 +80,8 @@ describe('translate', () => {
 
 describe('language detection', () => {
   it('uses the stored choice, then the browser, then English', () => {
-    expect(getInitialLanguage(createStore(memoryStorage({ 'zigo:lang': '"fr"' })))).toBe('fr');
-    expect(getInitialLanguage(createStore(memoryStorage({ 'zigo:lang': '"xx"' })))).toBe(detectBrowserLanguage());
+    expect(getInitialLanguage(createStore(memoryStorage({ 'zengo:lang': '"fr"' })))).toBe('fr');
+    expect(getInitialLanguage(createStore(memoryStorage({ 'zengo:lang': '"xx"' })))).toBe(detectBrowserLanguage());
     expect(detectBrowserLanguage({ language: 'de-AT', languages: ['de-AT', 'en'] })).toBe('de');
     expect(detectBrowserLanguage({ language: 'pt-BR', languages: ['pt-BR', 'es-ES'] })).toBe('es');
     expect(detectBrowserLanguage({ language: 'ja', languages: ['ja'] })).toBe('en');
@@ -104,7 +104,7 @@ function Probe() {
 
 describe('I18nProvider', () => {
   it('provides t(), syncs <html lang> and persists the choice', () => {
-    const mem = memoryStorage({ 'zigo:lang': '"de"' });
+    const mem = memoryStorage({ 'zengo:lang': '"de"' });
     render(
       <I18nProvider store={createStore(mem)}>
         <Probe />
@@ -117,7 +117,7 @@ describe('I18nProvider', () => {
     act(() => screen.getByText('es').click());
     expect(screen.getByTestId('undo').textContent).toBe('Deshacer');
     expect(document.documentElement.lang).toBe('es');
-    expect(mem.getItem('zigo:lang')).toBe('"es"');
+    expect(mem.getItem('zengo:lang')).toBe('"es"');
   });
 
   it('accepts a fixed language for tests', () => {

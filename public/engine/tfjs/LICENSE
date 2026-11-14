@@ -2,7 +2,7 @@ TensorFlow.js WebAssembly backend (@tensorflow/tfjs-backend-wasm 4.22.0), the .w
 Copyright Google LLC. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the text below). Source: https://github.com/tensorflow/tfjs
-Shipped unmodified. Not covered by Zigo's MIT licence.
+Shipped unmodified. Not covered by Zengo's MIT licence.
 
 -------------------------------------------------------------------------------
 

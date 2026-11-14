@@ -3,7 +3,7 @@
  * React hook subscribes to, and the two errors a search can end with.
  *
  * Implemented by `FakeEngine` (./fake.ts) now and by the KataGo worker driver of package 2A
- * (`hooks/useZigoEngine`). Framework-free.
+ * (`hooks/useZengoEngine`). Framework-free.
  */
 import type { EngineApi, EngineState } from '../types';
 

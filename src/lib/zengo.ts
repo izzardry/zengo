@@ -39,7 +39,7 @@ import type {
   Size,
   TcString,
   TimeControl,
-  ZigoApi,
+  ZengoApi,
 } from './types';
 
 /* ---------------------------------------------------------------------------------------------- */
@@ -49,7 +49,7 @@ import type {
 /** The pass "point". */
 export const PASS: Point = 'tt';
 
-/** Board sizes Zigo offers. */
+/** Board sizes Zengo offers. */
 export const SIZES: readonly Size[] = Object.freeze([9, 13, 19] as Size[]);
 
 const A = 97; // 'a'
@@ -116,7 +116,7 @@ export function maxHandicap(size: Size): number {
   return size === 9 ? 5 : 9;
 }
 
-/** A handicap as Zigo allows it: 0 or 2..max (1 and below → 0, above max → max). */
+/** A handicap as Zengo allows it: 0 or 2..max (1 and below → 0, above max → max). */
 export function normalizeHandicap(size: Size, n: number): number {
   const k = Number.isFinite(n) ? Math.floor(n) : 0;
   if (k < 2) return 0;
@@ -926,7 +926,7 @@ export function sgf(g: Game, meta: SgfMeta): string {
     'FF[4]',
     'GM[1]',
     'CA[UTF-8]',
-    `AP[${sgfText(`Zigo:${meta.version}`)}]`,
+    `AP[${sgfText(`Zengo:${meta.version}`)}]`,
     `SZ[${size}]`,
     `KM[${formatHalf(komi2)}]`,
     `RU[${rules === 'territory' ? 'Japanese' : 'Chinese'}]`,
@@ -1086,7 +1086,7 @@ export function fromDiagram(rows: readonly string[], turn: Color = 'B', settings
 /* The API object                                                                                   */
 /* ---------------------------------------------------------------------------------------------- */
 
-export const zigo: ZigoApi = {
+export const zengo: ZengoApi = {
   newGame,
   isLegal,
   illegalReason,
@@ -1118,4 +1118,4 @@ export const zigo: ZigoApi = {
   clockRunning,
 };
 
-export default zigo;
+export default zengo;

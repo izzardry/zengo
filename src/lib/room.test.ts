@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 import type { GameLog, Message, Point, Room, SavedGame, Seat } from './types';
 import { createStore, memoryStorage } from './storage';
 import { appendPly, endLog, generateKey, hashLog, logToSaved, makeHead, newLog, proveSeat, resumeLog, roomGameId, roomScore, scoreView, type LogEnd, type LogSettings } from './sync';
-import zigo, { makeSettings } from './zigo';
+import zengo, { makeSettings } from './zengo';
 import scoringApi from './scoring';
 import { createRoomController, ROOM_DEFAULTS, type RoomCreateSettings } from './room';
 import { provisionalWins, timeLeft } from './room/controller';
@@ -532,7 +532,7 @@ describe('live play', () => {
     expect(acks.length).toBe(4);
     for (const d of [A, B]) {
       const g = saved(d)[0];
-      expect(zigo.decodeMoves(g.moves)).toEqual(['cc', 'gg', 'cg', 'gc']);
+      expect(zengo.decodeMoves(g.moves)).toEqual(['cc', 'gg', 'cg', 'gc']);
       expect(g.ms).toEqual([1500, 1500, 1500, 1500]);
       expect(g.lastPlayedAt).toBeGreaterThanOrEqual(WALL0);
     }
@@ -652,7 +652,7 @@ describe('offline moves', () => {
     expect(A.ctrl.snapshot).toMatchObject({ presence: 'reconnecting', locked: null, canMove: true });
     expect(A.ctrl.move('cg')).toBe(true);
     expect(A.ctrl.snapshot).toMatchObject({ unsent: 1, myTurn: false, canMove: false });
-    expect(zigo.decodeMoves(saved(A)[0].moves)).toEqual(['cc', 'gg', 'cg']);
+    expect(zengo.decodeMoves(saved(A)[0].moves)).toEqual(['cc', 'gg', 'cg']);
     // B reopens the room later (same storage, new page).
     const B2 = h.device('B2', { storage: B.storage });
     expect(plies(B2)).toEqual(['cc', 'gg']);
@@ -660,7 +660,7 @@ describe('offline moves', () => {
     expect(plies(B2)).toEqual(['cc', 'gg', 'cg']);
     expect(A.ctrl.snapshot.unsent).toBe(0);
     expect(B2.ctrl.snapshot.myTurn).toBe(true);
-    expect(zigo.decodeMoves(saved(B2)[0].moves)).toEqual(['cc', 'gg', 'cg']);
+    expect(zengo.decodeMoves(saved(B2)[0].moves)).toEqual(['cc', 'gg', 'cg']);
     expect(A.kinds().at(-1)).toBe('reconnected');
     expect(B2.kinds()).toEqual(['opponent-connected']);
   });
@@ -799,7 +799,7 @@ describe('requests', () => {
     expect(A.ctrl.snapshot.myTurn).toBe(true);
     // Clocks return to the stamps of that position (derived from the log).
     const g = A.ctrl.snapshot.game;
-    expect(zigo.clocks(g, A.ctrl.snapshot.tc)).toEqual(zigo.clocks(zigo.replay(g.settings, g.plies), A.ctrl.snapshot.tc));
+    expect(zengo.clocks(g, A.ctrl.snapshot.tc)).toEqual(zengo.clocks(zengo.replay(g.settings, g.plies), A.ctrl.snapshot.tc));
     expect(A.ctrl.snapshot.clock.turnUsed).toBe(0);
     await play(h, [A, B], ['dd']);
     expect(plies(B)).toEqual(['cc', 'gg', 'dd']);
@@ -1236,12 +1236,12 @@ describe('clocks', () => {
     await play(h, [A, B], ['cc', 'gg']); // both first moves untimed
     const g = A.ctrl.snapshot.game;
     const tc = A.ctrl.snapshot.tc!;
-    expect(timeLeft(zigo, g, tc, 0)).toBe(60_000 + 2 * 10_000);
+    expect(timeLeft(zengo, g, tc, 0)).toBe(60_000 + 2 * 10_000);
     // Black uses the main time and 9 s of the first period, then moves: both periods are kept.
     await h.advance(69_000);
     await play(h, [A, B], ['cg', 'gc'], 69_000);
     expect(A.ctrl.snapshot.game.end).toBeUndefined();
-    expect(zigo.clocks(A.ctrl.snapshot.game, tc).B).toEqual({ mainMs: 0, periodMs: 10_000, periods: 2 });
+    expect(zengo.clocks(A.ctrl.snapshot.game, tc).B).toEqual({ mainMs: 0, periodMs: 10_000, periods: 2 });
     // Black now overruns both periods.
     await h.advance(20_000);
     for (const d of [A, B]) expect(d.ctrl.snapshot.game.end).toEqual({ result: { winner: 'W', by: 'time' } });
@@ -1369,7 +1369,7 @@ describe('sync on connect', () => {
       expect(d.kinds().filter((k) => k === 'restored-from-opponent').length).toBe(1);
       expect(d.ctrl.snapshot.live).toBe(true);
     }
-    expect(zigo.decodeMoves(saved(B)[0].moves)).toEqual(['cc', 'gg']);
+    expect(zengo.decodeMoves(saved(B)[0].moves)).toEqual(['cc', 'gg']);
   });
 
   it('a stale or conflicting live move is ignored and answered with a head', async () => {
@@ -1630,7 +1630,7 @@ describe('randomized sessions', () => {
         const size = g.settings.size;
         for (let tries = 0; tries < 30; tries++) {
           const p = String.fromCharCode(97 + Math.floor(rnd() * size), 97 + Math.floor(rnd() * size));
-          if (zigo.isLegal(g, p)) return p;
+          if (zengo.isLegal(g, p)) return p;
         }
         return 'tt';
       };

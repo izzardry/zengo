@@ -29,7 +29,7 @@
  * game opens in review.
  *
  * The rules themselves are pure functions in `lib/gameRecord.ts` (session transitions) and
- * `lib/zigo.ts` (Go); this hook wires them to React, the store, the address bar and the turn timer.
+ * `lib/zengo.ts` (Go); this hook wires them to React, the store, the address bar and the turn timer.
  * Inject `store`, `now` and `rng` in tests.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -130,7 +130,7 @@ import {
   type UrlParams,
 } from '@/lib/url';
 import { roomGameId } from '@/lib/sync';
-import zigo, { isPass, makeSettings, normalizeHandicap } from '@/lib/zigo';
+import zengo, { isPass, makeSettings, normalizeHandicap } from '@/lib/zengo';
 import { useRoom, type RoomHandle, type UseRoomOptions } from './useRoom';
 import { useScoring, type ScoringActions, type UseScoring } from './useScoring';
 
@@ -164,7 +164,7 @@ export interface UseGameStateOptions {
   rng?: Rng;
   /** Base address for share links; defaults to the current page without hash. */
   baseUrl?: string;
-  /** App version for SGF's `AP[Zigo:<version>]`; defaults to the build's git hash. */
+  /** App version for SGF's `AP[Zengo:<version>]`; defaults to the build's git hash. */
   version?: string;
   /** Dead-stone proposer for the scoring phase (milestone 2). Without it every stone starts alive. */
   proposeDead?: DeadStoneProposer;
@@ -257,14 +257,14 @@ function initialSettings(ctx: Ctx): State {
 function gameFromLink(url: UrlParams, settings: GameSettings): Game {
   let game: Game;
   try {
-    game = zigo.fromRecord({ ...settings, moves: url.moves ?? '', result: url.result }, { lenient: true });
+    game = zengo.fromRecord({ ...settings, moves: url.moves ?? '', result: url.result }, { lenient: true });
   } catch {
-    return zigo.newGame(settingsOf(settings));
+    return zengo.newGame(settingsOf(settings));
   }
   const n = game.plies.length;
   if (!game.end && !game.scoring && n >= 2 && isPass(game.plies[n - 1].m) && isPass(game.plies[n - 2].m)) {
     try {
-      game = zigo.replay(game.settings, game.plies);
+      game = zengo.replay(game.settings, game.plies);
     } catch {
       /* keep the resumed game */
     }
@@ -355,7 +355,7 @@ function levelOf(s: State): number {
 /**
  * What the address bar should say for a state. The start screen with `ROOM` selected leaves `o`
  * out: `?s=CODE&o=r` is the invite link, which opens the room at once, and the selection is
- * remembered in `zigo:opponent` anyway.
+ * remembered in `zengo:opponent` anyway.
  */
 function desiredUrl(s: State): UrlParams {
   // A room says its code only (DESIGN 13.2): no moves, no settings.
@@ -384,7 +384,7 @@ function defaultVersion(): string {
 /** The board shown while the room controller has not loaded yet: the create settings, else 9×9. */
 function placeholderGame(open: RoomOpen): Game {
   const c = open.create;
-  return zigo.newGame(makeSettings(c?.size ?? 9, c?.rules ?? 'area', normalizeHandicap(c?.size ?? 9, c?.handicap ?? 0)));
+  return zengo.newGame(makeSettings(c?.size ?? 9, c?.rules ?? 'area', normalizeHandicap(c?.size ?? 9, c?.handicap ?? 0)));
 }
 
 /**
@@ -461,25 +461,25 @@ export interface UseGameState {
   code: string;
   opponent: Opponent;
   colorChoice: ColorChoice;
-  /** Size pill (DESIGN 4.1). Remembered in `zigo:size`. */
+  /** Size pill (DESIGN 4.1). Remembered in `zengo:size`. */
   size: Size;
-  /** Rules dial: `area` (default) or `territory`. Remembered in `zigo:rules`. */
+  /** Rules dial: `area` (default) or `territory`. Remembered in `zengo:rules`. */
   rules: Rules;
-  /** Handicap dial for the current size: 0 or 2–9 (2–5 on 9×9). Remembered per size in `zigo:handicap`. */
+  /** Handicap dial for the current size: 0 or 2–9 (2–5 on 9×9). Remembered per size in `zengo:handicap`. */
   handicap: number;
-  /** Clock pill value of the current size, e.g. `5+7`, `20m5x30`, or null for off. Remembered per size in `zigo:clock`. */
+  /** Clock pill value of the current size, e.g. `5+7`, `20m5x30`, or null for off. Remembered per size in `zengo:clock`. */
   tc: TcString | null;
   /** Sets the code (normalized: uppercase `0-9A-Z`, 1–8). Returns false and ignores an empty result. */
   setCode(code: string): boolean;
   /** A new random code that no stored game uses. Returns it. */
   regenerateCode(): string;
-  /** Remembered in `zigo:opponent`. */
+  /** Remembered in `zengo:opponent`. */
   setOpponent(o: Opponent): void;
-  /** Remembered in `zigo:color`. */
+  /** Remembered in `zengo:color`. */
   setColorChoice(c: ColorChoice): void;
-  /** Remembered in `zigo:size`; switches the handicap and clock to that size's remembered values. */
+  /** Remembered in `zengo:size`; switches the handicap and clock to that size's remembered values. */
   setSize(size: Size): void;
-  /** Remembered in `zigo:rules`. */
+  /** Remembered in `zengo:rules`. */
   setRules(rules: Rules): void;
   /** Normalized for the current size and remembered for it. */
   setHandicap(n: number): void;
@@ -838,7 +838,7 @@ export function useGameState(options: UseGameStateOptions = {}): UseGameState {
     const bump = () => setSavedVersion((v) => v + 1);
     const off = onSavedGamesChange(bump);
     const onStorage = (e: StorageEvent) => {
-      if (e.key === null || e.key.startsWith('zigo:')) bump();
+      if (e.key === null || e.key.startsWith('zengo:')) bump();
     };
     window.addEventListener('storage', onStorage);
     // The autosave effect above runs before this subscription on mount (a game opened from a
@@ -871,7 +871,7 @@ export function useGameState(options: UseGameStateOptions = {}): UseGameState {
     () =>
       previewSaved
         ? gameFromSaved(previewSaved)
-        : zigo.newGame(settingsOf({ size: selSize, rules: selRules, handicap: selHandicap })),
+        : zengo.newGame(settingsOf({ size: selSize, rules: selRules, handicap: selHandicap })),
     [previewSaved, selSize, selRules, selHandicap],
   );
 

@@ -109,7 +109,7 @@ export interface ResignUndoToastProps {
   open: boolean;
   /** Who resigned: `you` against the computer, a color in pass-and-play. */
   who: 'you' | Color;
-  /** Undo: take the resignation back (e.g. `zigo.reopen`). */
+  /** Undo: take the resignation back (e.g. `zengo.reopen`). */
   onUndo: () => void;
   /** The toast ran out or × was pressed: the resignation is final. Called once per opening. */
   onExpire: () => void;

@@ -31,7 +31,7 @@ describe('boot', () => {
     expect(early.documentElement.className).toBe(READY_CLASS);
     const late = fakeDoc();
     reveal(late, FALLBACK_MS);
-    expect(late.documentElement.classList.contains('zigo-late')).toBe(true);
+    expect(late.documentElement.classList.contains('zengo-late')).toBe(true);
     expect(late.documentElement.classList.contains(READY_CLASS)).toBe(true);
   });
 

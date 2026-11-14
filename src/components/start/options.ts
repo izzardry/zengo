@@ -8,7 +8,7 @@
  * - Start pill label: START / RESUME / REVIEW from the code's saved game.
  */
 import type { ColorChoice, Opponent, Rules, SavedGame, Size, TcString, TimeControl } from '@/lib/types';
-import { maxHandicap, normalizeHandicap, parseTc } from '@/lib/zigo';
+import { maxHandicap, normalizeHandicap, parseTc } from '@/lib/zengo';
 
 /* ---------------------------------------------------------------------------------------------- */
 /* Opponent                                                                                        */

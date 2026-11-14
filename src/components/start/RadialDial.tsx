@@ -244,7 +244,7 @@ export function RadialDial({ x, y, dragging = false, step, onChoose, onBack, onC
   const by = d ? d.oy - center.y : 0;
   const aimedItem = aim.index !== null && aim.zone !== 'center' && aim.zone !== 'none' ? step.items[aim.index] : undefined;
   const captionText = aimedItem?.caption ?? step.caption;
-  const idOf = (i: number) => `zigo-${testId}-${step.id}-${i}`;
+  const idOf = (i: number) => `zengo-${testId}-${step.id}-${i}`;
 
   return createPortal(
     <>
@@ -267,7 +267,7 @@ export function RadialDial({ x, y, dragging = false, step, onChoose, onBack, onC
         onKeyDown={onKeyDown}
         data-testid={testId}
         data-step={step.id}
-        data-zigo-dial=""
+        data-zengo-dial=""
         className="fixed z-overlay touch-none select-none outline-none animate-scale-in"
         style={{ left: center.x, top: center.y, width: 0, height: 0 }}
       >

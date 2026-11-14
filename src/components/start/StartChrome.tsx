@@ -21,7 +21,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { flags } from '@/lib/flags';
 import type { ColorChoice, Opponent, Rng, Rules, SavedGame, Size, TimeControl } from '@/lib/types';
-import { parseTc } from '@/lib/zigo';
+import { parseTc } from '@/lib/zengo';
 import { BackToTop } from './BackToTop';
 import { ClockDial } from './ClockDial';
 import { ClockPill } from './ClockPill';

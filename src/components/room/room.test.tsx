@@ -177,7 +177,7 @@ describe('InviteSheet', () => {
     const nav = fakeNav(true);
     renderRoom(<InviteSheet open onOpenChange={() => {}} code="K7QW2M" link="https://x.test/#/?s=K7QW2M&o=r" nav={nav} />);
     await userEvent.click(screen.getByRole('button', { name: 'Share' }));
-    expect(nav.shared).toEqual([{ title: 'Zigo', text: 'Join my Go game!', url: 'https://x.test/#/?s=K7QW2M&o=r' }]);
+    expect(nav.shared).toEqual([{ title: 'Zengo', text: 'Join my Go game!', url: 'https://x.test/#/?s=K7QW2M&o=r' }]);
   });
 
   it('offers Connect manually with the calm reason when the 10-second rule says so', async () => {
@@ -235,7 +235,7 @@ describe('ManualConnectSheet', () => {
     await userEvent.type(field, 'nonsense');
     await userEvent.click(connect);
     expect(accept).toHaveBeenCalledWith('nonsense');
-    expect(await within(sheet).findByRole('alert')).toHaveTextContent('This is not a Zigo answer link.');
+    expect(await within(sheet).findByRole('alert')).toHaveTextContent('This is not a Zengo answer link.');
     expect(field).toHaveAttribute('aria-invalid', 'true');
 
     await userEvent.clear(field);

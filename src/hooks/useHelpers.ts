@@ -1,5 +1,5 @@
 /**
- * The helpers shield (DESIGN 7.1): one toggle, on by default, stored in `zigo:helpers`.
+ * The helpers shield (DESIGN 7.1): one toggle, on by default, stored in `zengo:helpers`.
  * It bundles the last-move ring, the atari glow, the ko marker, coordinates and the blunder guard.
  */
 import { useCallback, useState } from 'react';
@@ -13,7 +13,7 @@ export interface HelpersState {
   toggleHelpers: () => void;
 }
 
-/** Reads `zigo:helpers` (default true; anything but a boolean counts as missing). */
+/** Reads `zengo:helpers` (default true; anything but a boolean counts as missing). */
 export function readHelpers(s: Store = defaultStore): boolean {
   return s.pref<boolean>('helpers', true) !== false;
 }

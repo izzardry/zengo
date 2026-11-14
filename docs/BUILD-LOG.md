@@ -1,16 +1,16 @@
-# Zigo build log
+# Zengo build log
 
 The run's memory (PLAN.md section 1, rule 5). Updated after every package and every gate.
 
 ## Summary
 
-**The run is finished: the plan's definition of done is met.** Zigo is live at **https://izzardry.github.io/zigo/**. All four gates and the final gate passed, the last Pages deploy succeeded ([run 43371167524](https://github.com/izzardry/zigo/actions/runs/43371167524)), and the live smoke test passed. **Nothing is switched off by flag.**
+**The run is finished: the plan's definition of done is met.** Zengo is live at **https://izzardry.github.io/zengo/**. All four gates and the final gate passed, the last Pages deploy succeeded ([run 43371167524](https://github.com/izzardry/zengo/actions/runs/43371167524)), and the live smoke test passed. **Nothing is switched off by flag.**
 
 ### What works, per milestone
 
 | Phase | Gate result | What works |
 |---|---|---|
-| Phase 0 | Passed with one exception: 11 e2e tests needed Stockfish, which phase 0 removes. M1 deleted them with the chess modules. | Zhess copied and renamed; repo `izzardry/zigo` public with Pages; nets b6c96 and b10c128, TF.js 4.22.0 and goscorer vendored; Go contracts in `types.ts`, rules core `zigo.ts` (suicide forbidden, positional superko, SGF, GTP) |
+| Phase 0 | Passed with one exception: 11 e2e tests needed Stockfish, which phase 0 removes. M1 deleted them with the chess modules. | Zhess copied and renamed; repo `izzardry/zengo` public with Pages; nets b6c96 and b10c128, TF.js 4.22.0 and goscorer vendored; Go contracts in `types.ts`, rules core `zengo.ts` (suicide forbidden, positional superko, SGF, GTP) |
 | M1 · Board | Passed in round 3. Rounds 1 and 2 failed on screenshots: coordinate size, overlay summary wrap. 1599 unit tests, 27/27 e2e. | 9/13/19 board, input (tap, ghost and confirm, mouse, typed), pass-and-play, scoring with dead-stone marking, overlay, history, links, SGF, start screen with handicap, rules and clock dials, four languages, icons. No chess left (grep 0). |
 | M2 · Computer | Passed in round 1. 1773 unit tests, 40/40 e2e. | KataGo nets on TF.js (WebGPU with WASM fallback) in a worker, 12 levels, two-stage download with progress, Fischer and byo-yomi clocks, blunder guard, hint bulb and territory preview, the computer's dead-stone proposal, offline play, self-play and calibration scripts |
 | M3 · Rooms | Passed in round 3. Round 1 failed on screenshots; round 2 on room e2e under parallel load, then the macOS session broke. 2010 unit tests, 46/46 e2e. | Peer-to-peer rooms over PeerJS with a manual offer/answer fallback, sync and reconcile, the scoring protocol (mark, accept, resume, end), takeback, rematch, recovery, offline moves. The public PeerJS broker path ran and passed. |
@@ -121,7 +121,7 @@ node scripts/calibrate.mjs --size 19 --levels 1,3,5,7,9,10,12 --games 10 --write
 node scripts/screenshots.mjs http://localhost:4180/ docs/screenshots/final   # against `npx vite preview --port 4180`
 ```
 
-Live: https://izzardry.github.io/zigo/ · Repo: https://github.com/izzardry/zigo
+Live: https://izzardry.github.io/zengo/ · Repo: https://github.com/izzardry/zengo
 
 ## Package checklist
 
@@ -182,7 +182,7 @@ _(One line each: where the design was silent, what was chosen and why.)_
 - 0a: The engine runtime cache matches `/engine/.+\.(js|wasm|gz)$`, CacheFirst in `engine-cache`, 16 entries.
 - 0a: The nets' CC0 notice is from `https://katagoarchive.org/g170/LICENSE.txt` (the `neuralnets/LICENSE.txt` link returns 403).
 - 0a: README replaced by a short interim one; rewritten in the final phase.
-- 0a: Web KaTrain cloned at `a6a67d645048a996d606a410c4e4c4b1051ffd43` (2026-10-28, MIT) into `~/.cache/zigo/web-katrain`; golden test `test/engineGolden.test.ts`. Its `katago-small.bin.gz` is the same b6c96 net (only the gzip timestamp differs).
+- 0a: Web KaTrain cloned at `a6a67d645048a996d606a410c4e4c4b1051ffd43` (2026-10-28, MIT) into `~/.cache/zengo/web-katrain`; golden test `test/engineGolden.test.ts`. Its `katago-small.bin.gz` is the same b6c96 net (only the gzip timestamp differs).
 - 0a: goscorer vendored from `0ac5f59962a9e40f39f4667645335ba5068acf86` (`javascript/goscorer.js`, MIT, © 2024 David J Wu) with a `.d.ts`.
 - 0a: Net sha256: b6c96 `f57fddf4…60b1` (3,827,339 B), b10c128 `1a8e05a4…8b04` (11,138,361 B). No differences from PLAN.md section 2's ↻ facts.
 - 0a: Stockfish was never copied (`public/engine/` excluded); the 6 engine tests that need its file skip themselves until package 2A replaces them.
@@ -234,7 +234,7 @@ _(One line each: where the design was silent, what was chosen and why.)_
 - 1B: Resign and time-out are refused during scoring (clocks stop), and the turn timer pauses in scoring. Marking and review do not restart the turn timer; a new ply does.
 - 1B: Computer games stay startable sessions in M1 (undo by full turn, isComputerTurn); the integrator gates them with Coming soon. Rooms are not run by the hook in M1: Start with ROOM, an invite link and an unfinished room game from history call the onRoom option and return false without it. A finished room game opens in review.
 - 1B: storage.ts keeps createGoStore, goStore and isGoSavedGame as aliases of createStore, store and isSavedGame for modules written in phase 0. Stored games in any other shape are dropped on read.
-- 1B: SGF export names the computer as Zigo Level n on its side, uses the game's creation date for DT, and uses the git hash (or a version option) for AP.
+- 1B: SGF export names the computer as Zengo Level n on its side, uses the game's creation date for DT, and uses the git hash (or a version option) for AP.
 - 1C: Prisoners show only when the count is above 0 (Zhess shows captured pieces only when there are some).
 - 1C: During scoring both strips are at full opacity and show the whole score line in place of prisoners, komi and badge; the clock stays unless the strip carries an action.
 - 1C: Face-to-face scoring puts the far player's Accept (ScoringAccept, compact) in the far PlayerStrip's action slot, so the strip's 180° rotation turns it; the near Accept stays in the ScoringBar at the toolbar's place.
@@ -265,7 +265,7 @@ _(One line each: where the design was silent, what was chosen and why.)_
 - 1E: The apple-touch icon stays pwa-192x192.png as in Zhess; no separate file, index.html untouched.
 - 1E: OG feature line has three items as Ztyle 01 asks: '9×9 to 19×19 | 12 computer levels | zero ads'. The blurred board is a 9×9 Go board with a few stones; White stones at 30 % so they don't show as bright blobs behind the text.
 - 1E: History move count = plies including passes (Go numbering, matching '34. D4' and '54 moves').
-- 1E: History side to move and thumbnail come from zigo.fromRecord (lenient), so handicap games show White to move first; an invalid stored size falls back to 19×19.
+- 1E: History side to move and thumbnail come from zengo.fromRecord (lenient), so handicap games show White to move first; an invalid stored size falls back to 19×19.
 - 1E: History state: wins by count show 'Won by 4.5'; wins by resignation or time show 'Won'; losses show 'Lost'; pass-and-play shows formatResult (B+4.5, W+R, B+T); unfinished games with scoring show 'Scoring'.
 - 1E: History size label follows the size pill: '9×9', '19×19 · JP' for territory.
 - 1E: Card lines: code/time; opponent/game n/room score; state/moves; size/tc/assisted dot. The byo-yomi tc ('20m5x30') did not fit on the state line at 320 px.
@@ -273,7 +273,7 @@ _(One line each: where the design was silent, what was chosen and why.)_
 - 1E: Tutorial secondary-input bubble = scoring ('After two passes / Tap dead groups, then Accept'); the flag line is 'Tap: pass · Hold: resign' in every mode (DESIGN 4.2); the bulb line is 'Tap: hint · Hold: territory'; an optional size prop picks the 9×9 or ghost-confirm text, and both show when it is omitted.
 - 1E: Ghost stone wording: EN 'ghost stone', DE 'Vorschaustein', FR 'pierre fantôme', ES 'piedra fantasma'.
 - 1E: Live-region texts use the singular color names common in Go writing (FR Noir/Blanc, ES Negro/Blanco) and glossary prisoners (DE 1 Gefangener / n Gefangene, FR prisonnier(s), ES captura(s)).
-- 1E: The screenshot script imports src/lib/zigo.ts through Node's type stripping to encode and validate the prepared games; screens game-9/13/19 and scoring added; the overlay screens accept a stored scoring game (all visible Accept buttons).
+- 1E: The screenshot script imports src/lib/zengo.ts through Node's type stripping to encode and validate the prepared games; screens game-9/13/19 and scoring added; the overlay screens accept a stored scoring game (all visible Accept buttons).
 - 1F: The milestone gate is a separate `COMPUTER_ENABLED = false` export in lib/flags.ts, not `flags.computer = false`, because src/test/scaffold.test.tsx requires every entry of `flags` to be on; 2A sets it to true.
 - 1F: While COMPUTER_ENABLED is false, useEngineOffline reports both stages as 'unsupported' and fetches nothing, and EngineStatus renders nothing.
 - 1F: Stage 1 caches tfjs-backend-wasm.wasm, tfjs-backend-wasm-simd.wasm and the b6c96 net (4.56 MB). The threaded-simd wasm is left out because GitHub Pages cannot send COOP/COEP, so TF.js never requests it.
@@ -296,13 +296,13 @@ _(One line each: where the design was silent, what was chosen and why.)_
 - 1G: A room created with no settings (two invite links, the anchor creates it) is 9×9, area rules, no handicap, no clock, random color (Zhess's default, plus the default size from DESIGN 4.1).
 - 1G: Reconcile rule 6 for equal plies and equal ends (DESIGN 9.2): a resumed copy beats a copy still scoring; then the higher rev wins; the same rev with different dead stones is a fork (seat 0 wins); with the same marking, the copy whose acceptances include the other's wins, and acceptances that each lack the other's are a fork.
 - 1G: The head hash covers the plies, settings, scoring state (round, rev, acceptances, a hash of the dead stones) and end. When two heads show the same plies but different scoring, both sides send their logs and the logs step decides.
-- 1G: A log ending in two passes with a `scoring` field is in scoring; without one it was resumed. A ply after two passes resumes by itself, as ZigoApi.replay does.
+- 1G: A log ending in two passes with a `scoring` field is in scoring; without one it was resumed. A ply after two passes resumes by itself, as ZengoApi.replay does.
 - 1G: A received log that ends by score is accepted only if its result equals the count of its own dead stones; resign and time ends are accepted for either winner.
 - 1G: Rev 0 means nothing has been proposed yet. Seat 0 sends the first proposal (rev 1) the moment its log enters round-1 scoring, from the injected `propose(game)` or with every stone alive. Seat 1 may mark only after that (rev ≥ 1), so it cannot cross seat 0's first proposal.
 - 1G: Round 2 is ended by seat 0 as rev 1 accepted by both, with the result counted from its proposal, and sent as `end {by: 'score', dead}`. Seat 1 checks the claimed result against its own count of those dead stones before taking it.
 - 1G: When both seats accept the same rev, each device ends the game locally from the shared dead stones; no `end` message is sent. An accept for an older rev is ignored; an accept for a newer rev triggers a reconcile.
 - 1G: Marks are allowed offline and settle through rev. Accept and resume need the opponent connected (DESIGN 9.3: scoring needs both players). There is no marking round in round 2.
-- 1G: The controller computes time left itself from zigo.clocks: Fischer remaining time, or byo-yomi main time plus every period left. Clocks and flags are off during scoring.
+- 1G: The controller computes time left itself from zengo.clocks: Fischer remaining time, or byo-yomi main time plus every period left. Clocks and flags are off during scoring.
 - 1G: Rematch keeps size, rules, handicap and time control; colors swap except in a handicap game, where Black stays with the same seat (DESIGN 9.4).
 - 1G: The creator's size, rules and handicap in RoomCreateSettings are optional; the handicap is normalized for the size (for example 9 on 9×9 becomes 5).
 - 1G: Design-section references to Zhess in room comments became plain `DESIGN 9`, so the chess grep stays empty.
@@ -320,7 +320,7 @@ _(One line each: where the design was silent, what was chosen and why.)_
 - Integrator 1: DE writes Byo-Yomi capitalised, as the research's German convention says.
 - Integrator 1: Deleted the 9 unused start.engine.* keys per language from start.ts; EngineStatus uses assist's engine.status.*.
 - Integrator 1: Continue from here is offered at every review position. 1B: every Go position can be continued.
-- Gate 1 e2e: The scripted 9×9 game uses a column-F/G wall with a ko at F5/G5 and a white stone on B7 marked dead. The margins were counted by hand and cross-checked with ZigoApi/ScoringApi: area B 55 vs W 26 + 7.5 = B+21.5, territory B 44+2 vs W 17+0+6.5 = B+22.5.
+- Gate 1 e2e: The scripted 9×9 game uses a column-F/G wall with a ko at F5/G5 and a white stone on B7 marked dead. The margins were counted by hand and cross-checked with ZengoApi/ScoringApi: area B 55 vs W 26 + 7.5 = B+21.5, territory B 44+2 vs W 17+0+6.5 = B+22.5.
 - Gate 1 e2e: Rules and handicap are set through the real dials: a 700 ms mouse hold on the size or color pill, released in place, then a tap on the menuitemradio. The menu itself is a 0×0 anchor, so the tests wait for the item, not the menu.
 - Gate 1 e2e: The 'Copy SGF contains SZ[13] and the result' check finishes the shared 13×13 game in the fresh context (two passes, Accept, W+6.5) and copies the SGF from the overlay's Share menu, because Copy SGF is only offered for finished games.
 - Gate 1 e2e: Screenshot names are <shot>-<theme>-<w>x<h>.png. The 19×19 touch shots at 320×568 and 390×844 are game-19-touch-*, so the verifier can check that stones are distinguishable at 320 px.
@@ -335,9 +335,9 @@ _(One line each: where the design was silent, what was chosen and why.)_
 **Milestone 2**
 - Orchestrator: `@tensorflow/tfjs-backend-cpu@4.22.0` pinned as a dependency before M2 (it was only transitive through the WebGPU backend), so the engine's Node golden test and self-play can run without a mid-run install.
 - Orchestrator: M2 workflow: 2A and 2B in parallel, then 2C, the integrator, an e2e author, a verifier and up to three fix rounds.
-- 2A: Zigo area rules go to the network as KataGo's 'chinese' preset with positional ko, which is the golden test's setup. Territory rules go as 'japanese' with positional ko, because Zigo plays positional superko under both. Suicide is illegal under both.
+- 2A: Zengo area rules go to the network as KataGo's 'chinese' preset with positional ko, which is the golden test's setup. Territory rules go as 'japanese' with positional ko, because Zengo plays positional superko under both. Suicide is illegal under both.
 - 2A: The network's komi is the game's komi plus one point per handicap stone under area rules (DESIGN 8.2). A game counts as a handicap game when Black has 2 or more setup stones, White has none, and White moves first.
-- 2A: Two passes inside the search end that line, and the network judges the final position. There is no forced Tromp-Taylor count, because Zigo agrees dead stones after the game. The root uses KataGo's conservative-pass input, as in its GTP defaults.
+- 2A: Two passes inside the search end that line, and the network judges the final position. There is no forced Tromp-Taylor count, because Zengo agrees dead stones after the game. The root uses KataGo's conservative-pass input, as in its GTP defaults.
 - 2A: The search is a compact port of Web KaTrain's: KataGo's utility (win/loss plus score), exploration scaled by the parent's utility spread, first-play reduction, virtual losses, and LCB for the final move. Left out: graph search, subtree value bias, noise pruning, uncertainty weighting, and human-SL exploration.
 - 2A: Batches: 8 leaves per network call on WebGPU, 1 on WASM. Batching made no difference on WASM in Node: 3.5 vs 3.3 ms per visit on 9×9 and 13.7 vs 13.5 on 19×19.
 - 2A: The engine never resigns; resigning is 2C's policy. Every level passes when pass is its best move. Level 1 never fills its own one-point eyes.
@@ -358,13 +358,13 @@ _(One line each: where the design was silent, what was chosen and why.)_
 - 2C: 'Never pass while contested' (DESIGN 10.4) is a rules check under area rules only. When the computer wants to pass, one small-net evaluation runs, and it fills an open dame first: an empty point next to both colors with |ownership| < 0.3, legal, not its own eye, not a self-atari. Under territory rules a dame is worth nothing and capturing dead stones costs a point, so the engine's pass decision stands.
 - 2C: Resigning takes 'a few points' as more than 5 / 7 / 10 points behind on 9 / 13 / 19 (after KataGo's resignMinScoreDifference). It needs three of the computer's own turns in a row below 5 %, counted along the current line, so undo forgets them. The engine never resigns itself.
 - 2C: Blunder guard: the self-atari rule (3+ stones) is checked first and needs no engine. The engine check runs only when the engine is ready. When the turn's 'before' evaluation is missing, it is requested again within the same 150 ms budget.
-- 2C: The guard calls engine.stop() before its 'after' evaluation, so the hint's precomputation queued for this turn cannot push it past 150 ms. The only exception is while the 'before' evaluation is still running. The hint restarts a cancelled precomputation, at most twice per position. Zhess's guard never stopped; Zigo's hint precomputation makes the queue longer.
+- 2C: The guard calls engine.stop() before its 'after' evaluation, so the hint's precomputation queued for this turn cannot push it past 150 ms. The only exception is while the 'before' evaluation is still running. The hint restarts a cancelled precomputation, at most twice per position. Zhess's guard never stopped; Zengo's hint precomputation makes the queue longer.
 - 2C: The hint precomputes 300 ms after the position settles (analyze 32 visits ≤ 1.5 s, then evaluate 16 visits ≤ 1 s, small net), only while the engine is ready. A tap before that asks the engine directly and shows 'pending'. Taps after the second keep showing the top three (a new object, so the board replays and refocuses).
 - 2C: The preview line rounds the score lead from Black's view to half points, with a minimum of 0.5 ('B+0.5', never 'B+0'). It keeps Go notation in every language. The screen-reader text is the assist.previewLead.B/W strings.
 - 2C: The dead-stone proposal is about 100 visits, at most 3 s, with an overall timeout of 20 s (loading included). It uses the large net only when the engine has it loaded, else the small net. With no answer it returns null, and every stone is alive.
 - 2C: useEngineStart.prepare(level) loads stage 2 for levels 8–12 and stage 1 otherwise. It returns true at once when the needed nets are already loaded.
 - 2C: Calibration anchor: GNU Go 3.8 level 10, taken as about 6k on 9×9. One kyu per 7 points of win rate away from 50 %. A level gets a rank only with at least 10 games and a win rate between 10 % and 90 %.
-- 2C: Self-play and calibration score finished games by area themselves (dead stones from the engine's ownership ≥ 0.7, then flood fill), because lib/scoring.ts imports './zigo' without an extension and plain Node cannot load it.
+- 2C: Self-play and calibration score finished games by area themselves (dead stones from the engine's ownership ≥ 0.7, then flood fill), because lib/scoring.ts imports './zengo' without an extension and plain Node cannot load it.
 - Integrator 2: The engine's dead-stone proposal runs in every solo mode, pass-and-play included (DESIGN 8.4 step 1 makes no mode exception).
 - Integrator 2: An unfinished solo game warms the engine up (load stage 1): always against the computer, in pass-and-play only once stage 1 is cached, so a hint nobody asked for never downloads anything.
 - Integrator 2: Offline, Start (or Resume) of a computer game does nothing when the level's networks are neither loaded in the engine nor cached (stage 1 for levels 1–7, stage 2 for 8–12); the status line says why. Online, or while the cache is still being checked or cannot be read, loading decides (failure: the calm toast).
@@ -460,8 +460,14 @@ _(One line each: where the design was silent, what was chosen and why.)_
 - WASM is the main backend on every device. WebGPU is never in the path of a reply until it has been warmed up and checked for that board size and net.
 - WebGPU runs every network call at a fixed batch of 8 rows, so each board size compiles one set of shaders. Its pipelines are created in parallel with TF.js's `WEBGPU_ENGINE_COMPILE_ONLY` and `checkCompileCompletionAsync`.
 - Routing by measured speed: a single evaluation (levels 1–9, the guard, the dame check) compares one WebGPU call with one WASM call; a search compares one WebGPU call with 8 WASM calls.
-- A WebGPU error, crash, mismatch or hung search remembers `wasm` in `zigo:engine-backend` and is not retried on that device. A warm-up slower than 180 s drops WebGPU for that page only, so a slow first compile is retried on the next launch.
+- A WebGPU error, crash, mismatch or hung search remembers `wasm` in `zengo:engine-backend` and is not retried on that device. A warm-up slower than 180 s drops WebGPU for that page only, so a slow first compile is retried on the next launch.
 - The worker no longer probes or falls back by itself; one worker runs one backend.
+
+**After the run (name)**
+- 2026-11-14, owner's decision: the app is named Zengo, displayed as ZENGO (the wordmark's uppercase). Repository `izzardry/zengo`, site https://izzardry.github.io/zengo/, folder `~/Workspace/zengo`, development caches in `~/.cache/zengo/`.
+- Every name in code and docs follows: the rules core is `src/lib/zengo.ts` (`ZengoApi`), the engine hook `useZengoEngine`, storage keys `zengo:*`, CSS names `zengo-*`, room and worker names, the social card (regenerated with `scripts/generate-brand-images.mjs`), and all screenshots (regenerated).
+- No migration of stored data: games, history and settings saved under the previous name's keys are not read, so devices start fresh, and installed copies of the app must be reinstalled from the new address. The app was two days old, and a migration would have kept the previous name in the code.
+- Two pinned test values were recomputed for the new name as input (`hashString('zengo')`, `base64url('Zengo')`); the functions are unchanged.
 
 **After the run (first paint)**
 - The owner saw the start screen flicker on reload: text drawn in a fallback font that changed shape a few frames later, weights arriving one by one, elements popping in. Recorded with Chromium's screencast: the first contentful paint came before the font, "Medium" changed weight a frame later, and the status line popped in.
@@ -483,13 +489,13 @@ _(One line each: where the design was silent, what was chosen and why.)_
 - Fix (copy and style, `4772283`): the help names device speed for levels 10–12, only in computer games, inside the toolbar bubble. German says "Level" throughout. "Link copied!" everywhere. Copy failures use plain toasts. Tailwind's `overline` utility is blocklisted so Ztyle's `.overline` type role draws no line.
 - Fix (assets, `1528141`): the Apache-2.0 licence ships next to the TF.js WASM binaries. scripts/screenshots.mjs can open games in scoring.
 - Docs (`c26fe97`): README rewritten in Zhess's layout: features, scripts and flags, structure, how scoring, rooms and the engine work, licence and credits. It says the rank line has no table yet.
-- Gate fix round 1 (`b0cb55d`): at 844×390 the room's "Could not reach the connection service." toast broke text mid-word and covered the whole right rail. Toast text now breaks only between words, and an action moves under the text when the text would get narrower than 8rem (all toasts). Toasts beside the landscape board are compact (text-xs, py-2 px-3). While toasts show, the Toaster publishes their stack height as `--zigo-rail-toasts`, and the right rail (toolbar or scoring bar) moves up above them, never above Help. The rail was moved, not the toast, because the free corner at 844×390 (223×89 px) cannot hold a message with an action in every language.
+- Gate fix round 1 (`b0cb55d`): at 844×390 the room's "Could not reach the connection service." toast broke text mid-word and covered the whole right rail. Toast text now breaks only between words, and an action moves under the text when the text would get narrower than 8rem (all toasts). Toasts beside the landscape board are compact (text-xs, py-2 px-3). While toasts show, the Toaster publishes their stack height as `--zengo-rail-toasts`, and the right rail (toolbar or scoring bar) moves up above them, never above Help. The rail was moved, not the toast, because the free corner at 844×390 (223×89 px) cannot hold a message with an action in every language.
 
 ## Deviations
 
 _(Where a design decision could not be built as stated: what was built instead, and why.)_
 
-- 0b: Contract additions beyond PLAN section 4 (extensions, not changes): `Game.setup`, `IllegalReason`, `SgfMeta`, `ClockState`, `ClockInfo`, `Position`, `GameRecordFields`, `Score`/`ScoreSide` (whole points per side, totals and margin ×2), `GameLog` gains `black, tc, size, rules, handicap`, `WelcomeMsg` gains `size, rules, handicap`; `ZigoApi` gains `replay`, `fromRecord`, `setScoring`, `reopen`, `position`, `colorOfPly`, `lastMove`, `timeUsed`, `clockRunning`.
+- 0b: Contract additions beyond PLAN section 4 (extensions, not changes): `Game.setup`, `IllegalReason`, `SgfMeta`, `ClockState`, `ClockInfo`, `Position`, `GameRecordFields`, `Score`/`ScoreSide` (whole points per side, totals and margin ×2), `GameLog` gains `black, tc, size, rules, handicap`, `WelcomeMsg` gains `size, rules, handicap`; `ZengoApi` gains `replay`, `fromRecord`, `setScoring`, `reopen`, `position`, `colorOfPly`, `lastMove`, `timeUsed`, `clockRunning`.
 
 - 1A: DESIGN 5.4 asks for coordinates as text-[0.5rem]. They scale with the pitch instead (see decisions), because the board is one viewBox-scaled SVG.
 - 1B: Zhess's live room integration in useGameState (useRoom, the room session read from the controller, room review) was removed in M1 as the brief directs. Its tests are replaced by tests of the onRoom extension point until M3 brings the room back.
@@ -505,9 +511,9 @@ _(Where a design decision could not be built as stated: what was built instead, 
 - Integrator 1: Glue fixes outside my own paths:
 - src/components/game/ResignUndoToast.tsx and index.ts: the `placement` prop.
 - src/lib/i18n/game.ts and start.ts: glossary wording, and the unused engine keys removed.
-- src/lib/zigo.ts and zigo.test.ts: one comment each, so the Zhess mention is gone.
+- src/lib/zengo.ts and zengo.test.ts: one comment each, so the Zhess mention is gone.
 - src/hooks/usePWAInstall.ts: one import switched to lib/types.
-- Gate 1 fix overlay summary: The Zhess overlay is max-w-md with no deliberate break. Zigo's summary has a fifth part (board size), so the box widens from 640 px and the phone layout uses a fixed two-row split.
+- Gate 1 fix overlay summary: The Zhess overlay is max-w-md with no deliberate break. Zengo's summary has a fifth part (board size), so the box widens from 640 px and the phone layout uses a fixed two-row split.
 
 - 2A: The search is not a full port of Web KaTrain's 4,700-line search. The parts listed in the decisions are left out, and every visit has weight 1. Its numbers still match KataGo's own formulas for exploration, first-play reduction and LCB.
 - 2A: src/lib/engine/fake.ts now takes gameFromPosition from the new position.ts (the export is unchanged), and its genmove accepts and honours opts.avoid.
@@ -520,7 +526,7 @@ _(Where a design decision could not be built as stated: what was built instead, 
 - Gate 2 e2e suite: The info pill's lead note (`preview-note`) is shown on its own line under the info pill, not inside the 'Game info' group, so the test looks for it by test id instead of inside that group.
 
 - 3A: DESIGN 9.2 says that with equal rev and different dead, 'seat 0's copy wins'. Here seat 0's dead stones win but are kept at rev+1 with acceptances cleared, not seat 0's copy byte for byte, to void accepts of the contested rev (see decisions). After an equal end, seat 0's copy is kept exactly.
-- 3B: DESIGN 9.6 lists mark {n, epoch, rev, dead} as a proposal or toggle. Zigo also uses mark with rev 0 and an empty dead list as seat 0's hand-over of the first proposal to seat 1. DESIGN 9.5 asks for seat 1 to propose but names no message for it, and this keeps the message table and protocol version 1 unchanged.
+- 3B: DESIGN 9.6 lists mark {n, epoch, rev, dead} as a proposal or toggle. Zengo also uses mark with rev 0 and an empty dead list as seat 0's hand-over of the first proposal to seat 1. DESIGN 9.5 asks for seat 1 to propose but names no message for it, and this keeps the message table and protocol version 1 unchanged.
 - 3C: Ztyle 18-rooms asks for a pulsing button on the asking side. The own pending Accept instead shows the pressed 'Accepted' state with a waiting note, because 1C's ScoringBar (not my file) has no pulse option. Takeback and rematch pending states are unchanged from 1G.
 - Gate 3 fix (room connection under parallel load): The verifier asked for the root cause. I could not establish it with a browser, because Chromium cannot launch on this machine at the moment. The fix gives the room tests the condition in which they pass, inside the normal parallel run, and adds diagnostics so a remaining stall names its cause. It does not prove the app has no load-sensitive race in the manual exchange.
 - Gate 3 fix (room connection under parallel load): The verifier's suggested remedies were mode 'serial' or fewer workers for m3. I used Playwright's '-exclusive-' lock instead. It is stricter (nothing else runs beside a room test) and keeps independent retries and reporting.
@@ -573,7 +579,7 @@ All on this Mac (Apple silicon). **No phone was measured.** One network evaluati
 
 **Gate 0 (2026-11-12): passed with one exception.** `npm run lint` clean; `npm run typecheck` clean; `npm test` 74 files passed, 2 skipped; 1551 tests passed, 6 skipped; `npm run build` ok (26 precache entries, no `engine/`); both nets in `public/engine/nets/`. `npx playwright test`: 27 passed, 11 failed. The 11 are every Zhess test that needs the Stockfish engine (10 in `e2e/m2.spec.ts`, smoke "engine files are served next to each other"); PLAN.md phase 0 removes Stockfish, so they cannot pass until milestone 2 replaces the engine, and milestone 1 deletes them with the chess modules. Repo public, first Pages deploy succeeded.
 
-**0a check (2026-11-12):** lint, typecheck pass; `npm test` 72 files / 1459 passed, 6 skipped (Stockfish file absent); build ok; e2e 27/38 passed, 11 failed, all because Stockfish is gone (10 in Zhess's `m2.spec.ts`, 1 smoke test requesting `stockfish-19-lite-single.*`). First Pages deploy succeeded: https://github.com/izzardry/zigo/actions/runs/43290647595.
+**0a check (2026-11-12):** lint, typecheck pass; `npm test` 72 files / 1459 passed, 6 skipped (Stockfish file absent); build ok; e2e 27/38 passed, 11 failed, all because Stockfish is gone (10 in Zhess's `m2.spec.ts`, 1 smoke test requesting `stockfish-19-lite-single.*`). First Pages deploy succeeded: https://github.com/izzardry/zengo/actions/runs/43290647595.
 
 **Gate 1 (2026-11-12): passed in round 3.** Workflow `wf_1e8a200c-20b`, 14 agents (7 packages, integrator, e2e author, 3 verifier runs, 2 fix agents).
 - Round 1 failed on one visual fault: coordinate labels scaled with the pitch (about 4–5 px on 19×19 phones). Fixed in `dc1e1ff` (clamp 7–8 px).
@@ -593,4 +599,4 @@ All on this Mac (Apple silicon). **No phone was measured.** One network evaluati
 - Round 1: lint, typecheck, unit tests (2050), build, grep and e2e (51/51) all passed. The gate still failed on one visual fault. At 844×390 the room's broker-failure toast broke its text mid-word and covered the whole right rail, hiding pass, resign, Resume and Accept. Fixed in `b0cb55d`.
 - Round 2 and the orchestrator's own re-run: `npm run lint` clean, `npm run typecheck` clean, `npm test` 81 files / 2054 tests passed, `npm run build` ok (33 precache entries; the only warning is the known chunk size), chess grep 0 hits, `caffeinate -i npx playwright test` 55/55 passed (smoke 5, chrome 9, m1 22, m2 13, m3 6, including the broker path). The verifier read 30 new screenshots at 390×844, 844×390 and 1280×800, in light and dark, and found no regression. The visual pass's 130 screenshots at five sizes are in `docs/screenshots/final/`. Nothing is switched off by flag.
 
-**Live smoke test (2026-11-13): passed.** Against https://izzardry.github.io/zigo/ after deploy run 43371167524 (`scratchpad/live-smoke.mjs`, Playwright Chromium at 390×844). Level 1, 9×9, Black: engine ready 3.0 s after Start; E5 placed, and the computer replied E7 in 511 ms. No console errors; the service worker registered.
+**Live smoke test (2026-11-13): passed.** Against the live site after deploy run 43371167524 (`scratchpad/live-smoke.mjs`, Playwright Chromium at 390×844). Level 1, 9×9, Black: engine ready 3.0 s after Start; E5 placed, and the computer replied E7 in 511 ms. No console errors; the service worker registered.

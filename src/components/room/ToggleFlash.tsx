@@ -17,7 +17,7 @@ import type { RoomToggle } from '@/hooks/useRoom';
 import { useI18n } from '@/lib/i18n';
 import type { Size } from '@/lib/types';
 import { cn } from '@/lib/utils';
-import { gtp, isPoint } from '@/lib/zigo';
+import { gtp, isPoint } from '@/lib/zengo';
 import './room.css';
 
 export interface ToggleFlashProps {
@@ -61,7 +61,7 @@ export function ToggleFlash({ size, toggle, className }: ToggleFlashProps) {
             return c ? (
               <circle
                 key={p}
-                className="zigo-toggle-flash"
+                className="zengo-toggle-flash"
                 cx={c.col}
                 cy={c.row}
                 r={STONE_R + 0.04}

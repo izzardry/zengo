@@ -22,7 +22,7 @@
  * that plain Node (type stripping) can load this file for the engine and the scripts.
  */
 import type { ClockInfo, Color, EngineCandidate, Game, Point, Size, TimeControl } from './types.ts';
-import { PASS, clocks, indexToPoint, isLegal, isPass, play, pointToIndex, selfAtariSize } from './zigo.ts';
+import { PASS, clocks, indexToPoint, isLegal, isPass, play, pointToIndex, selfAtariSize } from './zengo.ts';
 
 /** Default level of a new computer game (DESIGN 10.2). */
 export const DEFAULT_LEVEL = 5;
@@ -222,7 +222,7 @@ export function captures(g: Game, p: Point): boolean {
 
 /**
  * Points where the side to move would put `minStones` or more of its own stones into atari that the
- * opponent can capture at once (`zigo.selfAtariSize`), sorted. Only points next to its own stones can
+ * opponent can capture at once (`zengo.selfAtariSize`), sorted. Only points next to its own stones can
  * do that, so the rest are skipped.
  */
 export function bigSelfAtariPoints(g: Game, minStones: number): Point[] {

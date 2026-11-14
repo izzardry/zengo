@@ -78,9 +78,9 @@ async function device(
   const context = await browser.newContext({ baseURL: BASE_URL, ...(opts.viewport ? { viewport: opts.viewport } : {}) });
   await context.addInitScript(() => {
     try {
-      localStorage.setItem('zigo:tutorial-seen', 'true');
-      localStorage.setItem('zigo:donation-shown', 'true');
-      localStorage.setItem('zigo:install-dismissed', 'true');
+      localStorage.setItem('zengo:tutorial-seen', 'true');
+      localStorage.setItem('zengo:donation-shown', 'true');
+      localStorage.setItem('zengo:install-dismissed', 'true');
     } catch {
       /* storage blocked */
     }
@@ -569,11 +569,11 @@ test.describe('Gate 3 · rooms', () => {
     await g.evaluate(() => {
       localStorage.clear();
       sessionStorage.clear();
-      localStorage.setItem('zigo:tutorial-seen', 'true');
+      localStorage.setItem('zengo:tutorial-seen', 'true');
     });
     await g.reload();
     await expect(stage(g)).toHaveAttribute('data-phase', 'start');
-    expect(await g.evaluate(() => localStorage.getItem('zigo:rooms'))).toBeNull();
+    expect(await g.evaluate(() => localStorage.getItem('zengo:rooms'))).toBeNull();
 
     // The guest starts the same code with ROOM (it has no record now).
     await startRoom(g, code);

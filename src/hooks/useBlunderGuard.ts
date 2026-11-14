@@ -31,10 +31,10 @@ import {
   type Verdict,
 } from '@/lib/blunder';
 import type { Color, EngineApi, Game, Now, Point } from '@/lib/types';
-import zigo, { isPass } from '@/lib/zigo';
+import zengo, { isPass } from '@/lib/zengo';
 
 export interface UseBlunderGuardOptions {
-  /** The shared engine (`useZigoEngine()`). */
+  /** The shared engine (`useZengoEngine()`). */
   engine: EngineApi;
   /** The live game (`session.game`), or null. */
   game: Game | null;
@@ -109,7 +109,7 @@ function withDeadline<T>(p: Promise<T | null>, ms: number): Promise<T | null> {
 function safeEvaluate(engine: EngineApi, g: Game, timeoutMs: number): Promise<GuardEval | null> {
   try {
     return engine
-      .evaluate(zigo.position(g), { net: 'small' }, timeoutMs)
+      .evaluate(zengo.position(g), { net: 'small' }, timeoutMs)
       .then((e) => (e ? { winrate: e.winrate, scoreLead: e.scoreLead } : null))
       .catch(() => null);
   } catch {
@@ -159,7 +159,7 @@ export function useBlunderGuard(opts: UseBlunderGuardOptions): BlunderGuard {
       const o = optsRef.current;
       const g = o.game;
       if (!o.enabled || !g || g.end || g.scoring || g.turn !== o.playerColor) return COMMIT;
-      if (isPass(point) || !zigo.isLegal(g, point)) return COMMIT; // a pass, or illegal: not the guard's business
+      if (isPass(point) || !zengo.isLegal(g, point)) return COMMIT; // a pass, or illegal: not the guard's business
       const k = `${o.sessionKey ?? ''}|${guardKey(g)}`;
       const t0 = now();
       if (isConfirmation(refusal.current, k, point, t0, o.confirmMs ?? CONFIRM_WINDOW_MS)) {
@@ -179,7 +179,7 @@ export function useBlunderGuard(opts: UseBlunderGuardOptions): BlunderGuard {
           if (!pending) o.engine.stop();
           // Reuse the turn's evaluation; without one (or an empty one) ask again within the budget.
           const beforeP = cached && cached.value !== null ? cached.promise : safeEvaluate(o.engine, g, budget);
-          const after = zigo.play(g, point, 0);
+          const after = zengo.play(g, point, 0);
           const afterP = safeEvaluate(o.engine, after, budget);
           const [b, a] = await Promise.all([withDeadline(beforeP, budget), withDeadline(afterP, budget)]);
           verdict = judgeEvals(g.settings.size, b, a);

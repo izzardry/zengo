@@ -1,10 +1,10 @@
-# Zigo — design document
+# Zengo — design document
 
 **Zero Distractions. Just Go.**
 
-Zigo is the izzardry Go game: a monochrome, monospaced, no-frills 2D Go board that can be played against the computer, by two people on one device, or by two people in a serverless peer-to-peer room.
+Zengo is the izzardry Go game: a monochrome, monospaced, no-frills 2D Go board that can be played against the computer, by two people on one device, or by two people in a serverless peer-to-peer room.
 
-Zigo is the sibling of [Zhess](https://github.com/izzardry/zhess), the izzardry chess game. It keeps Zhess's visual style, screen flow, start screen, rooms, history, sharing and platform behaviour, and swaps everything about chess for everything about Go. This document records every product and technical decision taken before the first line of code. It is the specification for the implementation.
+Zengo is the sibling of [Zhess](https://github.com/izzardry/zhess), the izzardry chess game. It keeps Zhess's visual style, screen flow, start screen, rooms, history, sharing and platform behaviour, and swaps everything about chess for everything about Go. This document records every product and technical decision taken before the first line of code. It is the specification for the implementation.
 
 - **Status:** agreed design, nothing implemented yet
 - **Date:** 2026-11-12
@@ -27,7 +27,7 @@ Decisions marked **(interview)** were chosen explicitly by the owner. Decisions 
 | Computer | KataGo networks run by a TypeScript search in a Web Worker, ported from Web KaTrain (MIT), with TF.js on WebGPU and a WASM fallback. **(interview)** |
 | Networks | 6-block net (3.8 MB) on the first launch; 10-block net (11 MB) on demand for levels 8–12, or at once when the app is installed. **(interview)** |
 | Levels | 12 levels with the Zudoku names, default 5, plus an approximate kyu/dan rank once it has been calibrated. **(interview)** |
-| Rules core | A small pure TypeScript core in `lib/zigo.ts` (no rules library); counting with lightvector's goscorer (MIT). **(derived from research)** |
+| Rules core | A small pure TypeScript core in `lib/zengo.ts` (no rules library); counting with lightvector's goscorer (MIT). **(derived from research)** |
 | Code | Every game has a 6-character game code. For rooms the code is the room. **(Zhess)** |
 | Rooms | PeerJS public broker, manual link + QR fallback, STUN only, seat key, longest valid log wins, a series with a running score. **(Zhess)** |
 | Room scoring | Dead-stone marks are shared live; the game ends when both accept the same marking; either can resume; after a resume the next two passes score by the engine's marking directly. **(interview)** |
@@ -52,10 +52,10 @@ Decisions marked **(interview)** were chosen explicitly by the owner. Decisions 
 | Board chrome | Prisoners and komi in the player strips, move strip, coordinates. No sound, no haptics. **(derived)** |
 | Room talk | None. **(Zhess)** |
 | Presence | One dot in the info pill plus a toast on each change. **(Zhess)** |
-| Licence | Zigo is MIT. KataGo networks are CC0; the engine port is MIT; TF.js is Apache-2.0. Nothing GPL ships. **(derived)** |
+| Licence | Zengo is MIT. KataGo networks are CC0; the engine port is MIT; TF.js is Apache-2.0. Nothing GPL ships. **(derived)** |
 | Code base | A copy of Zhess's source tree, with the chess-specific parts replaced. **(interview)** |
 | Delivery | Three milestones plus an audit (section 16), run unattended as Zhess was. **(interview)** |
-| Repository | `github.com/izzardry/zigo`, public, GitHub Pages enabled. Created by the build run's phase 0. **(interview)** |
+| Repository | `github.com/izzardry/zengo`, public, GitHub Pages enabled. Created by the build run's phase 0. **(interview)** |
 
 ---
 
@@ -63,16 +63,16 @@ Decisions marked **(interview)** were chosen explicitly by the owner. Decisions 
 
 | Item | Value |
 |------|-------|
-| Name | Zigo (wordmark `ZIGO`, `font-light tracking-[0.3em]`), from *Igo* (囲碁), the Japanese name of the game; "go" stays visible. |
+| Name | Zengo (wordmark `ZENGO`, `font-light tracking-[0.3em]`), from *Igo* (囲碁), the Japanese name of the game; "go" stays visible. |
 | Tagline | `Zero Distractions. Just Go.` |
-| Page title | `Zigo - Zero Distractions. Just Go.` |
+| Page title | `Zengo - Zero Distractions. Just Go.` |
 | Meta description | `Zero Distractions. Just Go. A minimalist Go board for one or two players.` |
 | OG description | `A minimalist Go game. 9×9 to 19×19, 12 computer levels, serverless rooms for two, and zero ads.` |
 | `author` | `izzardry` |
-| PWA `short_name` | `Zigo` |
-| Storage prefix | `zigo:` |
+| PWA `short_name` | `Zengo` |
+| Storage prefix | `zengo:` |
 | Icon | Ztyle icon standard: `#0d0d0d` tile, a faint thin-stroke 3×3 grid corner, one black and one white stone from the stone set touching diagonally in the center. Grayscale. **(interview)** |
-| Live URL | `https://izzardry.github.io/zigo/` |
+| Live URL | `https://izzardry.github.io/zengo/` |
 
 The name is not translated. The game itself is called *Go* in English, German and Spanish UI text, and *go* in French.
 
@@ -210,7 +210,7 @@ In scoring the toolbar is replaced by the scoring bar (section 8.4).
 
 ### 5.2 Pass-and-play seating
 
-As in Zhess, two seatings switched by the toolbar button and remembered (`zigo:seating`): **face to face** (default on touch) draws the far player's strip, clock, prisoners, passed badge, coordinate labels on the far edges and the scoring bar's far Accept button rotated 180°; **side by side** (default with a mouse) draws everything upright. Stones need no rotation. **(Zhess, derived)**
+As in Zhess, two seatings switched by the toolbar button and remembered (`zengo:seating`): **face to face** (default on touch) draws the far player's strip, clock, prisoners, passed badge, coordinate labels on the far edges and the scoring bar's far Accept button rotated 180°; **side by side** (default with a mouse) draws everything upright. Stones need no rotation. **(Zhess, derived)**
 
 ### 5.3 Point states
 
@@ -279,7 +279,7 @@ Each long press suppresses the click that follows, is announced in the `aria-lab
 
 ### 7.1 Helpers shield
 
-One toggle, on by default, stored in `zigo:helpers`. It bundles: **(interview)**
+One toggle, on by default, stored in `zengo:helpers`. It bundles: **(interview)**
 
 - the last-move ring,
 - the atari glow,
@@ -318,7 +318,7 @@ Hints are unlimited. A hint tap, a territory preview, an undo or a guard bounce 
 
 ### 8.1 Rules core
 
-`lib/zigo.ts` is a small pure TypeScript core with no React and no DOM, the counterpart of `lib/zhess.ts`. It provides board state, legal moves, captures, suicide (forbidden), ko and **positional superko** for both rule sets, handicap placement, the move codec, SGF export, clock arithmetic and log replay for room sync. No rules library is used: none that is maintained and permissively licensed offers immutable state, positional superko, a codec and SGF together. **(derived from research)**
+`lib/zengo.ts` is a small pure TypeScript core with no React and no DOM, the counterpart of `lib/zhess.ts`. It provides board state, legal moves, captures, suicide (forbidden), ko and **positional superko** for both rule sets, handicap placement, the move codec, SGF export, clock arithmetic and log replay for room sync. No rules library is used: none that is maintained and permissively licensed offers immutable state, positional superko, a codec and SGF together. **(derived from research)**
 
 Counting uses **goscorer** by lightvector (MIT, vendored as one file), which computes both area and territory scores and detects seki, given the agreed set of dead stones. **(derived from research)**
 
@@ -337,7 +337,7 @@ The result of a game is a pure function of `(size, rules, komi, handicap, moves,
 
 **(interview: per-game setting; values derived from research)**
 
-Half-point komi makes a draw (jigo) impossible. There is no draw result in Zigo. Custom komi is not offered. **(derived)**
+Half-point komi makes a draw (jigo) impossible. There is no draw result in Zengo. Custom komi is not offered. **(derived)**
 
 Handicap stones go on the star points in GTP order (19×19 names; 13×13 uses the 4th line and 9×9 the 3rd): 2 = D4 Q16; 3 adds D16; 4 adds Q4; 5 adds the center K10; 6 = the four corners plus D10 Q10; 7 = 6 plus the center; 8 = 6 plus K4 K16; 9 = all nine star points. On 9×9 the limit is 5. **(derived from research, GTP spec)**
 
@@ -389,7 +389,7 @@ Rooms work exactly as in Zhess section 9: the code is the room, creating and joi
 
 ### 9.1 Identifiers
 
-- PeerJS peer id `zigo-<CODE>`; Web Lock `zigo:room:<CODE>`; storage `zigo:rooms`. **(derived)**
+- PeerJS peer id `zengo-<CODE>`; Web Lock `zengo:room:<CODE>`; storage `zengo:rooms`. **(derived)**
 - The `welcome` message also carries the game settings chosen by the creator: `{key, seat, tc, color, size, rules, handicap}`. A joiner sees them dimmed on the start screen. **(derived)**
 
 ### 9.2 Game log
@@ -413,7 +413,7 @@ type Scoring = {
 type Result = { winner: 'B' | 'W'; by: 'score' | 'resign' | 'time'; margin?: number /* half points ×2 */ };
 ```
 
-Reconcile gains one rule after Zhess's five: with equal `n`, `epoch` and plies, the higher `scoring.rev` wins; with equal `rev` and different `dead`, seat 0's copy wins (it cannot happen in normal play). Adopted plies are replayed through `lib/zigo.ts`, positional superko included. **(derived)**
+Reconcile gains one rule after Zhess's five: with equal `n`, `epoch` and plies, the higher `scoring.rev` wins; with equal `rev` and different `dead`, seat 0's copy wins (it cannot happen in normal play). Adopted plies are replayed through `lib/zengo.ts`, positional superko included. **(derived)**
 
 ### 9.3 Offline moves and passes
 
@@ -445,7 +445,7 @@ There is no draw request and no redo in a room. Score: a win adds 1 to the winne
 | `resume {n, epoch}` | Leave scoring and play on. |
 | `end {n, result, by, dead?}` | Resign, time, or a round-2 score. |
 
-The protocol version `v` starts at 1 for Zigo. Zigo and Zhess peers never meet (different id prefixes). **(derived)**
+The protocol version `v` starts at 1 for Zengo. Zengo and Zhess peers never meet (different id prefixes). **(derived)**
 
 ### 9.7 Clocks in a room
 
@@ -459,11 +459,11 @@ As in Zhess 9.8, with byo-yomi: the remaining main time, the current period and 
 
 - **KataGo networks run by a TypeScript search in a Web Worker.** The KataGo C++ program cannot run on GitHub Pages: every browser build needs threads, and threads need COOP/COEP headers that Pages cannot send. A search written in TypeScript, with the network run single-threaded in WASM or on WebGPU, needs no headers. **(interview, research [V])**
 - **Starting point:** the engine of [Web KaTrain](https://github.com/Sir-Teo/web-katrain) (MIT; a TypeScript KataGo reimplementation running as an offline PWA on GitHub Pages): network loader, input features, PUCT search with LCB, ownership, and KaTrain-style weak-bot strategies. It is ported, not linked, into `src/lib/engine/katago/`, keeping its licence notice. **(derived from research)**
-- **Runtime:** TF.js 4.22.0, pinned and self-hosted, with the WebGPU backend when the worker can get an adapter and a warm-up evaluation matches the WASM result on a fixed position, otherwise the WASM-SIMD backend (single-threaded). The choice is remembered per device (`zigo:engine-backend`). **(derived)** Plan B if TF.js fails: ONNX Runtime Web (adds 3.8–6.9 MB).
+- **Runtime:** TF.js 4.22.0, pinned and self-hosted, with the WebGPU backend when the worker can get an adapter and a warm-up evaluation matches the WASM result on a fixed position, otherwise the WASM-SIMD backend (single-threaded). The choice is remembered per device (`zengo:engine-backend`). **(derived)** Plan B if TF.js fails: ONNX Runtime Web (adds 3.8–6.9 MB).
 - **Networks** (both CC0):
   - `g170-b6c96` (3.83 MB): levels 1–7, the blunder guard, hints and the scoring proposal;
   - `g170e-b10c128` (11.1 MB): levels 8–12.
-- `useZigoEngine` owns the worker and mirrors Zhess's driver rules (lazy, one search at a time, queueing, `stop`, failure state): `genmove(position, level, clock?)`, `evaluate(position, {visits | timeMs}, timeoutMs?)` → `{winrate, scoreLead, ownership, policy}`, `analyze(position, n)` → top-n moves, `stop()`. A position is `{size, rules, komi, handicap, moves}`. **(derived)**
+- `useZengoEngine` owns the worker and mirrors Zhess's driver rules (lazy, one search at a time, queueing, `stop`, failure state): `genmove(position, level, clock?)`, `evaluate(position, {visits | timeMs}, timeoutMs?)` → `{winrate, scoreLead, ownership, policy}`, `analyze(position, n)` → top-n moves, `stop()`. A position is `{size, rules, komi, handicap, moves}`. **(derived)**
 
 ### 10.2 Levels
 
@@ -565,19 +565,19 @@ As in Zhess: read-only board, stepping with undo/redo, hold to jump, arrow keys 
 
 | Key | Content |
 |-----|---------|
-| `zigo:games` | `SavedGame[]`, at most 100 |
-| `zigo:rooms` | `Room[]` (as Zhess) |
-| `zigo:opponent` | last opponent selector value |
-| `zigo:color` | `random` / `B` / `W` |
-| `zigo:size` | `9` / `13` / `19` |
-| `zigo:rules` | `area` / `territory` |
-| `zigo:handicap` | `{9: n, 13: n, 19: n}` |
-| `zigo:clock` | `{9: tc, 13: tc, 19: tc}` |
-| `zigo:helpers` | `'true'` / `'false'` |
-| `zigo:seating` | `face` / `side` |
-| `zigo:engine-backend` | `webgpu` / `wasm` |
-| `zigo:lang` | language code |
-| `zigo:tutorial-seen`, `zigo:donation-shown`, `zigo:install-dismissed` | flags |
+| `zengo:games` | `SavedGame[]`, at most 100 |
+| `zengo:rooms` | `Room[]` (as Zhess) |
+| `zengo:opponent` | last opponent selector value |
+| `zengo:color` | `random` / `B` / `W` |
+| `zengo:size` | `9` / `13` / `19` |
+| `zengo:rules` | `area` / `territory` |
+| `zengo:handicap` | `{9: n, 13: n, 19: n}` |
+| `zengo:clock` | `{9: tc, 13: tc, 19: tc}` |
+| `zengo:helpers` | `'true'` / `'false'` |
+| `zengo:seating` | `face` / `side` |
+| `zengo:engine-backend` | `webgpu` / `wasm` |
+| `zengo:lang` | language code |
+| `zengo:tutorial-seen`, `zengo:donation-shown`, `zengo:install-dismissed` | flags |
 
 All values JSON, every read guarded. **(Zhess, derived)**
 
@@ -606,7 +606,7 @@ Sharing works as in Zhess: a solo game sends the full URL (a new local game for 
 
 ### 13.3 SGF export
 
-`Copy SGF` writes FF[4] with `GM[1]`, `CA[UTF-8]`, `AP[Zigo:<version>]`, `SZ`, `KM`, `RU[Chinese]` or `RU[Japanese]`, `HA` and `AB` for handicap, `PB` / `PW` (`Zigo Level 5` for the computer), `DT`, `RE` (`B+4.5`, `W+R`, `B+T`), `TM` and `OT` for the clock, and moves with `B[]` / `W[]` for passes. No import. **(interview, derived)**
+`Copy SGF` writes FF[4] with `GM[1]`, `CA[UTF-8]`, `AP[Zengo:<version>]`, `SZ`, `KM`, `RU[Chinese]` or `RU[Japanese]`, `HA` and `AB` for handicap, `PB` / `PW` (`Zengo Level 5` for the computer), `DT`, `RE` (`B+4.5`, `W+R`, `B+T`), `TM` and `OT` for the clock, and moves with `B[]` / `W[]` for passes. No import. **(interview, derived)**
 
 ---
 
@@ -669,7 +669,7 @@ Runtime dependencies besides the Zhess ones minus `chess.js`:
 
 ### 15.2 Licence
 
-Zigo source is MIT. The networks are CC0 and sit in `public/engine/nets/` with a README naming their source. The engine port keeps Web KaTrain's and KataGo's MIT notices in `src/lib/engine/katago/LICENSE`. The start screen's scroll area carries a one-line credit: `computer opponent: KataGo networks (CC0), search after Web KaTrain (MIT)`, linking to both. Nothing GPL ships. **(derived)**
+Zengo source is MIT. The networks are CC0 and sit in `public/engine/nets/` with a README naming their source. The engine port keeps Web KaTrain's and KataGo's MIT notices in `src/lib/engine/katago/LICENSE`. The start screen's scroll area carries a one-line credit: `computer opponent: KataGo networks (CC0), search after Web KaTrain (MIT)`, linking to both. Nothing GPL ships. **(derived)**
 
 ### 15.3 Project layout
 
@@ -686,9 +686,9 @@ src/
     start/      as Zhess + SizePill, RulesDial; ColorPill gains the handicap hold
     room/       as Zhess
     platform/   as Zhess
-  hooks/        useGameState, useZigoEngine, useComputer, useHint, useBlunderGuard,
+  hooks/        useGameState, useZengoEngine, useComputer, useHint, useBlunderGuard,
                 useScoring, useClock, useRoom, useEngineOffline (two stages), … as Zhess
-  lib/          zigo.ts        pure: board, legality, superko, captures, handicap, codec, SGF
+  lib/          zengo.ts        pure: board, legality, superko, captures, handicap, codec, SGF
                 scoring.ts     pure: goscorer wrapper, area/territory, proposals → marks
                 levels.ts      pure: level table and move picker
                 clock.ts       Fischer and byo-yomi arithmetic
@@ -702,7 +702,7 @@ Removed from Zhess: `chess.js`, the Stockfish files, `premove.ts`, `drawOffer.ts
 
 ### 15.4 Testing
 
-- `zigo.ts`: captures (single, multiple groups, edge and corner), suicide refused, simple ko, positional superko (triple ko), handicap placement for every count and size, codec round-trips including passes, SGF export, replay validation. **(derived)**
+- `zengo.ts`: captures (single, multiple groups, edge and corner), suicide refused, simple ko, positional superko (triple ko), handicap placement for every count and size, codec round-trips including passes, SGF export, replay validation. **(derived)**
 - `scoring.ts`: fixed fixtures for area and territory on each size, including seki, dame, dead stones inside territory, handicap compensation, half-point komi, and identical results for identical inputs. **(derived)**
 - `clock.ts`: Fischer as in Zhess; byo-yomi period use, keep, run-out and undo restore; derivation from a ply log. **(derived)**
 - `sync.ts` and `room.ts`: Zhess's suites plus passes, the scoring round (mark, toggle clearing accepts, accept, resume, round-2 end from seat 0, seat 1 proposing when seat 0 has no engine), takeback during scoring, reconcile by `rev`. **(derived)**
@@ -734,7 +734,7 @@ Removed from Zhess: `chess.js`, the Stockfish files, `premove.ts`, `drawOffer.ts
 3. **Low-end Android.** The 10-block net on CPU may take 0.5–0.8 s per evaluation, which slows levels 10–12. Levels cap by time, not visits.
 4. **Engine numerics differ by device.** WebGPU and WASM do not produce identical floats. This is harmless only because no result is ever computed from a device's own engine output (8.1, 9.5); every test of the scoring protocol must keep it that way.
 5. **Blunder guard accuracy and latency.** A raw 6-block evaluation is noisy, and 150 ms on a low-end phone is unproven. The guard prefers missing a blunder to a false bounce and lets the stone through on timeout.
-6. **Calibration below 18k.** KaTrain's rank formula is calibrated for roughly 18k–2d; levels 1–2 need Zigo's own tuning and play-testing with real beginners.
+6. **Calibration below 18k.** KaTrain's rank formula is calibrated for roughly 18k–2d; levels 1–2 need Zengo's own tuning and play-testing with real beginners.
 7. **Bandwidth.** About 15 MB per installed device against GitHub Pages' soft limit of 100 GB per month. Stage 2 stays on demand for browser visitors.
 8. **Territory rules and disputes.** Under territory scoring, resuming to settle a dispute costs points; the round-2 rule ends it, which experienced players may find abrupt.
 9. **19×19 on a 320 px phone.** The pitch falls to about 15 px; the ghost-and-confirm input must be tested at that size.
@@ -748,4 +748,4 @@ Removed from Zhess: `chess.js`, the Stockfish files, `premove.ts`, `drawOffer.ts
 - KataGo's human-like model as a "human style" option for levels 1–9 on WebGPU devices (about 99 MB).
 - An opt-in 18-block net for a stronger level 12 on WebGPU (about 58–96 MB), hosted outside GitHub Pages if it becomes popular.
 - SGF import.
-- Whether Zigo, Zhess and Zudoku should link to each other from their start screens.
+- Whether Zengo, Zhess and Zudoku should link to each other from their start screens.

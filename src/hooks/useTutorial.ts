@@ -2,7 +2,7 @@
  * Coach-mark tutorial state (DESIGN 14.2, Ztyle 15).
  *
  * Shown automatically on the first game (`startTutorial`), again any time through `?`
- * (`forceShowTutorial`). Dismissing stores `zigo:tutorial-seen = true`.
+ * (`forceShowTutorial`). Dismissing stores `zengo:tutorial-seen = true`.
  * Ported from Zudoku `useTutorial.ts` with the storage key fix (Ztyle audit #13): the flag is
  * read synchronously, so `startTutorial` works on the first render.
  */

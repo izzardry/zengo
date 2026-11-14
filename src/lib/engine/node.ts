@@ -1,5 +1,5 @@
 /**
- * The Zigo engine in Node (golden test, `scripts/selfplay.mjs`, `scripts/calibrate.mjs`): the same
+ * The Zengo engine in Node (golden test, `scripts/selfplay.mjs`, `scripts/calibrate.mjs`): the same
  * KataGo port as the browser worker, with TF.js on its WASM backend (default) or its CPU backend,
  * the networks read from `public/engine/nets/`.
  *

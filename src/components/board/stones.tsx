@@ -74,7 +74,7 @@ export interface StoneGlyphProps {
  * move list and the tutorial. Sized by CSS: 1em by default (`className="h-3 w-3"` to change).
  */
 export const StoneGlyph = memo(function StoneGlyph({ color, className, title }: StoneGlyphProps) {
-  const id = useSvgId('zigo-glyph');
+  const id = useSvgId('zengo-glyph');
   return (
     <svg
       viewBox="-0.5 -0.5 1 1"

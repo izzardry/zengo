@@ -73,7 +73,7 @@ describe('Toaster', () => {
 
   it('in mobile landscape takes the bottom right beside the board', () => {
     const p = toasterPlacement(true);
-    expect(p.className).toBe('zigo-toaster-rail');
+    expect(p.className).toBe('zengo-toaster-rail');
     expect((p.style as Record<string, string>)['--width']).toBe(TOAST_WIDTH_LANDSCAPE);
     expect(p.offset).toMatchObject({ right: 'max(1rem, env(safe-area-inset-right))' });
     expect(p.mobileOffset).toEqual(p.offset);

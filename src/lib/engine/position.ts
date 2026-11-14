@@ -6,7 +6,7 @@
  * the self-play and calibration scripts.
  */
 import type { Color, Game, Point, Position } from '../types.ts';
-import { PASS, indexToPoint, isLegal, newGame, play, pointToIndex, resume } from '../zigo.ts';
+import { PASS, indexToPoint, isLegal, newGame, play, pointToIndex, resume } from '../zengo.ts';
 
 /**
  * The game a position describes: its setup stones, then its plies (so ko and superko are exact).
@@ -35,7 +35,7 @@ export function playableGame(pos: Position): Game {
   return g.scoring && !g.end ? resume(g) : g;
 }
 
-/** True when the side to move may play `p` (`tt` = pass) by Zigo's rules (`ZigoApi.isLegal`). */
+/** True when the side to move may play `p` (`tt` = pass) by Zengo's rules (`ZengoApi.isLegal`). */
 export function isLegalInPosition(pos: Position, p: Point, game: Game = playableGame(pos)): boolean {
   if (p === PASS) return !game.end;
   return isLegal(game, p);

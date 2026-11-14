@@ -3,7 +3,7 @@ import type { ReactElement } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { I18nProvider } from '@/lib/i18n';
 import type { Language, SavedGame } from '@/lib/types';
-import { handicapPoints, pointToIndex } from '@/lib/zigo';
+import { handicapPoints, pointToIndex } from '@/lib/zengo';
 import { DIAL_GEOMETRY, DIAL_MAX_ITEMS, dialAim, dialItemOffset, nearestIndex } from './dialGeometry';
 import { HandicapDial, type HandicapDialProps } from './HandicapDial';
 import { previewGame } from './preview';

@@ -2,7 +2,7 @@ import { Profiler, type ReactNode } from 'react';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { I18nProvider } from '@/lib/i18n';
-import { fromDiagram, fromGtp, makeSettings, newGame, play } from '@/lib/zigo';
+import { fromDiagram, fromGtp, makeSettings, newGame, play } from '@/lib/zengo';
 import type { Game, Size } from '@/lib/types';
 import { GoBoard } from './GoBoard';
 import { goBoardGameProps } from './gameProps';

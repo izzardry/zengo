@@ -15,7 +15,7 @@ describe("scaffold", () => {
         </MemoryRouter>
       </I18nProvider>,
     );
-    expect(screen.getByRole("heading", { name: "ZIGO" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "ZENGO" })).toBeInTheDocument();
     expect(screen.getByText("Zero Distractions. Just Go.")).toBeInTheDocument();
   });
 

@@ -24,10 +24,10 @@ import type { Message, Transport, TransportFailure, TransportState } from '../ty
  */
 export type TransportFailureKind = TransportFailure | 'peer-gone';
 
-/** Transport role (DESIGN 9.2): anchor holds `zigo-<CODE>` (or made the manual offer). */
+/** Transport role (DESIGN 9.2): anchor holds `zengo-<CODE>` (or made the manual offer). */
 export type TransportRole = 'anchor' | 'dialer';
 
-/** `Transport` with the extras every Zigo transport offers. */
+/** `Transport` with the extras every Zengo transport offers. */
 export interface RoomTransport extends Transport {
   /** Current role. For PeerJS it may change on every reconnect (DESIGN 9.2). */
   readonly role: TransportRole;

@@ -4,11 +4,11 @@
  * Procedure, run on start and again on every reconnect, by both devices:
  *
  * 1. Wait a random 0–500 ms (injected `rng`) so two devices do not grab the id at once.
- * 2. Claim `zigo-<CODE>` at the broker. On `open` this device is the **anchor**: it waits for the
+ * 2. Claim `zengo-<CODE>` at the broker. On `open` this device is the **anchor**: it waits for the
  *    other device to connect. A newer incoming connection replaces an older one (newest wins), so a
  *    peer that comes back after a network change gets in at once.
  * 3. On `unavailable-id` another device holds the id: register a random id and **dial**
- *    `zigo-<CODE>`. If the dial fails because that peer is gone (`peer-unavailable`), the old anchor
+ *    `zengo-<CODE>`. If the dial fails because that peer is gone (`peer-unavailable`), the old anchor
  *    has left: claim again (step 1).
  *
  * Failures are classified for the UI (`TransportFailureKind`): `broker-unreachable` (the broker
@@ -74,7 +74,7 @@ export type PeerCtor = new (id: string, options: PeerOptionsLike) => PeerLike;
 
 /** The broker peer id of a room (DESIGN 9.2). */
 export function anchorPeerId(code: string): string {
-  return `zigo-${code}`;
+  return `zengo-${code}`;
 }
 
 /** What a PeerJS `Peer` error means for the procedure. */

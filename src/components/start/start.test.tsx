@@ -741,7 +741,7 @@ describe('VersionStamp', () => {
 describe('StartHeader', () => {
   it('shows the untranslated wordmark and tagline', () => {
     wrap(<StartHeader visible />, 'de');
-    expect(screen.getByRole('heading', { level: 1, name: 'ZIGO' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: 'ZENGO' })).toBeInTheDocument();
     expect(screen.getByText('Zero Distractions. Just Go.')).toBeInTheDocument();
   });
 
@@ -995,7 +995,7 @@ describe('StartChrome', () => {
       hold(screen.getByTestId('color-pill'));
       hold(screen.getByTestId('size-pill'));
       hold(screen.getByTestId('clock-pill'));
-      expect(document.querySelector('[data-zigo-dial]')).toBeNull();
+      expect(document.querySelector('[data-zengo-dial]')).toBeNull();
     });
   });
 });

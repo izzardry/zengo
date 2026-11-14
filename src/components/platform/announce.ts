@@ -4,7 +4,7 @@
  * into its `aria-live="polite"` region.
  */
 import type { TranslationKey, TranslationVars } from '@/lib/i18n';
-import { atari, gtp, isPass } from '@/lib/zigo';
+import { atari, gtp, isPass } from '@/lib/zengo';
 import type { Color, Game, Point, Size } from '@/lib/types';
 
 export type Translate = (key: TranslationKey, vars?: TranslationVars) => string;

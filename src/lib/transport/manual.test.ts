@@ -187,7 +187,7 @@ class FakeBC {
 
 const PC = FakePC as unknown as ManualOptions['RTCPeerConnection'];
 const BC = FakeBC as unknown as typeof BroadcastChannel;
-const BASE = 'https://izzardry.github.io/zigo/';
+const BASE = 'https://izzardry.github.io/zengo/';
 const CODE = 'K7QW2M';
 const opts = (extra: Partial<ManualOptions> = {}): ManualOptions => ({ RTCPeerConnection: PC, BroadcastChannel: BC, base: BASE, ...extra });
 

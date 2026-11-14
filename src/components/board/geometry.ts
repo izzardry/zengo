@@ -6,7 +6,7 @@
  * row 0 at the top (SGF row `a`). The drawing spans `-MARGIN … size - 1 + MARGIN` on both axes,
  * so the whole board is `size + 0.6` pitches wide (DESIGN 5.1).
  */
-import { gtp, indexToPoint, isPoint, pointToIndex, starPoints } from '@/lib/zigo';
+import { gtp, indexToPoint, isPoint, pointToIndex, starPoints } from '@/lib/zengo';
 import type { Point, Size } from '@/lib/types';
 
 /** Margin outside the edge lines, in pitches: `(size + 0.6 - (size - 1)) / 2`. */

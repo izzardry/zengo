@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { FakeEngine, gameFromPosition, isPassMove, movesKey, neutralEval, sensiblePoints } from './fake';
 import { isEngineAbort } from './handle';
-import { fromDiagram, makeSettings, newGame, pass, play, position, replay } from '../zigo';
+import { fromDiagram, makeSettings, newGame, pass, play, position, replay } from '../zengo';
 import type { EngineApi, EngineMove, Position } from '../types';
 import type { EngineHandle } from './handle';
 

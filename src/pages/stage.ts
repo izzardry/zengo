@@ -8,7 +8,7 @@ import { COMPUTER_ENABLED, flags } from '@/lib/flags';
 import type { GameSession } from '@/lib/gameRecord';
 import { needsLargeNet } from '@/lib/levels';
 import type { Color, EngineApi, Game, Mode, Point, TcString, TimeControl } from '@/lib/types';
-import zigo, { isPass } from '@/lib/zigo';
+import zengo, { isPass } from '@/lib/zengo';
 
 /**
  * Milestone switch for rooms (milestone 3 turned it on; `useGameState` runs the room with its
@@ -105,7 +105,7 @@ export function passedBadges(g: Game): Record<Color, boolean> {
   const out: Record<Color, boolean> = { B: false, W: false };
   for (let i = g.cursor - 1; i >= 0 && i >= g.cursor - 2; i--) {
     if (!isPass(g.plies[i].m)) break;
-    out[zigo.colorOfPly(g, i)] = true;
+    out[zengo.colorOfPly(g, i)] = true;
   }
   return out;
 }
@@ -129,7 +129,7 @@ export function totalTime(g: Game, tc?: TimeControl | TcString | null): number {
   const result = g.end?.result;
   if (control && result?.by === 'time' && g.cursor === g.plies.length) {
     const loser = other(result.winner);
-    ms += Math.max(0, budgetMs(zigo.clocks(g, control)[loser], control));
+    ms += Math.max(0, budgetMs(zengo.clocks(g, control)[loser], control));
   }
   return ms;
 }

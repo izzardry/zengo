@@ -3,7 +3,7 @@
  * `<GoBoard {...useGoBoardGame(game)} helpers … />`. Pure apart from the memo hook.
  */
 import { useMemo } from 'react';
-import { atari, illegalReason, lastMove } from '@/lib/zigo';
+import { atari, illegalReason, lastMove } from '@/lib/zengo';
 import type { Game, IllegalReason, Point } from '@/lib/types';
 import type { GoBoardProps } from './types';
 
@@ -24,7 +24,7 @@ export function goBoardGameProps(game: Game): GoBoardGameProps {
   };
 }
 
-/** `goBoardGameProps`, memoized on the game value (a new object per game, as every `ZigoApi` call returns). */
+/** `goBoardGameProps`, memoized on the game value (a new object per game, as every `ZengoApi` call returns). */
 export function useGoBoardGame(game: Game): GoBoardGameProps {
   return useMemo(() => goBoardGameProps(game), [game]);
 }

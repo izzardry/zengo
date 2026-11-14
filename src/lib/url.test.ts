@@ -19,9 +19,9 @@ import {
   useUrlParams,
   type ShareableGame,
 } from './url';
-import zigo from './zigo';
+import zengo from './zengo';
 
-const BASE = 'https://izzardry.github.io/zigo/';
+const BASE = 'https://izzardry.github.io/zengo/';
 
 describe('parseUrl', () => {
   it('reads every parameter of DESIGN 13.2', () => {
@@ -114,7 +114,7 @@ describe('serializeUrl', () => {
       color: 'W' as const,
       tc: '15+10',
       size: 9 as const,
-      moves: zigo.encodeMoves(plies),
+      moves: zengo.encodeMoves(plies),
       result: { winner: 'W' as const, by: 'time' as const },
     };
     expect(parseUrl(serializeUrl(p))).toEqual(p);
@@ -149,13 +149,13 @@ describe('share links', () => {
     size: 9,
     rules: 'area',
     handicap: 0,
-    moves: zigo.encodeMoves([{ m: 'ee', ms: 0 }]),
+    moves: zengo.encodeMoves([{ m: 'ee', ms: 0 }]),
   };
 
   it('builds hash URLs on a base', () => {
     expect(buildUrl({ code: 'A' }, BASE)).toBe(`${BASE}#/?s=A`);
     expect(buildUrl({}, BASE)).toBe(`${BASE}#/`);
-    expect(appBaseUrl({ origin: 'https://x.y', pathname: '/zigo/' })).toBe('https://x.y/zigo/');
+    expect(appBaseUrl({ origin: 'https://x.y', pathname: '/zengo/' })).toBe('https://x.y/zengo/');
   });
 
   it('room invites carry the code only', () => {
@@ -232,14 +232,14 @@ describe('Go parameters n, g, h (DESIGN 13.2)', () => {
 
   it('round-trips a Go game with byo-yomi and passes', () => {
     const p = {
-      code: 'ZIGO1',
+      code: 'ZENGO1',
       playing: true,
       mode: 'local' as const,
       tc: '20m5x30',
       size: 19 as const,
       rules: 'territory' as const,
       handicap: 4,
-      moves: zigo.encodeMoves(['pd', 'tt', 'dp'].map((m) => ({ m, ms: 0 }))),
+      moves: zengo.encodeMoves(['pd', 'tt', 'dp'].map((m) => ({ m, ms: 0 }))),
     };
     expect(parseUrl(serializeUrl(p))).toEqual(p);
   });

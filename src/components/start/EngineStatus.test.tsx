@@ -9,7 +9,7 @@ import { EngineStatus } from './EngineStatus';
 
 const wrap = ({ children }: { children: ReactNode }) => <I18nProvider language="en">{children}</I18nProvider>;
 
-const base = 'https://example.test/zigo/';
+const base = 'https://example.test/zengo/';
 const LARGE_URL = base + LARGE_NET_PATH;
 
 /** Cache Storage where `cached` lists the URLs present at the start. */

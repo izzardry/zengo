@@ -20,8 +20,8 @@ export function PWAInstallPrompt({ onInstall, onDismiss }: PWAInstallPromptProps
     <div className="fixed inset-0 z-50 flex items-end justify-center p-4 pb-[max(1rem,env(safe-area-inset-bottom))] pointer-events-none">
       <div
         role="dialog"
-        aria-labelledby="zigo-install-title"
-        aria-describedby="zigo-install-body"
+        aria-labelledby="zengo-install-title"
+        aria-describedby="zengo-install-body"
         className={cn('pointer-events-auto w-full max-w-sm bg-card border border-border rounded-2xl shadow-xl p-4 animate-slide-up')}
       >
         <div className="flex items-start gap-3">
@@ -29,10 +29,10 @@ export function PWAInstallPrompt({ onInstall, onDismiss }: PWAInstallPromptProps
             <Download className="w-6 h-6 text-primary" aria-hidden="true" />
           </div>
           <div className="flex-1 min-w-0">
-            <h3 id="zigo-install-title" className="font-mono font-medium tracking-wide text-sm">
+            <h3 id="zengo-install-title" className="font-mono font-medium tracking-wide text-sm">
               {t('platform.install.title')}
             </h3>
-            <p id="zigo-install-body" className="text-xs text-muted-foreground mt-1">
+            <p id="zengo-install-body" className="text-xs text-muted-foreground mt-1">
               {t('platform.install.body')}
             </p>
           </div>

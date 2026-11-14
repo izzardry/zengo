@@ -19,14 +19,14 @@ describe('useTutorial', () => {
     act(() => result.current.completeTutorial());
     expect(result.current.showTutorial).toBe(false);
     expect(result.current.hasSeenTutorial).toBe(true);
-    expect(raw.dump()['zigo:tutorial-seen']).toBe('true');
+    expect(raw.dump()['zengo:tutorial-seen']).toBe('true');
 
     act(() => result.current.startTutorial());
     expect(result.current.showTutorial).toBe(false);
   });
 
   it('reads the stored flag on the first render', () => {
-    const { store } = mem({ 'zigo:tutorial-seen': 'true' });
+    const { store } = mem({ 'zengo:tutorial-seen': 'true' });
     const { result } = renderHook(() => useTutorial({ store, enabled: true }));
     expect(result.current.hasSeenTutorial).toBe(true);
     act(() => result.current.startTutorial());
@@ -34,13 +34,13 @@ describe('useTutorial', () => {
   });
 
   it('? shows it again; reset forgets', () => {
-    const { raw, store } = mem({ 'zigo:tutorial-seen': 'true' });
+    const { raw, store } = mem({ 'zengo:tutorial-seen': 'true' });
     const { result } = renderHook(() => useTutorial({ store, enabled: true }));
     act(() => result.current.forceShowTutorial());
     expect(result.current.showTutorial).toBe(true);
     act(() => result.current.resetTutorial());
     expect(result.current.hasSeenTutorial).toBe(false);
-    expect(raw.dump()['zigo:tutorial-seen']).toBeUndefined();
+    expect(raw.dump()['zengo:tutorial-seen']).toBeUndefined();
   });
 
   it('shows nothing when the flag is off', () => {

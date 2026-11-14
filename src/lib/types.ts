@@ -1,5 +1,5 @@
 /**
- * Zigo contracts.
+ * Zengo contracts.
  *
  * Every cross-package type and interface lives here (PLAN.md section 4). Packages code against
  * these shapes. A package that needs a change reports it to the orchestrator, which edits this
@@ -10,7 +10,7 @@
  * Conventions used throughout:
  * - A `Point` is two SGF letters, column then row from the top (`aa` = top-left); `tt` = pass.
  * - Board arrays (`Game.board`, ownership maps) are row-major from the top: index = row × size + col,
- *   with row 0 the top row (SGF row `a`). Use `pointToIndex` / `indexToPoint` in `lib/zigo.ts`.
+ *   with row 0 the top row (SGF row `a`). Use `pointToIndex` / `indexToPoint` in `lib/zengo.ts`.
  * - Anything that can carry half points is an integer of half points ×2 (`komi2`, `margin`, …).
  */
 
@@ -45,7 +45,7 @@ export type TimeControl =
 
 /**
  * Time control in its compact text form: `5+7` (Fischer) or `20m5x30` (byo-yomi). Used in URLs
- * (`t`), `SavedGame.tc` and protocol messages. Convert with `parseTc` / `formatTc` in `lib/zigo.ts`.
+ * (`t`), `SavedGame.tc` and protocol messages. Convert with `parseTc` / `formatTc` in `lib/zengo.ts`.
  */
 export type TcString = string;
 
@@ -94,7 +94,7 @@ export interface Scoring {
  * --------------------------------------------------------------------------------------------- */
 
 /**
- * Immutable game value. Every operation of `ZigoApi` returns a new one. The object and `plies`
+ * Immutable game value. Every operation of `ZengoApi` returns a new one. The object and `plies`
  * are frozen; `board` is a typed array (which cannot be frozen) and must never be mutated.
  */
 export interface Game {
@@ -127,14 +127,14 @@ export interface Game {
   readonly setup?: { readonly board: Uint8Array; readonly turn: Color };
 }
 
-/** Why a point cannot be played (`ZigoApi.illegalReason`). `ko` = the simple-ko point; `superko` = a longer cycle. */
+/** Why a point cannot be played (`ZengoApi.illegalReason`). `ko` = the simple-ko point; `superko` = a longer cycle. */
 export type IllegalReason = 'occupied' | 'suicide' | 'ko' | 'superko';
 
 /** Header values for SGF export (DESIGN 13.3). Missing names and date are left out. */
 export interface SgfMeta {
-  /** App version for `AP[Zigo:<version>]`. */
+  /** App version for `AP[Zengo:<version>]`. */
   readonly version: string;
-  /** `PB`, e.g. `Zigo Level 5` for the computer. */
+  /** `PB`, e.g. `Zengo Level 5` for the computer. */
   readonly black?: string;
   /** `PW`. */
   readonly white?: string;
@@ -165,7 +165,7 @@ export interface ClockInfo {
   readonly left: ClockState;
 }
 
-/** A position handed to the engine (`ZigoApi.position`). Arrays are row-major from the top. */
+/** A position handed to the engine (`ZengoApi.position`). Arrays are row-major from the top. */
 export interface Position {
   readonly size: Size;
   readonly rules: Rules;
@@ -182,8 +182,8 @@ export interface Position {
   readonly ko: Point | null;
 }
 
-/** `lib/zigo.ts` — pure, no React, no DOM. PLAN 4 first; additions documented in place. */
-export interface ZigoApi {
+/** `lib/zengo.ts` — pure, no React, no DOM. PLAN 4 first; additions documented in place. */
+export interface ZengoApi {
   /** A new game; places the handicap stones of `settings.handicap` unless `setup` is given. */
   newGame(settings: Settings, setup?: { board: Uint8Array; turn: Color }): Game;
   /** occupied / suicide / ko / positional superko. False while scoring or after the end. */
@@ -229,7 +229,7 @@ export interface ZigoApi {
 
   /** Plays a sequence of plies (or points) from a new game. Resumes scoring implicitly when a ply follows it. Throws on an illegal ply. */
   replay(settings: Settings, plies: readonly (Ply | Point)[]): Game;
-  /** Rebuilds a game from stored fields (`SavedGame`, `GameLog`). See `lib/zigo.ts`. */
+  /** Rebuilds a game from stored fields (`SavedGame`, `GameLog`). See `lib/zengo.ts`. */
   fromRecord(rec: GameRecordFields, opts?: { lenient?: boolean }): Game;
   /** Replaces the marks of the scoring phase (dead sorted and de-duplicated). Throws when not scoring. */
   setScoring(g: Game, scoring: Scoring): Game;
@@ -247,7 +247,7 @@ export interface ZigoApi {
   clockRunning(g: Game): boolean;
 }
 
-/** The stored fields `ZigoApi.fromRecord` reads (a subset of `SavedGame`). */
+/** The stored fields `ZengoApi.fromRecord` reads (a subset of `SavedGame`). */
 export interface GameRecordFields {
   readonly size: Size;
   readonly rules: Rules;
@@ -351,7 +351,7 @@ export interface EngineGenmoveOptions {
 
 /**
  * What `genmove` resolves with. The real engine fills every field; the FakeEngine only `move`.
- * `move` is legal by `ZigoApi.isLegal` or `tt` (pass); the engine itself never resigns (DESIGN 10.4
+ * `move` is legal by `ZengoApi.isLegal` or `tt` (pass); the engine itself never resigns (DESIGN 10.4
  * is the caller's policy, using `winrate` and `scoreLead`).
  */
 export interface EngineMove {
@@ -381,7 +381,7 @@ export interface EngineEvaluation {
 }
 
 /**
- * `hooks/useZigoEngine` — and the FakeEngine used in tests.
+ * `hooks/useZengoEngine` — and the FakeEngine used in tests.
  *
  * Perspective: every `winrate` and `scoreLead` is from the side to move in the given position;
  * `ownership` is from Black's (+1 = Black).
@@ -465,7 +465,7 @@ export interface Room {
   games: string[];
 }
 
-/** `lib/storage.ts` — every read guarded, keys of DESIGN 13.1 under the `zigo:` prefix. */
+/** `lib/storage.ts` — every read guarded, keys of DESIGN 13.1 under the `zengo:` prefix. */
 export interface Store {
   /** Saved games, newest `lastPlayedAt` first. */
   games(): SavedGame[];
@@ -485,7 +485,7 @@ export interface Store {
   setPref<T>(key: string, value: T): void;
 }
 
-/** Preference keys of DESIGN 13.1 (without the `zigo:` prefix). */
+/** Preference keys of DESIGN 13.1 (without the `zengo:` prefix). */
 export type PrefKey =
   | 'opponent'
   | 'color'
@@ -501,19 +501,19 @@ export type PrefKey =
   | 'donation-shown'
   | 'install-dismissed';
 
-/** Opponent selector value (DESIGN 4.1), stored under `zigo:opponent`. */
+/** Opponent selector value (DESIGN 4.1), stored under `zengo:opponent`. */
 export type Opponent =
   | { readonly mode: 'room' }
   | { readonly mode: 'local' }
   | { readonly mode: 'computer'; readonly level: number };
 
-/** Color pill value (DESIGN 4.1), stored under `zigo:color`. */
+/** Color pill value (DESIGN 4.1), stored under `zengo:color`. */
 export type ColorChoice = 'random' | Color;
 
-/** Pass-and-play seating (DESIGN 5.2), stored under `zigo:seating`. */
+/** Pass-and-play seating (DESIGN 5.2), stored under `zengo:seating`. */
 export type Seating = 'face' | 'side';
 
-/** UI language (DESIGN 14), stored under `zigo:lang`. */
+/** UI language (DESIGN 14), stored under `zengo:lang`. */
 export type Language = 'en' | 'de' | 'fr' | 'es';
 
 /* ------------------------------------------------------------------------------------------------

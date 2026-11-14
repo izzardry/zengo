@@ -1,14 +1,14 @@
 /**
- * KataGo v7 network inputs (22 spatial planes, 19 globals) for Zigo's two rule sets.
+ * KataGo v7 network inputs (22 spatial planes, 19 globals) for Zengo's two rule sets.
  *
  * Ported from Web KaTrain `src/engine/katago/featuresV7Fast.ts` and `historyV7.ts` (MIT, see
  * ./LICENSE), which follow KataGo's `NNInputs::fillRowV7` (`cpp/neuralnet/nninputs.cpp`).
  *
  * Rules (KataGo's rule inputs, as Web KaTrain feeds them):
- * - Zigo `area`: area scoring, positional superko, no group tax, suicide illegal, friendly pass
+ * - Zengo `area`: area scoring, positional superko, no group tax, suicide illegal, friendly pass
  *   (KataGo's "chinese" preset with positional ko, the configuration of the golden test);
- * - Zigo `territory`: territory scoring, positional superko, seki tax, suicide illegal (KataGo's
- *   "japanese" preset with positional ko, because Zigo plays positional superko under both).
+ * - Zengo `territory`: territory scoring, positional superko, seki tax, suicide illegal (KataGo's
+ *   "japanese" preset with positional ko, because Zengo plays positional superko under both).
  */
 import type { Rules } from '../../types.ts';
 import { BOARD_AREA, BOARD_SIZE, EMPTY, PASS_MOVE, computeAreaMapV7KataGoInto, type StoneColor } from './fastBoard.ts';

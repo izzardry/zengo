@@ -2,7 +2,7 @@
  * Pure formatting helpers of the game chrome: move numbers and GTP labels, komi, the running
  * score line of DESIGN 8.4 and margins. No React.
  */
-import { formatHalf, gtp, isPass } from '@/lib/zigo';
+import { formatHalf, gtp, isPass } from '@/lib/zengo';
 import type { Color, Language, Point, Score, Size } from '@/lib/types';
 
 /** The other color. */

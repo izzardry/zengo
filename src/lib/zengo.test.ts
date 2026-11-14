@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Game, Ply, Point, Size } from './types';
-import zigo, {
+import zengo, {
   PASS,
   boardFromDiagram,
   boardToDiagram,
@@ -27,7 +27,7 @@ import zigo, {
   TC_LIMITS,
   starPoints,
   toTc,
-} from './zigo';
+} from './zengo';
 
 const {
   newGame,
@@ -55,7 +55,7 @@ const {
   lastMove,
   timeUsed,
   clockRunning,
-} = zigo;
+} = zengo;
 
 const S9 = makeSettings(9);
 
@@ -704,8 +704,8 @@ describe('SGF export (DESIGN 13.3)', () => {
     g = playAll(g, ['ee', 'cc']);
     g = pass(g, 1);
     g = end(g, { winner: 'B', by: 'resign' });
-    expect(sgf(g, { version: '1.2.3', black: 'Ann', white: 'Zigo Level 5', date: '2026-11-12', tc: '5+7' })).toBe(
-      '(;FF[4]GM[1]CA[UTF-8]AP[Zigo:1.2.3]SZ[9]KM[0.5]RU[Japanese]HA[2]AB[cg][gc]PB[Ann]PW[Zigo Level 5]DT[2026-11-12]RE[B+R]TM[300]OT[fischer +7s];W[ee];B[cc];W[])',
+    expect(sgf(g, { version: '1.2.3', black: 'Ann', white: 'Zengo Level 5', date: '2026-11-12', tc: '5+7' })).toBe(
+      '(;FF[4]GM[1]CA[UTF-8]AP[Zengo:1.2.3]SZ[9]KM[0.5]RU[Japanese]HA[2]AB[cg][gc]PB[Ann]PW[Zengo Level 5]DT[2026-11-12]RE[B+R]TM[300]OT[fischer +7s];W[ee];B[cc];W[])',
     );
   });
 
@@ -714,21 +714,21 @@ describe('SGF export (DESIGN 13.3)', () => {
     g = pass(pass(g, 1), 1);
     g = end(g, { winner: 'W', by: 'score', margin: 9 });
     expect(sgf(g, { version: '0.1', black: 'A]b\\c', tc: { kind: 'byoyomi', baseMs: 1_200_000, periods: 5, periodMs: 30_000 } })).toBe(
-      '(;FF[4]GM[1]CA[UTF-8]AP[Zigo:0.1]SZ[19]KM[7.5]RU[Chinese]PB[A\\]b\\\\c]RE[W+4.5]TM[1200]OT[5x30 byo-yomi];B[pd];W[dp];B[];W[])',
+      '(;FF[4]GM[1]CA[UTF-8]AP[Zengo:0.1]SZ[19]KM[7.5]RU[Chinese]PB[A\\]b\\\\c]RE[W+4.5]TM[1200]OT[5x30 byo-yomi];B[pd];W[dp];B[];W[])',
     );
   });
 
   it('exports up to the cursor while running and everything once finished; time results', () => {
     const g = playAll(newGame(S9), ['ee', 'cc', 'gg']);
-    expect(sgf(undo(g, 1), { version: '1' })).toBe('(;FF[4]GM[1]CA[UTF-8]AP[Zigo:1]SZ[9]KM[7.5]RU[Chinese];B[ee];W[cc])');
+    expect(sgf(undo(g, 1), { version: '1' })).toBe('(;FF[4]GM[1]CA[UTF-8]AP[Zengo:1]SZ[9]KM[7.5]RU[Chinese];B[ee];W[cc])');
     const over = goto(end(g, { winner: 'W', by: 'time' }), 1);
-    expect(sgf(over, { version: '1' })).toBe('(;FF[4]GM[1]CA[UTF-8]AP[Zigo:1]SZ[9]KM[7.5]RU[Chinese]RE[W+T];B[ee];W[cc];B[gg])');
+    expect(sgf(over, { version: '1' })).toBe('(;FF[4]GM[1]CA[UTF-8]AP[Zengo:1]SZ[9]KM[7.5]RU[Chinese]RE[W+T];B[ee];W[cc];B[gg])');
     expect(formatResult({ winner: 'B', by: 'score', margin: 1 })).toBe('B+0.5');
   });
 
   it('writes a set-up position with AB, AW and PL', () => {
     const g = fromDiagram(['x........', '.o.......', ...Array(7).fill('.........')], 'W');
-    expect(sgf(g, { version: '1' })).toBe('(;FF[4]GM[1]CA[UTF-8]AP[Zigo:1]SZ[9]KM[7.5]RU[Chinese]AB[aa]AW[bb]PL[W])');
+    expect(sgf(g, { version: '1' })).toBe('(;FF[4]GM[1]CA[UTF-8]AP[Zengo:1]SZ[9]KM[7.5]RU[Chinese]AB[aa]AW[bb]PL[W])');
   });
 });
 

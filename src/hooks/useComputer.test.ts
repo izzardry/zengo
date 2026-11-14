@@ -3,7 +3,7 @@ import { FakeEngine, movesKey } from '@/lib/engine/fake';
 import { ENGINE_STAGES, downloadStage, runningDownload, type EngineStage } from '@/lib/engine/offline';
 import { seededRng } from '@/lib/levels';
 import type { ClockInfo, EngineApi, EngineGenmoveOptions, EngineMove, Game, Position } from '@/lib/types';
-import { PASS, fromDiagram, indexToPoint, isLegal, makeSettings, newGame, pass, play, undo } from '@/lib/zigo';
+import { PASS, fromDiagram, indexToPoint, isLegal, makeSettings, newGame, pass, play, undo } from '@/lib/zengo';
 import { computerResignation, lineKey, useComputer, useEngineStart, type UseComputerOptions } from './useComputer';
 
 type Props = UseComputerOptions;
@@ -360,7 +360,7 @@ describe('useEngineStart', () => {
    * share of every file, `end()` the rest, `fail()` errors every file.
    */
   function pageDownload(stage: EngineStage) {
-    const BASE = 'https://example.test/zigo/';
+    const BASE = 'https://example.test/zengo/';
     const SIZE = 1000;
     const streams: ReadableStreamDefaultController<Uint8Array>[] = [];
     const sent: number[] = [];

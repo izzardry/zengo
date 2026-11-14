@@ -5,72 +5,72 @@
  * by a 1 ms animation delayed by that time (the global block shortens durations, not delays).
  */
 
-.zigo-hint-pulse,
-.zigo-atari-pulse,
-.zigo-blunder {
+.zengo-hint-pulse,
+.zengo-atari-pulse,
+.zengo-blunder {
   transform-box: fill-box;
   transform-origin: center;
   pointer-events: none;
 }
 
 /* Hint (DESIGN 7.3): green, 800 ms, once. */
-@keyframes zigo-hint-pulse {
+@keyframes zengo-hint-pulse {
   0% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.6; transform: scale(1.35); }
   100% { opacity: 0; transform: scale(1.6); }
 }
-.zigo-hint-pulse {
-  animation: zigo-hint-pulse var(--dur-pulse, 800ms) ease-out 1 forwards;
+.zengo-hint-pulse {
+  animation: zengo-hint-pulse var(--dur-pulse, 800ms) ease-out 1 forwards;
 }
 
 /* Atari (DESIGN 5.3): the ring pulses once when the group enters atari. */
-@keyframes zigo-atari-pulse {
+@keyframes zengo-atari-pulse {
   0% { opacity: 0.9; transform: scale(1); }
   100% { opacity: 0; transform: scale(1.45); }
 }
-.zigo-atari-pulse {
+.zengo-atari-pulse {
   opacity: 0;
-  animation: zigo-atari-pulse var(--dur-pulse, 800ms) ease-out 1;
+  animation: zengo-atari-pulse var(--dur-pulse, 800ms) ease-out 1;
 }
 
 /* Blunder guard (DESIGN 7.2): the bounced stone pulses destructive once, then disappears. */
-@keyframes zigo-blunder-pulse {
+@keyframes zengo-blunder-pulse {
   0% { opacity: 1; transform: scale(1); filter: drop-shadow(0 0 0 hsl(var(--destructive) / 0)); }
   35% { opacity: 1; transform: scale(1.08); filter: drop-shadow(0 0 3px hsl(var(--destructive) / 0.9)) drop-shadow(0 0 6px hsl(var(--destructive) / 0.6)); }
   100% { opacity: 0; transform: scale(1); filter: drop-shadow(0 0 0 hsl(var(--destructive) / 0)); }
 }
-.zigo-blunder {
+.zengo-blunder {
   opacity: 0;
-  animation: zigo-blunder-pulse var(--dur-pulse, 800ms) ease-out 1;
+  animation: zengo-blunder-pulse var(--dur-pulse, 800ms) ease-out 1;
 }
 
-@keyframes zigo-mark-clear { to { opacity: 0; } }
+@keyframes zengo-mark-clear { to { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) {
-  .zigo-hint-pulse,
-  .zigo-blunder {
+  .zengo-hint-pulse,
+  .zengo-blunder {
     opacity: 1;
     transform: none;
-    animation: zigo-mark-clear 1ms linear calc(var(--dur-pulse, 800ms) * 2) 1 forwards !important;
+    animation: zengo-mark-clear 1ms linear calc(var(--dur-pulse, 800ms) * 2) 1 forwards !important;
   }
-  .zigo-blunder {
+  .zengo-blunder {
     filter: drop-shadow(0 0 3px hsl(var(--destructive) / 0.9));
   }
   /* The atari ring itself stays (it is static); only the pulse goes. */
-  .zigo-atari-pulse { display: none; }
+  .zengo-atari-pulse { display: none; }
 }
 
 /* Typed coordinate that did not parse: a short shake. */
-@keyframes zigo-typed-shake {
+@keyframes zengo-typed-shake {
   0%, 100% { transform: translateX(0); }
   25% { transform: translateX(-4px); }
   75% { transform: translateX(4px); }
 }
-.zigo-typed-error {
-  animation: zigo-typed-shake 200ms ease-in-out 2;
+.zengo-typed-error {
+  animation: zengo-typed-shake 200ms ease-in-out 2;
 }
 
 /* Brand focus ring on intersections (Ztyle 16): a ring around the point, never the browser outline. */
-.zigo-point:focus-visible {
+.zengo-point:focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px hsl(var(--ring) / 0.7);
 }

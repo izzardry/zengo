@@ -27,7 +27,7 @@ import {
 import { CLOCK_PRESETS } from '@/components/start/options';
 import { translate, type Language } from './i18n/core';
 import type { ClockState, Color, Game, Point, Size, TimeControl } from './types';
-import zigo, { byoyomiStep, formatTc, indexToPoint, makeSettings, parseTc } from './zigo';
+import zengo, { byoyomiStep, formatTc, indexToPoint, makeSettings, parseTc } from './zengo';
 
 const TC_1_0: TimeControl = { kind: 'fischer', baseMs: 60_000, incMs: 0 };
 const TC_3_2: TimeControl = { kind: 'fischer', baseMs: 180_000, incMs: 2_000 };
@@ -39,11 +39,11 @@ const BY_0_5x30 = { kind: 'byoyomi', baseMs: 0, periods: 5, periodMs: 30_000 } a
 const S9 = makeSettings(9);
 
 /** Plays SGF points (`tt` = pass) with the given ms each. Black moves first. */
-function playAll(moves: [string, number][], g: Game = zigo.newGame(S9)): Game {
-  return moves.reduce((acc, [m, ms]) => zigo.play(acc, m, ms), g);
+function playAll(moves: [string, number][], g: Game = zengo.newGame(S9)): Game {
+  return moves.reduce((acc, [m, ms]) => zengo.play(acc, m, ms), g);
 }
 
-const timeout = (g: Game) => zigo.end(g, { winner: g.turn === 'B' ? 'W' : 'B', by: 'time' });
+const timeout = (g: Game) => zengo.end(g, { winner: g.turn === 'B' ? 'W' : 'B', by: 'time' });
 
 describe('toTimeControl and tcKey', () => {
   it('accepts objects, strings and off', () => {
@@ -68,12 +68,12 @@ describe('toTimeControl and tcKey', () => {
 
 describe('positionKey', () => {
   it('changes with every ply and returns on undo / redo', () => {
-    const g0 = zigo.newGame(S9);
-    const g1 = zigo.play(g0, 'ee', 0);
+    const g0 = zengo.newGame(S9);
+    const g1 = zengo.play(g0, 'ee', 0);
     expect(positionKey(g0)).not.toBe(positionKey(g1));
-    expect(positionKey(zigo.undo(g1, 1))).toBe(positionKey(g0));
-    expect(positionKey(zigo.redo(zigo.undo(g1, 1), 1))).toBe(positionKey(g1));
-    expect(positionKey(zigo.pass(g1, 0))).not.toBe(positionKey(g1));
+    expect(positionKey(zengo.undo(g1, 1))).toBe(positionKey(g0));
+    expect(positionKey(zengo.redo(zengo.undo(g1, 1), 1))).toBe(positionKey(g1));
+    expect(positionKey(zengo.pass(g1, 0))).not.toBe(positionKey(g1));
   });
 });
 
@@ -122,7 +122,7 @@ describe('remaining (Fischer)', () => {
   });
 
   it('does not count the running turn before the side has moved once', () => {
-    const g0 = zigo.newGame(S9);
+    const g0 = zengo.newGame(S9);
     expect(remaining(g0, TC_1_0, 30_000)).toEqual({ B: 60_000, W: 60_000 });
     const g1 = playAll([['ee', 1000]]);
     expect(remaining(g1, TC_1_0, 30_000)).toEqual({ B: 60_000, W: 60_000 });
@@ -164,9 +164,9 @@ describe('remaining (Fischer)', () => {
     ];
     const g = playAll(moves);
     expect(remaining(g, TC_3_2, 0)).toEqual({ B: 180_000 - 29_000 + 4000, W: 180_000 - 15_000 + 2000 });
-    const back = zigo.undo(g, 2);
+    const back = zengo.undo(g, 2);
     expect(remaining(back, TC_3_2, 0)).toEqual({ B: 180_000 - 20_000 + 2000, W: 180_000 });
-    const again = zigo.redo(back, 2);
+    const again = zengo.redo(back, 2);
     expect(remaining(again, TC_3_2, 0)).toEqual(remaining(g, TC_3_2, 0));
   });
 });
@@ -186,7 +186,7 @@ describe('byo-yomi (DESIGN 11)', () => {
   it('remaining counts main time plus the periods left; the log keeps or uses up periods', () => {
     // Black: untimed first move, then 65 s (main gone, 5 s into period 1: kept), then 25 s (2 periods used).
     const g = playAll([['ee', 0], ['cc', 0], ['gg', 65_000], ['cg', 0]]);
-    expect(zigo.clocks(g, BY_1_3x10).B).toEqual({ mainMs: 0, periodMs: 10_000, periods: 3 });
+    expect(zengo.clocks(g, BY_1_3x10).B).toEqual({ mainMs: 0, periodMs: 10_000, periods: 3 });
     expect(remaining(g, BY_1_3x10, 0).B).toBe(30_000);
     expect(remaining(g, BY_1_3x10, 12_000).B).toBe(18_000);
     expect(clockStates(g, BY_1_3x10, 12_000).B).toEqual({ mainMs: 0, periodMs: 8_000, periods: 2 });
@@ -194,7 +194,7 @@ describe('byo-yomi (DESIGN 11)', () => {
     expect(flagged(g, BY_1_3x10, 29_999)).toBeNull();
     expect(flagged(g, BY_1_3x10, 30_000)).toBe('B');
     const after = playAll([['gc', 25_000], ['cd', 0]], g);
-    expect(zigo.clocks(after, BY_1_3x10).B).toEqual({ mainMs: 0, periodMs: 10_000, periods: 1 });
+    expect(zengo.clocks(after, BY_1_3x10).B).toEqual({ mainMs: 0, periodMs: 10_000, periods: 1 });
   });
 
   it('shows main time as m:ss and periods as `0:24 ·3`, with tenths below 10 s', () => {
@@ -233,8 +233,8 @@ describe('flagged / msUntilFlag / isCounting', () => {
   it('never flags without a clock, before the first move, or after the end', () => {
     expect(flagged(g, null, 1e9)).toBeNull();
     expect(msUntilFlag(g, null, 0)).toBeNull();
-    expect(flagged(zigo.newGame(S9), TC_1_0, 1e9)).toBeNull();
-    expect(flagged(zigo.end(g, { winner: 'W', by: 'resign' }), TC_1_0, 1e9)).toBeNull();
+    expect(flagged(zengo.newGame(S9), TC_1_0, 1e9)).toBeNull();
+    expect(flagged(zengo.end(g, { winner: 'W', by: 'resign' }), TC_1_0, 1e9)).toBeNull();
   });
 });
 
@@ -280,13 +280,13 @@ describe('clockView', () => {
   });
 
   it('the first move of each side does not run the clock', () => {
-    const v = clockView(zigo.newGame(S9), TC_1_0, 20_000);
+    const v = clockView(zengo.newGame(S9), TC_1_0, 20_000);
     expect(v.B).toMatchObject({ text: '1:00', running: false });
     expect(v.counting).toBe(false);
   });
 
   it('White moves first in a handicap game and its clock starts on its second move', () => {
-    const h = zigo.newGame(makeSettings(9, 'area', 2));
+    const h = zengo.newGame(makeSettings(9, 'area', 2));
     expect(h.turn).toBe('W');
     const g = playAll([['ee', 0], ['cc', 0]], h);
     expect(g.turn).toBe('W');
@@ -428,7 +428,7 @@ function randomStone(g: Game, rng: () => number): Point {
   const start = Math.floor(rng() * n);
   for (let k = 0; k < n; k++) {
     const p = indexToPoint((start + k) % n, g.settings.size);
-    if (zigo.isLegal(g, p)) return p;
+    if (zengo.isLegal(g, p)) return p;
   }
   throw new Error('no legal point');
 }
@@ -465,7 +465,7 @@ describe('byo-yomi derivation against a step simulation (seeded)', () => {
       const rng = mulberry32(seed * 7919);
       const tc = randomByoyomi(rng);
       const handicap = rng() < 0.2 ? 2 : 0;
-      let g = zigo.newGame(makeSettings(SIZES[seed % 3], 'area', handicap));
+      let g = zengo.newGame(makeSettings(SIZES[seed % 3], 'area', handicap));
       const sims: Record<Color, StepClock> = { B: new StepClock(tc), W: new StepClock(tc) };
       const moved: Record<Color, boolean> = { B: false, W: false };
       const snapshots: Record<Color, ClockState>[] = [{ B: sims.B.state(), W: sims.W.state() }];
@@ -475,7 +475,7 @@ describe('byo-yomi derivation against a step simulation (seeded)', () => {
         const ms = turnMs(sims[c], tc, rng);
         // The running turn, part way and at the end.
         if (moved[c]) {
-          const base = zigo.clocks(g, tc)[c];
+          const base = zengo.clocks(g, tc)[c];
           expect(base).toEqual(sims[c].state());
           for (const t of [Math.floor(rng() * (ms + 1)), ms]) {
             const live = sims[c].clone();
@@ -500,18 +500,18 @@ describe('byo-yomi derivation against a step simulation (seeded)', () => {
         } else {
           moved[c] = true; // each side's first move is untimed
         }
-        g = zigo.play(g, randomStone(g, rng), ms);
-        const derived = zigo.clocks(g, tc);
+        g = zengo.play(g, randomStone(g, rng), ms);
+        const derived = zengo.clocks(g, tc);
         expect(derived, `seed ${seed} after ply ${i}`).toEqual({ B: sims.B.state(), W: sims.W.state() });
         snapshots.push(derived);
       }
       // Undo, redo and review restore every earlier clock from the log.
       for (let k = 0; k < 6; k++) {
         const cursor = Math.floor(rng() * (g.plies.length + 1));
-        expect(zigo.clocks(zigo.goto(g, cursor), tc)).toEqual(snapshots[cursor]);
-        expect(zigo.clocks(zigo.undo(g, g.plies.length - cursor), tc)).toEqual(snapshots[cursor]);
+        expect(zengo.clocks(zengo.goto(g, cursor), tc)).toEqual(snapshots[cursor]);
+        expect(zengo.clocks(zengo.undo(g, g.plies.length - cursor), tc)).toEqual(snapshots[cursor]);
       }
-      expect(zigo.clocks(zigo.redo(zigo.undo(g, 5), 5), tc)).toEqual(snapshots[g.plies.length]);
+      expect(zengo.clocks(zengo.redo(zengo.undo(g, 5), 5), tc)).toEqual(snapshots[g.plies.length]);
     }
     expect(checks).toBeGreaterThan(3000);
   });
@@ -520,7 +520,7 @@ describe('byo-yomi derivation against a step simulation (seeded)', () => {
     for (let seed = 1; seed <= 60; seed++) {
       const rng = mulberry32(seed * 104_729);
       const tc: NonNullable<TimeControl> = { kind: 'fischer', baseMs: 1000 * (10 + Math.floor(rng() * 120)), incMs: 1000 * Math.floor(rng() * 10) };
-      let g = zigo.newGame(makeSettings(19));
+      let g = zengo.newGame(makeSettings(19));
       const sims: Record<Color, StepClock> = { B: new StepClock(tc), W: new StepClock(tc) };
       const moved: Record<Color, boolean> = { B: false, W: false };
       for (let i = 0; i < 40; i++) {
@@ -537,8 +537,8 @@ describe('byo-yomi derivation against a step simulation (seeded)', () => {
         } else {
           moved[c] = true;
         }
-        g = zigo.play(g, randomStone(g, rng), ms);
-        expect(zigo.clocks(g, tc)).toEqual({ B: sims.B.state(), W: sims.W.state() });
+        g = zengo.play(g, randomStone(g, rng), ms);
+        expect(zengo.clocks(g, tc)).toEqual({ B: sims.B.state(), W: sims.W.state() });
       }
     }
   });
@@ -561,8 +561,8 @@ describe('presets time correctly (DESIGN 11)', () => {
     for (const size of [9, 13, 19] as Size[]) {
       for (const p of CLOCK_PRESETS[size]) {
         if (!p || p.kind !== 'fischer') continue;
-        const g = playAll([['ee', 0], ['cc', 0], ['gg', 4000], ['cg', 0]], zigo.newGame(makeSettings(size)));
-        expect(zigo.clocks(g, p).B.mainMs).toBe(p.baseMs - 4000 + p.incMs);
+        const g = playAll([['ee', 0], ['cc', 0], ['gg', 4000], ['cg', 0]], zengo.newGame(makeSettings(size)));
+        expect(zengo.clocks(g, p).B.mainMs).toBe(p.baseMs - 4000 + p.incMs);
         expect(flagged(g, p, p.baseMs - 4000 + p.incMs - 1)).toBeNull();
         expect(flagged(g, p, p.baseMs - 4000 + p.incMs)).toBe('B');
         expect(initialFace(p).text).toBe(`${p.baseMs / 60_000}:00`);
@@ -576,15 +576,15 @@ describe('presets time correctly (DESIGN 11)', () => {
         if (!p || p.kind !== 'byoyomi') continue;
         const S = p.periodMs;
         const secs = S / 1000;
-        const g = playAll([['ee', 0], ['cc', 0]], zigo.newGame(makeSettings(size)));
+        const g = playAll([['ee', 0], ['cc', 0]], zengo.newGame(makeSettings(size)));
         expect(clockView(g, p, 0).B.text).toBe(`${p.baseMs / 60_000}:00`);
         expect(clockView(g, p, p.baseMs).B.text).toBe(`${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')} ·${p.periods}`);
         // A move 1 s into the first period keeps all periods.
         const kept = playAll([['gg', p.baseMs + 1000], ['cg', 0]], g);
-        expect(zigo.clocks(kept, p).B).toEqual({ mainMs: 0, periodMs: S, periods: p.periods });
+        expect(zengo.clocks(kept, p).B).toEqual({ mainMs: 0, periodMs: S, periods: p.periods });
         // 1.5 periods over: one used.
         const used = playAll([['gc', 1.5 * S], ['dg', 0]], kept);
-        expect(zigo.clocks(used, p).B).toEqual({ mainMs: 0, periodMs: S, periods: p.periods - 1 });
+        expect(zengo.clocks(used, p).B).toEqual({ mainMs: 0, periodMs: S, periods: p.periods - 1 });
         // The flag falls when the last period reads zero.
         const budget = (p.periods - 1) * S;
         expect(flagged(used, p, budget - 1)).toBeNull();
@@ -648,7 +648,7 @@ describe('spoken byo-yomi readings (DESIGN 14.1)', () => {
 
 describe('engineClock', () => {
   it('gives the side to move its clock at the start of the turn, once it is timed', () => {
-    expect(engineClock(zigo.newGame(S9), '1m3x10')).toBeUndefined();
+    expect(engineClock(zengo.newGame(S9), '1m3x10')).toBeUndefined();
     const g = playAll([['ee', 0], ['cc', 0], ['gg', 65_000], ['cg', 0]]);
     expect(engineClock(g, '1m3x10')).toEqual({ tc: BY_1_3x10, left: { mainMs: 0, periodMs: 10_000, periods: 3 } });
     expect(engineClock(g, TC_3_2)).toEqual({ tc: TC_3_2, left: { mainMs: 180_000 - 65_000 + 2000, periodMs: 0, periods: 0 } });

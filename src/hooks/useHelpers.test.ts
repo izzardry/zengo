@@ -11,24 +11,24 @@ describe('useHelpers', () => {
   });
 
   it("reads 'true' / 'false' and treats junk as missing", () => {
-    expect(readHelpers(createStore(memoryStorage({ 'zigo:helpers': 'false' })))).toBe(false);
-    expect(readHelpers(createStore(memoryStorage({ 'zigo:helpers': 'true' })))).toBe(true);
-    expect(readHelpers(createStore(memoryStorage({ 'zigo:helpers': '"nope"' })))).toBe(true);
-    expect(readHelpers(createStore(memoryStorage({ 'zigo:helpers': '{bad' })))).toBe(true);
+    expect(readHelpers(createStore(memoryStorage({ 'zengo:helpers': 'false' })))).toBe(false);
+    expect(readHelpers(createStore(memoryStorage({ 'zengo:helpers': 'true' })))).toBe(true);
+    expect(readHelpers(createStore(memoryStorage({ 'zengo:helpers': '"nope"' })))).toBe(true);
+    expect(readHelpers(createStore(memoryStorage({ 'zengo:helpers': '{bad' })))).toBe(true);
   });
 
-  it('toggles and persists under zigo:helpers', () => {
+  it('toggles and persists under zengo:helpers', () => {
     const mem = memoryStorage();
     const { result } = renderHook(() => useHelpers(createStore(mem)));
     act(() => result.current.toggleHelpers());
     expect(result.current.helpers).toBe(false);
-    expect(mem.dump()['zigo:helpers']).toBe('false');
+    expect(mem.dump()['zengo:helpers']).toBe('false');
     act(() => result.current.toggleHelpers());
     expect(result.current.helpers).toBe(true);
-    expect(mem.dump()['zigo:helpers']).toBe('true');
+    expect(mem.dump()['zengo:helpers']).toBe('true');
     act(() => result.current.setHelpers(false));
     expect(result.current.helpers).toBe(false);
-    expect(mem.dump()['zigo:helpers']).toBe('false');
+    expect(mem.dump()['zengo:helpers']).toBe('false');
   });
 
   it('survives a storage that throws', () => {

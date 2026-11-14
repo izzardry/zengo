@@ -20,7 +20,7 @@
  * are state, so they survive any re-render of the board or its parent.
  */
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type RefObject } from 'react';
-import { fromGtp, pointToIndex } from '@/lib/zigo';
+import { fromGtp, pointToIndex } from '@/lib/zengo';
 import type { IllegalReason, Point, Size } from '@/lib/types';
 import {
   DRAG_THRESHOLD,

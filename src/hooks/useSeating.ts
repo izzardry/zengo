@@ -1,5 +1,5 @@
 /**
- * Pass-and-play seating (DESIGN 5.2), stored in `zigo:seating`.
+ * Pass-and-play seating (DESIGN 5.2), stored in `zengo:seating`.
  *
  * - `face`: face to face, the far player's strip, clock, prisoners, passed badge and coordinate
  *   labels drawn rotated 180° (stones need no rotation). Default on touch devices.

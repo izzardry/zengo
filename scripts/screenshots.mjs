@@ -9,7 +9,7 @@
  * `<screen>-<theme>-<width>x<height>.png` into `outDir`.
  *
  * Screens, each in a fresh browser context with its own seeded localStorage (the app's own
- * `zigo:` storage format, see src/lib/storage.ts and src/lib/types.ts `SavedGame` / `Room`):
+ * `zengo:` storage format, see src/lib/storage.ts and src/lib/types.ts `SavedGame` / `Room`):
  *
  *   start        idle start screen, with history below the fold
  *   dial         start screen with the custom clock dial held open on the clock pill
@@ -31,7 +31,7 @@
  *
  * Only the app's own origin is contacted: the PeerJS broker WebSocket and HTTP are blocked in every
  * context. Math.random is seeded per context; codes drawn from crypto.getRandomValues still vary.
- * The prepared games are encoded and checked with the app's own rules core (src/lib/zigo.ts,
+ * The prepared games are encoded and checked with the app's own rules core (src/lib/zengo.ts,
  * imported with Node's type stripping), so a bad move fails here and not in the screenshot.
  */
 import { chromium } from '@playwright/test';
@@ -40,7 +40,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const zigo = await import(pathToFileURL(join(root, 'src/lib/zigo.ts')).href);
+const zengo = await import(pathToFileURL(join(root, 'src/lib/zengo.ts')).href);
 
 /* ---------------------------------------------------------------------------------------------- */
 /* Arguments                                                                                        */
@@ -81,17 +81,17 @@ const THEMES = listArg('themes') ?? ['light', 'dark'];
 function encode(gtps, size, handicap = 0, rules = 'area') {
   const moves = gtps
     .map((m) => {
-      const p = zigo.fromGtp(m, size);
+      const p = zengo.fromGtp(m, size);
       if (!p) throw new Error(`Bad GTP move ${m} on ${size}×${size}`);
       return p;
     })
     .join('');
-  const g = zigo.fromRecord({ size, rules, handicap, moves });
+  const g = zengo.fromRecord({ size, rules, handicap, moves });
   return { moves, plies: g.cursor };
 }
 
 /** SGF points of GTP coordinates (dead stones). */
-const points = (gtps, size) => gtps.map((m) => zigo.fromGtp(m, size)).sort();
+const points = (gtps, size) => gtps.map((m) => zengo.fromGtp(m, size)).sort();
 
 /** Plausible per-ply thinking times (ms), deterministic. */
 const msFor = (n, base = 4000) => Array.from({ length: n }, (_, i) => base + ((i * 7919) % 9000));
@@ -217,18 +217,18 @@ async function newContext(browser, size, theme, seed) {
       sessionStorage.setItem('shots:seeded', '1');
       const now = Date.now();
       const min = 60_000;
-      for (const [k, v] of Object.entries(data.prefs)) localStorage.setItem(`zigo:${k}`, JSON.stringify(v));
+      for (const [k, v] of Object.entries(data.prefs)) localStorage.setItem(`zengo:${k}`, JSON.stringify(v));
       if (data.games.length) {
         const games = data.games.map(({ ago, ...g }) => ({
           ...g,
           createdAt: now - (ago + 30) * min,
           lastPlayedAt: now - ago * min,
         }));
-        localStorage.setItem('zigo:games', JSON.stringify(games));
+        localStorage.setItem('zengo:games', JSON.stringify(games));
       }
       if (data.rooms.length) {
         const rooms = data.rooms.map((r) => ({ ...r, createdAt: now + r.createdAt * min, lastSeenAt: now + r.lastSeenAt * min }));
-        localStorage.setItem('zigo:rooms', JSON.stringify(rooms));
+        localStorage.setItem('zengo:rooms', JSON.stringify(rooms));
       }
     } catch {
       /* storage blocked */

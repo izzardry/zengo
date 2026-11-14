@@ -1,6 +1,6 @@
 /**
  * Types for the vendored goscorer (./goscorer.js, MIT, lightvector/goscorer@0ac5f59).
- * Written for Zigo from the JSDoc in that file; only src/lib/scoring.ts should import it.
+ * Written for Zengo from the JSDoc in that file; only src/lib/scoring.ts should import it.
  *
  * Boards are row-major: `stones[y][x]`, y from the top. All arrays must be ysize × xsize.
  */

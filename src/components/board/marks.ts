@@ -2,7 +2,7 @@
  * Pure derivations for the board layers: per-row stone codes (the memo key of a stone row) and
  * the small squares of the territory and preview layers.
  */
-import { pointToIndex } from '@/lib/zigo';
+import { pointToIndex } from '@/lib/zengo';
 import type { Color, Point, Size } from '@/lib/types';
 
 /**

@@ -3,7 +3,7 @@
  * the facts on each card (position, side to move, state), relative time and the room score.
  * No React.
  */
-import { formatResult, fromRecord, makeSettings, newGame } from '@/lib/zigo';
+import { formatResult, fromRecord, makeSettings, newGame } from '@/lib/zengo';
 import type { Color, Game, Language, Room, SavedGame, Size } from '@/lib/types';
 
 const DAY = 24 * 60 * 60 * 1000;

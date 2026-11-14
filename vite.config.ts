@@ -37,7 +37,7 @@ function engineGzipAsBytes(): Plugin {
     });
   };
   return {
-    name: "zigo-engine-gzip-as-bytes",
+    name: "zengo-engine-gzip-as-bytes",
     configureServer(server) {
       server.middlewares.use(middleware(() => server.config.publicDir));
     },
@@ -54,7 +54,7 @@ function engineGzipAsBytes(): Plugin {
  */
 function preloadBrandFont(): Plugin {
   return {
-    name: "zigo-preload-brand-font",
+    name: "zengo-preload-brand-font",
     apply: "build",
     transformIndexHtml: {
       order: "post",
@@ -107,8 +107,8 @@ export default defineConfig(() => {
         registerType: "autoUpdate",
         includeAssets: ["favicon.ico", "robots.txt"],
         manifest: {
-          name: "Zigo - Zero Distractions. Just Go.",
-          short_name: "Zigo",
+          name: "Zengo - Zero Distractions. Just Go.",
+          short_name: "Zengo",
           description: "Zero Distractions. Just Go.",
           theme_color: "#0d0d0d",
           background_color: "#0d0d0d",

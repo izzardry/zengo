@@ -1,7 +1,7 @@
 /**
  * Local persistence (DESIGN 13.1, 12.1, Ztyle chapter 11).
  *
- * Keys are `zigo:<key>`. Values are JSON. Every read and write is wrapped in try/catch: private
+ * Keys are `zengo:<key>`. Values are JSON. Every read and write is wrapped in try/catch: private
  * mode, a full quota or corrupt data never break the app; reads fall back to defaults.
  *
  * `createStore` / `store` hold Go's `SavedGame` (DESIGN 12.1); stored entries of any other shape
@@ -9,10 +9,10 @@
  * helpers below cover the preference keys whose values need validation.
  */
 import type { ColorChoice, Result, Room, Rules, SavedGame, Scoring, Size, Store, TcString } from './types';
-import { formatTc, normalizeHandicap, parseTc } from './zigo';
+import { formatTc, normalizeHandicap, parseTc } from './zengo';
 
 /** The key prefix of every stored value. */
-export const PREFIX = 'zigo:';
+export const PREFIX = 'zengo:';
 
 /** Most games kept (DESIGN 12.1). */
 export const MAX_GAMES = 100;
@@ -238,15 +238,15 @@ export const goStore: Store = store;
 /** What the preference helpers need. */
 export type PrefStore = Pick<Store, 'pref' | 'setPref'>;
 
-/** Engine backend remembered after the WebGPU probe (`zigo:engine-backend`). */
+/** Engine backend remembered after the WebGPU probe (`zengo:engine-backend`). */
 export type EngineBackend = 'webgpu' | 'wasm';
 
-/** A value per board size, as `zigo:handicap` and `zigo:clock` store it: `{ "9": …, "13": …, "19": … }`. */
+/** A value per board size, as `zengo:handicap` and `zengo:clock` store it: `{ "9": …, "13": …, "19": … }`. */
 export type PerSize<T> = Partial<Record<`${Size}`, T>>;
 
 const isSize = (v: unknown): v is Size => v === 9 || v === 13 || v === 19;
 
-/** `zigo:size`; default 9 (DESIGN 4.1). */
+/** `zengo:size`; default 9 (DESIGN 4.1). */
 export function readSize(s: PrefStore): Size {
   const v = s.pref<unknown>(KEYS.size, null);
   const n = typeof v === 'string' ? Number(v) : v;
@@ -257,7 +257,7 @@ export function writeSize(s: PrefStore, size: Size): void {
   s.setPref(KEYS.size, size);
 }
 
-/** `zigo:rules`; default area. */
+/** `zengo:rules`; default area. */
 export function readRules(s: PrefStore): Rules {
   return s.pref<unknown>(KEYS.rules, null) === 'territory' ? 'territory' : 'area';
 }
@@ -271,7 +271,7 @@ function readPerSize(s: PrefStore, key: string): PerSize<unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as PerSize<unknown>) : {};
 }
 
-/** `zigo:handicap` for one size: 0 or 2..max (normalized); default 0. */
+/** `zengo:handicap` for one size: 0 or 2..max (normalized); default 0. */
 export function readHandicap(s: PrefStore, size: Size): number {
   const v = readPerSize(s, KEYS.handicap)[`${size}`];
   return typeof v === 'number' ? normalizeHandicap(size, v) : 0;
@@ -283,7 +283,7 @@ export function writeHandicap(s: PrefStore, size: Size, n: number): void {
 }
 
 /**
- * `zigo:clock` for one size: a normalized time control (`5+7`, `20m5x30`), null for off, or
+ * `zengo:clock` for one size: a normalized time control (`5+7`, `20m5x30`), null for off, or
  * `fallback` when nothing valid is stored for that size (e.g. an older single string).
  */
 export function readClock(s: PrefStore, size: Size, fallback: TcString | null = null): TcString | null {
@@ -300,7 +300,7 @@ export function writeClock(s: PrefStore, size: Size, tc: TcString | null): void 
   s.setPref(KEYS.clock, { ...readPerSize(s, KEYS.clock), [`${size}`]: norm });
 }
 
-/** `zigo:engine-backend`, or null when not probed yet. */
+/** `zengo:engine-backend`, or null when not probed yet. */
 export function readEngineBackend(s: PrefStore): EngineBackend | null {
   const v = s.pref<unknown>(KEYS.engineBackend, null);
   return v === 'webgpu' || v === 'wasm' ? v : null;
@@ -310,7 +310,7 @@ export function writeEngineBackend(s: PrefStore, b: EngineBackend | null): void 
   s.setPref(KEYS.engineBackend, b ?? undefined);
 }
 
-/** `zigo:color` as Go's color pill reads it: `random`, `B` or `W` (default random). */
+/** `zengo:color` as Go's color pill reads it: `random`, `B` or `W` (default random). */
 export function readColorChoice(s: PrefStore): ColorChoice {
   const v = s.pref<unknown>(KEYS.color, null);
   return v === 'B' || v === 'W' ? v : 'random';

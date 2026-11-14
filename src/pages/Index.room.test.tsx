@@ -14,14 +14,14 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { Toaster } from '@/components/ui/sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { cell, installPointerEvent, layoutGrid, tap } from '@/components/board/test-helpers';
-import { setSharedEngine } from '@/hooks/useZigoEngine';
+import { setSharedEngine } from '@/hooks/useZengoEngine';
 import { FakeEngine, type FakeEngineOptions } from '@/lib/engine/fake';
 import { I18nProvider } from '@/lib/i18n';
 import { createRoomController, type RoomControllerApi, type RoomControllerOptions } from '@/lib/room';
 import { createStore, memoryStorage } from '@/lib/storage';
 import type { MemoryNetwork } from '@/lib/transport';
 import type { Point, Size } from '@/lib/types';
-import { fromGtp } from '@/lib/zigo';
+import { fromGtp } from '@/lib/zengo';
 import Index from './Index';
 
 const broker = vi.hoisted(() => ({ net: null as MemoryNetwork | null, fail: false }));
@@ -88,9 +88,9 @@ beforeAll(() => {
 beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
-  localStorage.setItem('zigo:tutorial-seen', 'true');
-  localStorage.setItem('zigo:opponent', JSON.stringify({ mode: 'room' }));
-  localStorage.setItem('zigo:color', JSON.stringify('B'));
+  localStorage.setItem('zengo:tutorial-seen', 'true');
+  localStorage.setItem('zengo:opponent', JSON.stringify({ mode: 'room' }));
+  localStorage.setItem('zengo:color', JSON.stringify('B'));
   broker.net = createMemoryNetwork();
   broker.fail = false;
   others = [];
@@ -140,7 +140,7 @@ describe('Index stage in a room', () => {
     const invite = await screen.findByTestId('invite-sheet');
     expect(within(invite).getByText('RMG001')).toBeInTheDocument();
     expect((within(invite).getByRole('textbox', { name: 'Invite link' }) as HTMLInputElement).value).toMatch(/#\/\?s=RMG001&o=r$/);
-    expect(localStorage.getItem('zigo:rooms')).toContain('RMG001');
+    expect(localStorage.getItem('zengo:rooms')).toContain('RMG001');
 
     // The opponent joins: presence turns connected, the sheet closes, a toast says so.
     const other = opponent('RMG001');
@@ -268,7 +268,7 @@ describe('Index stage in a room', () => {
     });
     others.push(host);
     // This device's engine would mark every white stone dead (it disagrees with the host's).
-    localStorage.setItem('zigo:opponent', JSON.stringify({ mode: 'local' }));
+    localStorage.setItem('zengo:opponent', JSON.stringify({ mode: 'local' }));
     renderStage('/?s=RMG002&o=r');
     expect(stage()).toHaveAttribute('data-phase', 'playing');
     await waitFor(() => expect(stage()).toHaveAttribute('data-room-presence', 'connected'));
@@ -437,14 +437,14 @@ describe('Index stage in a room', () => {
     // Delete game 2: the room record goes too; Undo brings both back.
     const card = (await screen.findAllByTestId('history-card'))[0];
     fireEvent.click(within(card.parentElement!).getByRole('button', { name: /Delete/ }));
-    await waitFor(() => expect(localStorage.getItem('zigo:rooms')).toBe('[]'));
+    await waitFor(() => expect(localStorage.getItem('zengo:rooms')).toBe('[]'));
     fireEvent.click(await screen.findByRole('button', { name: 'Undo' }));
-    await waitFor(() => expect(localStorage.getItem('zigo:rooms')).toContain('RMG005'));
+    await waitFor(() => expect(localStorage.getItem('zengo:rooms')).toContain('RMG005'));
     expect(await screen.findAllByTestId('history-card')).toHaveLength(2);
   }, 20_000);
 
   it('a timed room: the controller clock runs the strips, and a disconnect pauses both (DESIGN 9.7)', async () => {
-    localStorage.setItem('zigo:clock', JSON.stringify({ 9: '2+7' }));
+    localStorage.setItem('zengo:clock', JSON.stringify({ 9: '2+7' }));
     const other = await createAndJoin('RMG006');
     const timer = (c: 'B' | 'W') => document.querySelector(`[data-color="${c}"] [role="timer"]`)!;
     expect(timer('B').textContent).toBe('2:00');

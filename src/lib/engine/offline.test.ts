@@ -15,7 +15,7 @@ import {
   type EngineOfflineStatus,
 } from './offline';
 
-const BASE = 'https://example.test/zigo/';
+const BASE = 'https://example.test/zengo/';
 const STAGE1 = ENGINE_STAGES[1].map((a) => BASE + a.path);
 const NET1 = BASE + SMALL_NET_PATH;
 const NET2 = BASE + LARGE_NET_PATH;
@@ -66,7 +66,7 @@ function fakeFetch(opts: FetchOpts = {}) {
     calls.push(url);
     const asset = [...ENGINE_STAGES[1], ...ENGINE_STAGES[2]].find((a) => BASE + a.path === url)!;
     const size = Math.round(asset.bytes / 10);
-    if (opts.html) return new Response('<!doctype html><title>Zigo</title>', { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } });
+    if (opts.html) return new Response('<!doctype html><title>Zengo</title>', { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } });
     const headers: Record<string, string> = { 'content-type': asset.kind === 'wasm' ? 'application/wasm' : 'application/gzip' };
     if (opts.encoded) headers['content-encoding'] = 'gzip';
     headers['content-length'] = String(opts.encoded ? Math.round(size / 3) : size);

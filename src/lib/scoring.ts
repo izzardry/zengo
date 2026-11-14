@@ -24,7 +24,7 @@ import {
   type GoscorerColor,
 } from './vendor/goscorer';
 import type { Color, Game, Point, Result, Score, ScoreSide, ScoringApi } from './types';
-import { groupAt, indexToPoint, pointToIndex } from './zigo';
+import { groupAt, indexToPoint, pointToIndex } from './zengo';
 
 /** Ownership at or beyond this toward the opponent makes a stone dead (OGS's threshold, DESIGN 8.4). */
 export const DEAD_THRESHOLD = 0.7;

@@ -2,7 +2,7 @@
  * i18n: `I18nProvider`, `useI18n`, `t(key, vars)`, EN / DE / FR / ES.
  *
  * Strings live in per-package tables registered in `tables.ts`. The provider detects the
- * language (stored → browser → en), persists the choice under `zigo:lang` and keeps
+ * language (stored → browser → en), persists the choice under `zengo:lang` and keeps
  * `<html lang>` in sync.
  */
 export { I18nProvider, type I18nProviderProps } from './provider';

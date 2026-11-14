@@ -1,6 +1,6 @@
-# Zigo — Go rules, formats, libraries and UX research
+# Zengo — Go rules, formats, libraries and UX research
 
-Research input for **Zigo**, a minimalist Go PWA that follows Zhess (`~/Workspace/zhess/DESIGN.md`) as closely as possible.
+Research input for **Zengo**, a minimalist Go PWA that follows Zhess (`~/Workspace/zhess/DESIGN.md`) as closely as possible.
 
 - **Date:** 2026-11-12
 - **Scope:** rules, board sizes, time controls, record formats, JS libraries, mobile UX, Go-specific helpers, ranks and terminology. The choice of computer opponent (engine) is only touched where hints and scoring depend on it. It needs its own research note.
@@ -10,7 +10,7 @@ Research input for **Zigo**, a minimalist Go PWA that follows Zhess (`~/Workspac
 
 ## 0. TL;DR recommendations
 
-| # | Topic | Recommendation for Zigo |
+| # | Topic | Recommendation for Zengo |
 |---|-------|-------------------------|
 | 1 | Rule set | **One fixed rule set: area scoring with positional superko and suicide forbidden.** This is Chinese-style scoring on a Tromp-Taylor core. Two passes end play and open a **mark-dead-stones phase**. Both players accept, or either one resumes play, which costs nothing under area scoring. After a resume, 4 consecutive passes end the game with the board scored as it stands, so a dispute cannot stall the game (Tromp-Taylor comment 8). No Japanese rules in v1. |
 | 1 | Komi | **7.5 on 9×9, 13×13 and 19×19** (OGS and KGS Chinese default; KataGo's fair 9×9 area komi is 7, so .5 avoids jigo). With handicap: **komi 0.5, and White gets +1 point per handicap stone** (Chinese/KGS compensation). Long-press opens custom komi, as the clock dial does in Zhess. Store komi as an integer number of half points. |
@@ -28,12 +28,12 @@ Research input for **Zigo**, a minimalist Go PWA that follows Zhess (`~/Workspac
 
 ### How each Zhess feature carries over
 
-| Zhess | Zigo |
+| Zhess | Zengo |
 |-------|------|
 | Solo vs computer, 12 levels | Same selector. Needs a Go engine; KataGo nets run in the browser through ONNX/WebGPU/WASM (see 7.6). Levels show an approximate rank. |
 | Pass-and-play, face to face | Simpler than chess: stones look the same from every side, so only the strips, clocks, prisoner counts, overlays and coordinate labels rotate. |
 | WebRTC rooms, longest valid log wins | Unchanged. A ply is a point or a pass. Validation replays through the Go core, positional superko included. New: a scoring sub-protocol (`ask{kind:'score', dead}` / `reply`), a `resume` and an `end{by:'score', dead, score}` (section 1.8). |
-| 6-character codes | Unchanged; the peer id becomes `zigo-<CODE>`. |
+| 6-character codes | Unchanged; the peer id becomes `zengo-<CODE>`. |
 | URL `m=` codec | Two SGF letters per ply plus `n=` (size), `k=` (komi), `h=` (handicap). |
 | PGN export | SGF export (`Copy SGF`, share as a `.sgf` file). |
 | Undo / redo, takeback | Unchanged. Against the computer, undo goes back one full turn. Undo is widely accepted Go etiquette for misclicks online (OGS, KGS and Fox all have undo requests). |
@@ -76,14 +76,14 @@ OGS's engine encodes these defaults directly (`GobanEngine.ts`, `rules` switch).
 
 ### 1.3 Suicide
 
-Forbidden under Japanese, Chinese and AGA rules; multi-stone suicide is allowed under NZ, Ing and Tromp-Taylor. **For Zigo, forbid it.** Beginners expect it to be illegal, and every major app and server forbids it by default. Implementation: place the stone, remove opposing groups without liberties, and reject the move if the placed group then has no liberties.
+Forbidden under Japanese, Chinese and AGA rules; multi-stone suicide is allowed under NZ, Ing and Tromp-Taylor. **For Zengo, forbid it.** Beginners expect it to be illegal, and every major app and server forbids it by default. Implementation: place the stone, remove opposing groups without liberties, and reject the move if the placed group then has no liberties.
 
 ### 1.4 Ko and superko
 
 - **Basic ko:** you may not immediately retake a single stone that would recreate the position before the opponent's last move.
 - **Positional superko (PSK):** no move may recreate any earlier whole-board position (stones only). **Situational superko (SSK):** the same, but only when the same player is to move. Tromp: "Only in exceedingly rare cases does the difference matter, sufficient reason for the simpler PSK rule to be preferred."
 - Japanese rules have no superko. A triple ko or eternal life makes the game "no result", which a serverless app cannot adjudicate.
-- **Zigo: positional superko.** It is a pure function of the move list, and a ply can be validated from the log alone. Keep a set of position hashes: 64-bit Zobrist built from a fixed hard-coded seed, or exact board strings, which cost about 361 bytes × 400 positions ≈ 150 kB at worst. Passes do not create positions. Show a basic-ko point with a marker; when a rare superko violation is refused, say so in a toast ("This would repeat an earlier position").
+- **Zengo: positional superko.** It is a pure function of the move list, and a ply can be validated from the log alone. Keep a set of position hashes: 64-bit Zobrist built from a fixed hard-coded seed, or exact board strings, which cost about 361 bytes × 400 positions ≈ 150 kB at worst. Passes do not create positions. Show a basic-ko point with a marker; when a rare superko violation is refused, say so in a toast ("This would repeat an earlier position").
 
 ### 1.5 Seki
 
@@ -97,7 +97,7 @@ Under area scoring, stones in seki count and eyes shared in seki count for nobod
 - **Sabaki (desktop editor):** "Estimate" and "Score" modes. Dead stones are guessed with `@sabaki/deadstones` (Monte Carlo, Rust/WASM), and the user corrects them by clicking.
 - **BadukPop:** forum users report Japanese-style territory scoring; there is no public documentation of its dispute flow.
 
-**Recommended Zigo flow (works offline, in pass-and-play and in rooms):**
+**Recommended Zengo flow (works offline, in pass-and-play and in rooms):**
 
 1. Two consecutive passes, so the next player to move cannot place a stone. The board enters **Scoring**.
 2. The app proposes a dead set: from the engine's ownership if it is loaded, otherwise from a deterministic heuristic (for example goscorer's own helpers, or a seeded Monte Carlo run). Dead stones are drawn faded with a small ×, and territory as small squares in the owner's color.
@@ -116,9 +116,9 @@ Under area scoring, stones in seki count and eyes shared in seki count for nobod
 
 - **Fixed placement** (GTP spec, also the OGS/KGS default for AGA/Japanese), in Black's coordinates on 19×19:
   2: D4 Q16 · 3: + D16 · 4: + Q4 · 5: + K10 · 6: D4 Q16 D16 Q4 D10 Q10 · 7: 6 + K10 · 8: 6 + K4 K16 · 9: all nine.
-  On 13×13 the same pattern sits on the 4th line (D4, K10, D10, K4, sides D7/K7/G4/G10, center G7). On 9×9 it sits on the 3rd line (C3, G7, C7, G3, center E5, sides C5/G5/E3/E7). GTP allows 9 on both sizes; Zigo should cap 9×9 at 5, because one 9×9 stone is worth about 6 ranks. Some Japanese sources put the 3rd stone in a different corner; follow GTP.
+  On 13×13 the same pattern sits on the 4th line (D4, K10, D10, K4, sides D7/K7/G4/G10, center G7). On 9×9 it sits on the 3rd line (C3, G7, C7, G3, center E5, sides C5/G5/E3/E7). GTP allows 9 on both sizes; Zengo should cap 9×9 at 5, because one 9×9 stone is worth about 6 ranks. Some Japanese sources put the 3rd stone in a different corner; follow GTP.
 - **Komi in handicap games:** 0.5, so White wins a tie (OGS rule). Under area scoring add **+1 point for White per handicap stone** (Chinese/KGS). Otherwise every extra Black stone on the board is worth a point in area counting. AGA uses n−1.
-- **Rank difference → handicap:** 1 rank ≈ 1 stone on 19×19; 13×13 scales by about 2.5–4, 9×9 by about 6 ranks per stone (Wikipedia, Go handicaps). Zigo can suggest a handicap against the computer later. v1: a handicap pill `0 · 2 · 3 · … · 9`, dimmed in rooms after the first game.
+- **Rank difference → handicap:** 1 rank ≈ 1 stone on 19×19; 13×13 scales by about 2.5–4, 9×9 by about 6 ranks per stone (Wikipedia, Go handicaps). Zengo can suggest a handicap against the computer later. v1: a handicap pill `0 · 2 · 3 · … · 9`, dimmed in rooms after the first game.
 
 ### 1.9 Which rule set is most robust for a serverless app
 
@@ -179,7 +179,7 @@ Correspondence is 3 days + 1 day per move, max 7 days. KGS documents the same sy
 
 OGS's own short formatters (`TimeControl/util.ts`): Fischer `%s+%s up to %s`, byo-yomi `%s+%sx%s` (e.g. `20m+5x30s`), Canadian `%s+%s/%s` (e.g. `10m+5m/25`), simple `%s/move`.
 
-### 3.4 Recommendation for Zigo
+### 3.4 Recommendation for Zengo
 
 - Keep the Zhess clock engine (performance.now deltas, ms per ply, pause on disconnect) and add **byo-yomi** as a second mode. Its state is derivable from the per-ply `ms` log. Remaining main time and the periods left follow purely from the sequence of `ms`, so the room clocks stay log-derived exactly as in Zhess 9.8.
 - **Clock pill per size** (one cycle, Zhess style). The values below follow OGS:
@@ -198,12 +198,12 @@ Sources: [OGS SPEED_OPTIONS.ts](https://github.com/online-go/online-go.com/blob/
 
 ### 4.1 SGF FF[4] essentials
 
-| Property | Meaning / value for Zigo |
+| Property | Meaning / value for Zengo |
 |----------|--------------------------|
 | `GM[1]` | Go |
 | `FF[4]` | file format 4 |
 | `CA[UTF-8]` | charset (the default is ISO-8859-1, so always write it) |
-| `AP[Zigo:1.2.3]` | application:version |
+| `AP[Zengo:1.2.3]` | application:version |
 | `SZ[19]` | board size (`SZ[19:19]` is illegal for square boards) |
 | `KM[7.5]` | komi, a real number |
 | `RU[Chinese]` | rules; reserved names `AGA`, `GOE`, `Japanese`, `NZ`; `Chinese` is widely used |
@@ -221,8 +221,8 @@ Sources: [OGS SPEED_OPTIONS.ts](https://github.com/online-go/online-go.com/blob/
 Example record:
 
 ```
-(;GM[1]FF[4]CA[UTF-8]AP[Zigo:1.0.0]SZ[9]KM[7.5]RU[Chinese]DT[2026-11-12]
-PB[Black]PW[Zigo Level 5]RE[W+4.5]
+(;GM[1]FF[4]CA[UTF-8]AP[Zengo:1.0.0]SZ[9]KM[7.5]RU[Chinese]DT[2026-11-12]
+PB[Black]PW[Zengo Level 5]RE[W+4.5]
 ;B[ee];W[gc];B[cg]…;B[];W[])
 ```
 
@@ -237,7 +237,7 @@ Write exports with `B[]` for a pass. Accept both `[]` and `[tt]` on import (OGS,
 
 ### 4.3 Size of a record: URL and QR
 
-Measured with `qrcode-generator` 2.0.4 (the Zhess dependency) on a representative URL, `https://izzardry.github.io/zigo/#/?s=K7QW2M&n=19&k=7.5&r=j&m=…` (59 characters before the moves), byte mode:
+Measured with `qrcode-generator` 2.0.4 (the Zhess dependency) on a representative URL, `https://izzardry.github.io/zengo/#/?s=K7QW2M&n=19&k=7.5&r=j&m=…` (59 characters before the moves), byte mode:
 
 | Game | URL length | QR version (EC L) | QR version (EC M) |
 |------|-----------|-------------------|-------------------|
@@ -264,7 +264,7 @@ Sources: [SGF FF[4] properties](https://www.red-bean.com/sgf/properties.html) ·
 | `@sabaki/sgf` | MIT | 3.5.0 (2026-07) | 135 kB, dep `doken` | SGF parse/stringify, encodings | **Good for import.** Maintained. Export is easy to write by hand. |
 | `@sabaki/deadstones` | MIT | 2.2.0 (2026-07) | 41 kB + WASM | Monte Carlo dead-stone guess, probability map | Usable as a **proposal** generator. Random, so never authoritative across devices. |
 | `@sabaki/influence` | MIT | 1.2.2 | 23 kB | static influence/area heuristics | Possible cheap territory preview without an engine. |
-| `@sabaki/shudan` | MIT | 1.8.0 (2026-07) | 814 kB | Preact goban component | Different stack (Preact) and its own look; Zigo needs its own monochrome board anyway. |
+| `@sabaki/shudan` | MIT | 1.8.0 (2026-07) | 814 kB | Preact goban component | Different stack (Preact) and its own look; Zengo needs its own monochrome board anyway. |
 | **goscorer** (lightvector) | MIT (2024) | not on npm; repo 2025-04 | `goscorer.js` 51 kB | territory scoring with **seki detection**, plus an area scoring implementation; needs dead stones marked by the user; pure and deterministic | **Vendor it** if Japanese-style display or seki-correct territory marks are wanted. By KataGo's author. |
 | `wgo` (WGo.js) | MIT on npm (no licence detected on GitHub) | 3.0.0-alpha.10 (2021) | 596 kB | board renderer, player, SGF | Alpha for 5 years; not needed. |
 | `tenuki` | MIT | 0.3.1 (2019) | 5.4 MB | board + rules (superko options, scoring) | Stale. |
@@ -275,7 +275,7 @@ Sources: [SGF FF[4] properties](https://www.red-bean.com/sgf/properties.html) ·
 | `online-go/goban` | Apache-2.0 | active (2026-10) | large | OGS's full engine + renderer (all rule sets, SGF, clocks) | Excellent **reference** for rules and edge cases, but too large and tied to OGS. |
 | `online-go/score-estimator` | MIT | 2019 | — | old OGS estimator (C++/WASM) | Superseded by KataGo autoscore. |
 
-**Recommendation: write the rules core yourself** (`lib/zigo.ts`, the counterpart of `lib/zhess.ts`). It is smaller than chess: a flat `Int8Array(size²)`, a flood fill for groups and liberties, capture, suicide check, a positional superko hash set, the pass and end state, an area count, the handicap tables, the codec and SGF out. That is about 300–400 lines plus tests, with no dependency. Zhess's frozen-value-plus-WeakMap-cache pattern fits unchanged. Optionally add `@sabaki/sgf` (import) and vendored `goscorer.js` (territory marks, seki). Test the core against OGS's `GoEngine.test.ts` cases and goscorer's test positions.
+**Recommendation: write the rules core yourself** (`lib/zengo.ts`, the counterpart of `lib/zhess.ts`). It is smaller than chess: a flat `Int8Array(size²)`, a flood fill for groups and liberties, capture, suicide check, a positional superko hash set, the pass and end state, an area count, the handicap tables, the codec and SGF out. That is about 300–400 lines plus tests, with no dependency. Zhess's frozen-value-plus-WeakMap-cache pattern fits unchanged. Optionally add `@sabaki/sgf` (import) and vendored `goscorer.js` (territory marks, seki). Test the core against OGS's `GoEngine.test.ts` cases and goscorer's test positions.
 
 Sources: npm registry metadata (`npm view`, 2026-11-12) · [SabakiHQ/go-board](https://github.com/SabakiHQ/go-board) · [SabakiHQ/sgf](https://github.com/SabakiHQ/sgf) · [SabakiHQ/deadstones](https://github.com/SabakiHQ/deadstones) · [lightvector/goscorer](https://github.com/lightvector/goscorer) · [waltheri/wgo.js](https://github.com/waltheri/wgo.js) · [aprescott/tenuki](https://github.com/aprescott/tenuki) · [duckpunch/godash](https://github.com/duckpunch/godash) · [jokkebk/jgoboard](https://github.com/jokkebk/jgoboard) · [yewang/besogo](https://github.com/yewang/besogo) · [Kashomon/glift](https://github.com/Kashomon/glift) · [online-go/goban](https://github.com/online-go/goban) · [online-go/score-estimator](https://github.com/online-go/score-estimator)
 
@@ -295,7 +295,7 @@ Sources: npm registry metadata (`npm view`, 2026-11-12) · [SabakiHQ/go-board](h
 | **Shift / snap correction** | GridMaster, Igowin "smart move" | Snap to the nearest legal point. |
 | **Hold, stone shown above the finger, adjust, lift** | requested and described in lifein19x19 app threads | The classic touch technique. |
 
-**Zigo recommendation** (no settings screen, Zhess spirit):
+**Zengo recommendation** (no settings screen, Zhess spirit):
 
 - **9×9** (cells ≥ 36 px): a tap places immediately. Drag works too: the ghost follows the finger and release places it.
 - **13×13 / 19×19 on a coarse pointer:**
@@ -336,7 +336,7 @@ Sources: [OGS preferences.ts (one-click / double-click submit, move numbers)](ht
 
 ## 7. Go-specific comfort features
 
-| Feature | How | Engine? | Zigo |
+| Feature | How | Engine? | Zengo |
 |---------|-----|---------|------|
 | **Atari warning** | own groups with 1 liberty glow (6.2) | no | helpers bundle, on |
 | **Self-atari guard** (the blunder guard) | a move that leaves its own group of ≥2 stones with 1 liberty, so that the opponent can capture at once, is refused once with a red pulse; playing it again within 5 s commits. Single-stone self-ataris are excluded (throw-ins, ko and snapback are often good) | no | helpers bundle, vs computer and pass-and-play |
@@ -365,7 +365,7 @@ Sources: [Kaya KataGo ONNX models](https://hug-proxy.pages.dev/kaya-go/kaya) · 
 - Servers differ by several stones (KGS, OGS, Fox and the EGF/AGA scales are not aligned), and a 9×9 rank is not a 19×19 rank. Any rank label for a bot is approximate.
 - How others label bots: KaTrain uses "calibrated rank" sliders labelled in kyu/dan; BadukAI maps a 30 → −8 slider to 30k … 9d; OGS shows bots with their rated rank.
 
-**Zigo:** keep the 12 Zudoku names (one family across Zudoku, Zhess and Zigo) and add an **approximate rank, only after calibration**, e.g. `COMPUTER 5 MEDIUM · ≈12k`. The prefix `≈` is honest. Spread the levels roughly from 30k (1 Beginner) to about 1d–3d (12 Insane), depending on what the browser engine reaches on a phone.
+**Zengo:** keep the 12 Zudoku names (one family across Zudoku, Zhess and Zengo) and add an **approximate rank, only after calibration**, e.g. `COMPUTER 5 MEDIUM · ≈12k`. The prefix `≈` is honest. Spread the levels roughly from 30k (1 Beginner) to about 1d–3d (12 Insane), depending on what the browser engine reaches on a phone.
 
 ### 8.2 Display formats
 
@@ -404,7 +404,7 @@ Sources: [Wikipedia: Go ranks and ratings](https://en.wikipedia.org/wiki/Go_rank
 
 ---
 
-## 9. Open questions for the Zigo design interview
+## 9. Open questions for the Zengo design interview
 
 1. Komi for 9×9: 7.5 (OGS/KGS Chinese default, slightly favors White) or 7 (fair; allows jigo, so a draw result is needed)?
 2. Should the self-atari guard count as "assisted", like hints in Zhess?

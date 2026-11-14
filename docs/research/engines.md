@@ -1,4 +1,4 @@
-# Zigo — Go engine research
+# Zengo — Go engine research
 
 Research date: 2026-11-12. Scope: which Go engine can replace Stockfish in a Zhess-style PWA. The app is static on GitHub Pages, has no COOP/COEP headers, works offline, and must run on iPhone home-screen PWAs, Android Chrome and low-end phones.
 
@@ -109,7 +109,7 @@ A 9×9 eval costs about 1/4.5 of a 19×19 eval.
 - Backend order is WebGPU → WASM → CPU. On GitHub Pages WASM runs single-threaded, and WebGPU is unaffected **[V]**.
 - PWA service worker precaches the shell, the worker, the 3.6 MB default model and one TF.js WASM build (`tfjs-backend-wasm-simd.wasm`) **[V docs/deployment.md]**.
 - KaTrain AI strategies are included (`rank`, `policy`, `weighted`, `scoreloss`, …), plus a `human` strategy using the Human-SL net **[V]**.
-- Sibling apps exist: **web-chess** (Stockfish) and web-xiangqi (Pikafish). The author mirrors the Zhess → Zigo relationship **[V]**.
+- Sibling apps exist: **web-chess** (Stockfish) and web-xiangqi (Pikafish). The author mirrors the Zhess → Zengo relationship **[V]**.
 - Caveats:
   - Physical phones are "unvalidated" in its own audit **[V docs/continuous-audit.md]**.
   - A forum user reported a crash on a phone in Jan 2026, and the author says mobile was then optimised and works on an iPhone **[C, OGS forum]**.
@@ -284,13 +284,13 @@ All are weaker per byte and per FLOP than KataGo nets (KataGo g170 surpassed LZ'
 
 These are recent 0★ hobby repos: NakliTechie/KoLocal (MIT), brett-buskirk/go (MIT, Easy/Hard MCTS), gextam/go-web (MCTS in worker) **[V GitHub search]**. Not worth depending on.
 
-Zigo should own its rules core: board, liberties, ko/superko, captures, area/territory scoring. That core is needed anyway for the UI, ownership-free fallbacks, and the TS search.
+Zengo should own its rules core: board, liberties, ko/superko, captures, area/territory scoring. That core is needed anyway for the UI, ownership-free fallbacks, and the TS search.
 
 ---
 
-## 2. Engine features: Zhess → Zigo analogues
+## 2. Engine features: Zhess → Zengo analogues
 
-| Zhess feature | Zigo analogue | Engine source | Latency notes |
+| Zhess feature | Zengo analogue | Engine source | Latency notes |
 |---|---|---|---|
 | **Hint (best move)** | Pulse the top move. Tap again to show the second-best, or the PV's next stone. | Low levels: root `policy` argmax of the small net, effectively instant from cache. High levels: MCTS top move by LCB. | One b6c96 eval is ≈30–250 ms on CPU **[E]**. Precompute it while the human thinks ("ponder"). |
 | **Threat peek** (hold) | **Option A (recommended, deterministic, like chess.js attack data):** shade groups in **atari** (1 liberty) and groups with **2 liberties**, both colours, plus ladder-capturable stones. Pure TS, no engine. **Option B:** ownership/territory heatmap from the ownership head (root ownership of the cached eval). | A: rules core. B: KataGo `ownership` (Web KaTrain exposes root/tree ownership **[V]**). | A ≈ 0 ms. B is free if the cached eval exists. |
@@ -406,7 +406,7 @@ Targets are for 19×19. 9×9 and 13×13 use the same methods, with visit counts 
   - GNU Go WASM runs in Node (its README example is Node-friendly; tests use `test/smoke.mts`) **[V]**.
   - pachi-web has a headless `npm run smoke` **[V]**.
   - toyoshi's KataGo WASM runs as a Node CLI (`NODERAWFS`) **[V]**. It needs pthreads, which Node supports, so it is a reference oracle for checking our TS search against real KataGo.
-- **Suggested `scripts/selfplay.mjs` for Zigo:**
+- **Suggested `scripts/selfplay.mjs` for Zengo:**
   1. Level 12 vs level 1, expecting a win by resignation or score.
   2. A calibration ladder: each level vs **GNU Go level 10** (≈5–8k **[C]**) on 9×9 and 19×19, N games each, to fit the kyu targets. This is the KaTrain method.
   3. Optionally, levels vs real KataGo at fixed visits through the WASM CLI.
@@ -420,7 +420,7 @@ Targets are for 19×19. 9×9 and 13×13 use the same methods, with visit counts 
 2. **WebGPU on iOS home-screen PWAs and in workers.** Supported per caniuse (Safari 26+) **[C]**. **Verify on a device**, and verify the WASM fallback on iOS < 26.
 3. **Low-end Android.** b10c128 on CPU (≈0.5–0.8 s/eval **[E]**) makes levels 10–12 slow. Cap by time, not visits, and document that strength depends on the device (as Pachi does).
 4. **Blunder guard accuracy.** A raw b6c96 eval is noisy (single-view ownership error up to 0.25 **[V]**). Tune the thresholds by self-play. Prefer missing a blunder to a false bounce.
-5. **Calibration below 18k.** KaTrain's formula is calibrated for about 18k–2d **[V]**. Levels 1–2 need Zigo's own humanizing and real-beginner play-testing.
+5. **Calibration below 18k.** KaTrain's formula is calibrated for about 18k–2d **[V]**. Levels 1–2 need Zengo's own humanizing and real-beginner play-testing.
 6. **Rules choice.** Area scoring makes passes, dead stones and counting simpler, and Web KaTrain scores terminal nodes exactly under area rules **[V]**. Japanese/territory needs encore or dead-stone agreement; goscorer handles counting, including seki **[V]**.
 7. **Storage eviction.** Request persistent storage. Re-download the nets transparently if they are evicted (Zhess's offline-state UI pattern).
 

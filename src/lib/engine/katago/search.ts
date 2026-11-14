@@ -4,13 +4,13 @@
  * LCB-based final move selection; ownership averaged over the search.
  *
  * A compact port of Web KaTrain's `analyzeMcts.ts` (MIT, see ./LICENSE), which follows KataGo's
- * `cpp/search/*.cpp`. Zigo keeps the parts a game opponent needs and leaves out graph search,
+ * `cpp/search/*.cpp`. Zengo keeps the parts a game opponent needs and leaves out graph search,
  * subtree value bias, noise pruning, uncertainty weighting, human-SL exploration, regions of
  * interest and analysis-only reporting. Every visit has weight 1.
  *
  * Rules inside the search: captures, simple ko and positional superko (Zobrist hashes of every
  * board in the game and along the line), no suicide. Two consecutive passes end a line: that node is
- * judged by the network and never expanded (Zigo agrees dead stones after the game, so no
+ * judged by the network and never expanded (Zengo agrees dead stones after the game, so no
  * Tromp-Taylor count is forced on the search). At the root, KataGo's `conservativePass` input is
  * used, as in its GTP defaults.
  *

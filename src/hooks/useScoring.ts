@@ -12,7 +12,7 @@
 import { useMemo } from 'react';
 import scoringApi from '@/lib/scoring';
 import type { Color, Game, Point, Result, Score } from '@/lib/types';
-import { formatHalf } from '@/lib/zigo';
+import { formatHalf } from '@/lib/zengo';
 
 /** What the scoring bar and the board can do. Each returns whether it applied. */
 export interface ScoringActions {

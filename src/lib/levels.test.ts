@@ -25,7 +25,7 @@ import {
   type EngineAnswer,
 } from './levels';
 import type { EngineCandidate, Game } from './types';
-import { PASS, fromDiagram, isLegal, makeSettings, play, pointToIndex, replay } from './zigo';
+import { PASS, fromDiagram, isLegal, makeSettings, play, pointToIndex, replay } from './zengo';
 
 describe('level table (DESIGN 10.2)', () => {
   it('has twelve levels with the design values', () => {

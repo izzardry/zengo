@@ -35,17 +35,17 @@ export interface GoBoardProps {
   readonly interactive?: boolean;
   /** Helpers bundle (DESIGN 7.1): last-move ring, atari, ko marker, coordinates, blunder pulse, the illegal ghost. */
   readonly helpers: boolean;
-  /** The last ply's point (`zigo.lastMove`); `tt` or null draws no ring. */
+  /** The last ply's point (`zengo.lastMove`); `tt` or null draws no ring. */
   readonly lastMove?: Point | null;
   /** The simple-ko point the side to move may not retake (`Game.ko`). */
   readonly ko?: Point | null;
   /**
-   * The mover's own groups with one liberty (`zigo.atari(game, game.turn)`). Each gets a ring; a
+   * The mover's own groups with one liberty (`zengo.atari(game, game.turn)`). Each gets a ring; a
    * group pulses once, when it first appears in its color's list (not again while it stays in atari).
    */
   readonly atari?: readonly (readonly Point[])[];
   /**
-   * Why the side to move may not play `p` (`zigo.illegalReason`), or null when legal. Without it
+   * Why the side to move may not play `p` (`zengo.illegalReason`), or null when legal. Without it
    * every empty point is legal and an occupied one is `occupied`.
    */
   readonly illegalReason?: (p: Point) => IllegalReason | null;

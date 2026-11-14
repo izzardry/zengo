@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { StoneGlyph } from '@/components/board';
 import { useI18n } from '@/lib/i18n';
-import { formatHalf } from '@/lib/zigo';
+import { formatHalf } from '@/lib/zengo';
 import type { Color, Score } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { formatKomi, other, scoreLine, scoreTotals } from './format';

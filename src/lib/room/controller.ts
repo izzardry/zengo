@@ -103,10 +103,10 @@ import type {
   TransportFailure,
   TransportState,
   WelcomeMsg,
-  ZigoApi,
+  ZengoApi,
 } from '../types';
 import { PROTOCOL_VERSION } from '../types';
-import zigoDefault, { makeSettings, normalizeHandicap, parseTc, PASS } from '../zigo';
+import zengoDefault, { makeSettings, normalizeHandicap, parseTc, PASS } from '../zengo';
 import { budgetMs } from '../clock';
 import { defaultTimers, type RoomTransport, type Timers, type TransportFailureKind, type TransportRole } from '../transport/common';
 import {
@@ -264,7 +264,7 @@ function timeout(color: Color): LogEnd {
  * remaining time, or byo-yomi's main time plus every period left (a move inside a period keeps it).
  * The flag falls at zero or below, the same instant as lib/clock's `flagged`.
  */
-export function timeLeft(api: ZigoApi, game: Game, tc: NonNullable<TimeControl>, turnMs: number): number {
+export function timeLeft(api: ZengoApi, game: Game, tc: NonNullable<TimeControl>, turnMs: number): number {
   return budgetMs(api.clocks(game, tc)[game.turn], tc) - turnMs;
 }
 
@@ -329,7 +329,7 @@ class Controller implements RoomControllerApi {
   /* config */
   private readonly code: string;
   private readonly store: Store;
-  private readonly api: ZigoApi;
+  private readonly api: ZengoApi;
   private readonly propose: Proposer | null;
   private readonly now: () => number;
   private readonly wall: () => number;
@@ -419,7 +419,7 @@ class Controller implements RoomControllerApi {
   constructor(opts: RoomControllerOptions) {
     this.code = opts.code;
     this.store = opts.store;
-    this.api = opts.zigo ?? zigoDefault;
+    this.api = opts.zengo ?? zengoDefault;
     this.propose = opts.propose ?? null;
     this.now = opts.now ?? defaultNow;
     this.wall = opts.wallNow ?? Date.now;

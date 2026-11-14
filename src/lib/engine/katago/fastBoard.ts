@@ -4,8 +4,8 @@
  * 14–17).
  *
  * Ported from Web KaTrain `src/engine/katago/fastBoard.ts` (MIT, see ./LICENSE), which follows
- * KataGo's `cpp/game/board.cpp` and `cpp/neuralnet/nninputs.cpp`. Zigo keeps everything except the
- * independent-life area (only needed for group-tax rulesets, which Zigo does not offer).
+ * KataGo's `cpp/game/board.cpp` and `cpp/neuralnet/nninputs.cpp`. Zengo keeps everything except the
+ * independent-life area (only needed for group-tax rulesets, which Zengo does not offer).
  *
  * The board size is module state (`setBoardSize`), as in the original: one engine per worker or
  * per Node process, one search at a time. Points are row-major from the top, `y * size + x`.

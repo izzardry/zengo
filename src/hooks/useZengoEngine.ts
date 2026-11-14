@@ -1,5 +1,5 @@
 /**
- * `useZigoEngine`: React access to the one shared engine worker (DESIGN 10.1).
+ * `useZengoEngine`: React access to the one shared engine worker (DESIGN 10.1).
  *
  * The computer opponent, the hint, the blunder guard and the scoring proposal all call this hook and
  * get the same engine, so there is only ever one worker and one search queue. Nothing is fetched
@@ -31,7 +31,7 @@ export function setSharedEngine(engine: EngineHandle | null): void {
 }
 
 /** The shared engine as `EngineApi`, re-rendering on snapshot changes. */
-export function useZigoEngine(engine?: EngineHandle): EngineApi {
+export function useZengoEngine(engine?: EngineHandle): EngineApi {
   const e = engine ?? sharedEngine();
   const methods = useMemo(
     () => ({

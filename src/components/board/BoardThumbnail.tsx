@@ -24,7 +24,7 @@ export interface BoardThumbnailProps {
 
 export const BoardThumbnail = memo(function BoardThumbnail({ size: rawSize, board, px = 64, label, className }: BoardThumbnailProps) {
   const size = asSize(rawSize);
-  const id = useSvgId('zigo-thumb');
+  const id = useSvgId('zengo-thumb');
   const last = size - 1;
   let grid = '';
   for (let i = 0; i <= last; i++) grid += `M${i} 0V${last}M0 ${i}H${last}`;

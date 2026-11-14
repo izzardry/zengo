@@ -18,7 +18,7 @@ import { X } from 'lucide-react';
 import { BoardThumbnail } from '@/components/board';
 import { levelKey, useI18n } from '@/lib/i18n';
 import type { Room, SavedGame } from '@/lib/types';
-import { formatHalf } from '@/lib/zigo';
+import { formatHalf } from '@/lib/zengo';
 import { cn } from '@/lib/utils';
 import { cardState, formatRelativeTime, formatRoomScore, gameOf, moveCount, plyCount, sizeLabel, sizeOf, type CardState } from './history';
 import { useSwipeToDelete } from './useSwipeToDelete';

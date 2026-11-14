@@ -4,14 +4,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PlayerStrip } from '@/components/game/PlayerStrip';
 import { I18nProvider } from '@/lib/i18n';
 import type { Game, TcString, TimeControl } from '@/lib/types';
-import zigo, { makeSettings } from '@/lib/zigo';
+import zengo, { makeSettings } from '@/lib/zengo';
 import { useClock, type UseClockOptions } from './useClock';
 
 const S9 = makeSettings(9);
 
 /** Plays SGF points (`tt` = pass) with the given ms each. Black moves first. */
-function playAll(moves: [string, number][], g: Game = zigo.newGame(S9)): Game {
-  return moves.reduce((acc, [m, ms]) => zigo.play(acc, m, ms), g);
+function playAll(moves: [string, number][], g: Game = zengo.newGame(S9)): Game {
+  return moves.reduce((acc, [m, ms]) => zengo.play(acc, m, ms), g);
 }
 
 /** Both sides have moved once, so Black's clock runs: E5, C7, Black to move. */
@@ -126,7 +126,7 @@ describe('useClock', () => {
     advance(7000);
     const ms = result.current.elapsed();
     expect(ms).toBe(7000);
-    const next = zigo.play(opened, 'gg', ms);
+    const next = zengo.play(opened, 'gg', ms);
     rerender({ game: next, tc: ONE_MIN, opts: {} });
     expect(result.current.elapsed()).toBe(0);
     expect(result.current.B).toMatchObject({ text: '0:53', running: false });
@@ -155,12 +155,12 @@ describe('useClock', () => {
     expect(result.current.B.text).toBe('0:48');
     expect(result.current.W.text).toBe('0:52');
     advance(3000);
-    const back = zigo.undo(g, 2);
+    const back = zengo.undo(g, 2);
     rerender({ game: back, tc: ONE_MIN, opts: {} });
     expect(result.current.B.text).toBe('1:00');
     expect(result.current.W.text).toBe('1:00');
     expect(result.current.elapsed()).toBe(0);
-    rerender({ game: zigo.redo(back, 2), tc: ONE_MIN, opts: {} });
+    rerender({ game: zengo.redo(back, 2), tc: ONE_MIN, opts: {} });
     expect(result.current.B.text).toBe('0:48');
     expect(result.current.W.text).toBe('0:52');
   });
@@ -183,7 +183,7 @@ describe('useClock', () => {
 
   it('does not flag while paused or before the side has moved', () => {
     const onFlag = vi.fn();
-    const { rerender } = mount(zigo.newGame(S9), ONE_MIN, { onFlag });
+    const { rerender } = mount(zengo.newGame(S9), ONE_MIN, { onFlag });
     advance(120_000);
     expect(onFlag).not.toHaveBeenCalled();
     rerender({ game: opened, tc: ONE_MIN, opts: { onFlag, paused: true } });
@@ -192,7 +192,7 @@ describe('useClock', () => {
   });
 
   it('a game lost on time shows 0.0 and stops', () => {
-    const lost = zigo.end(opened, { winner: 'W', by: 'time' });
+    const lost = zengo.end(opened, { winner: 'W', by: 'time' });
     const { result } = mount(lost, ONE_MIN);
     expect(result.current.ticking).toBe(false);
     expect(result.current.B).toMatchObject({ text: '0.0', flagged: true });
@@ -255,10 +255,10 @@ describe('useClock', () => {
     advance(6_000);
     expect(result.current.B.text).toBe('4.0 ·3');
     // Black moves 6 s into the first period: the period is kept and refills.
-    const g1 = zigo.play(opened, 'gg', result.current.elapsed());
+    const g1 = zengo.play(opened, 'gg', result.current.elapsed());
     rerender({ game: g1, tc: '1m3x10', opts: { onFlag } });
     expect(result.current.B).toMatchObject({ text: '0:10 ·3', running: false });
-    const g2 = zigo.play(g1, 'cg', result.current.elapsed());
+    const g2 = zengo.play(g1, 'cg', result.current.elapsed());
     rerender({ game: g2, tc: '1m3x10', opts: { onFlag } });
     advance(12_000);
     expect(result.current.B).toMatchObject({ text: '8.0 ·2', running: true });
@@ -270,7 +270,7 @@ describe('useClock', () => {
     expect(onFlag).toHaveBeenCalledWith('B');
     expect(result.current.B).toMatchObject({ text: '0.0', flagged: true });
     // Undo restores the clock from the log: the side to move is White, Black's periods are back.
-    rerender({ game: zigo.undo(g2, 1), tc: '1m3x10', opts: { onFlag } });
+    rerender({ game: zengo.undo(g2, 1), tc: '1m3x10', opts: { onFlag } });
     expect(result.current.B).toMatchObject({ text: '0:10 ·3', flagged: false });
   });
 

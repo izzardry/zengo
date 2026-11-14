@@ -1,5 +1,5 @@
 import type { GameLog, HeadMsg, LogsMsg, Message, SavedGame, Scoring, Seat } from './types';
-import zigo, { MAX_PLIES } from './zigo';
+import zengo, { MAX_PLIES } from './zengo';
 import {
   acceptLog,
   acceptMarking,
@@ -197,10 +197,10 @@ const ORDERS = ['alternate', 'a-first', 'b-first', 1, 2, 3, 4, 5] as const;
 describe('hashing', () => {
   it('is stable and 16 hex digits', () => {
     expect(hashString('')).toMatch(/^[0-9a-f]{16}$/);
-    expect(hashString('zigo')).toBe(hashString('zigo'));
-    expect(hashString('zigo')).not.toBe(hashString('zigO'));
+    expect(hashString('zengo')).toBe(hashString('zengo'));
+    expect(hashString('zengo')).not.toBe(hashString('zengO'));
     // Pinned so that a change of the hash (a protocol change) is noticed.
-    expect(hashString('zigo')).toMatchInlineSnapshot(`"4bacb2cdfe451073"`);
+    expect(hashString('zengo')).toMatchInlineSnapshot(`"21b1d80797cdfe30"`);
   });
 
   it('covers n, epoch, black, tc, settings, points and times, but neither scoring nor the end in pliesHash', () => {
@@ -384,7 +384,7 @@ describe('validateLog', () => {
   });
 
   it('logToGame replays or throws', () => {
-    expect(logToGame(log(1, LINE_A)).board).toEqual(zigo.replay(logToGame(log(1, [])).settings, LINE_A).board);
+    expect(logToGame(log(1, LINE_A)).board).toEqual(zengo.replay(logToGame(log(1, [])).settings, LINE_A).board);
     expect(() => logToGame({ ...log(1, []), plies: [{ m: 'cc', ms: 0 }, { m: 'cc', ms: 0 }] })).toThrow(/Invalid game log/);
   });
 });
@@ -1452,7 +1452,7 @@ describe('base64url', () => {
     const bytes = new Uint8Array([0xfb, 0xff, 0xbf, 0x00, 0x10]);
     expect(toBase64Url(bytes)).toBe('-_-_ABA');
     expect([...fromBase64Url('-_-_ABA=')]).toEqual([...bytes]);
-    expect(toBase64Url(new TextEncoder().encode('Zigo'))).toBe('Wmlnbw');
+    expect(toBase64Url(new TextEncoder().encode('Zengo'))).toBe('WmVuZ28');
   });
 
   it('rejects bad input', () => {
@@ -1576,7 +1576,7 @@ describe('GameLog ↔ SavedGame', () => {
       rules: 'territory',
       handicap: 0,
       tc: '5+0',
-      moves: zigo.encodeMoves(l.plies),
+      moves: zengo.encodeMoves(l.plies),
       ms: l.plies.map((p) => p.ms),
       result: { winner: 'W', by: 'resign' },
       assisted: false,

@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { I18nProvider } from '@/lib/i18n';
 import type { Language, TimeControl } from '@/lib/types';
 import { ClockDial, DIAL_INCREMENTS, DIAL_MINUTES, DIAL_PERIOD_SECONDS, DIAL_PERIODS, type ClockDialProps } from './ClockDial';
-import { formatTc, parseTc } from '@/lib/zigo';
+import { formatTc, parseTc } from '@/lib/zengo';
 import { DIAL_GEOMETRY } from './dialGeometry';
 import { byoyomiTc, fischerTc } from './options';
 import { captionSide, clampCenter, DIAL_EXTENT, DIAL_MARGIN } from './dialPlacement';
@@ -193,7 +193,7 @@ describe('ClockDial (DESIGN 11: system, minutes, then increment or period and pe
     // First arrow aims at the current value, the next moves clockwise.
     fireEvent.keyDown(dial(), { key: 'ArrowRight' });
     expect(item(5)).toHaveClass('dial-item--aim');
-    expect(dial()).toHaveAttribute('aria-activedescendant', `zigo-clock-dial-minutes-${DIAL_MINUTES.indexOf(5)}`);
+    expect(dial()).toHaveAttribute('aria-activedescendant', `zengo-clock-dial-minutes-${DIAL_MINUTES.indexOf(5)}`);
     fireEvent.keyDown(dial(), { key: 'ArrowRight' });
     fireEvent.keyDown(dial(), { key: 'Enter' });
     expect(dial()).toHaveAttribute('data-step', 'increment');

@@ -14,7 +14,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Game, GameLog, MarkMsg, Message, Point, RoomNoticeKind } from '../types';
 import { hashLog } from '../sync';
-import zigo from '../zigo';
+import zengo from '../zengo';
 import scoringApi from '../scoring';
 import type { MemoryOptions, MemoryTransport } from '../transport/memory';
 import { ROOM_DEFAULTS, type RoomCreateSettings } from '../room';
@@ -682,12 +682,12 @@ describe('byo-yomi in a room', () => {
     await play(h, [A, B], ['ce'], 25_000); // Black: 25 s in periods: two used, one kept
     const tc = A.ctrl.snapshot.tc!;
     for (const d of [A, B]) {
-      expect(zigo.clocks(d.ctrl.snapshot.game, tc)).toEqual({
+      expect(zengo.clocks(d.ctrl.snapshot.game, tc)).toEqual({
         B: { mainMs: 0, periodMs: 10_000, periods: 1 },
         W: { mainMs: 30_000, periodMs: 10_000, periods: 3 },
       });
     }
-    expect(timeLeft(zigo, B.ctrl.snapshot.game, tc, 0)).toBe(30_000 + 3 * 10_000);
+    expect(timeLeft(zengo, B.ctrl.snapshot.game, tc, 0)).toBe(30_000 + 3 * 10_000);
   });
 
   it("the opponent's flag in the last period is claimed after 2 s at zero; both show the same end", async () => {
@@ -700,7 +700,7 @@ describe('byo-yomi in a room', () => {
     frozenAt = h.time.t; // A's tab stalls on its own turn and never sees its flag fall
     const tc = B.ctrl.snapshot.tc!;
     // B's view of Black's clock: main time and both periods, then 2 s of grace.
-    const left = timeLeft(zigo, B.ctrl.snapshot.game, tc, B.ctrl.elapsed());
+    const left = timeLeft(zengo, B.ctrl.snapshot.game, tc, B.ctrl.elapsed());
     expect(left).toBeGreaterThan(79_000);
     await h.advance(left);
     expect(end(B)).toBeUndefined();
@@ -733,7 +733,7 @@ describe('byo-yomi in a room', () => {
     expect(A.ctrl.elapsed()).toBe(used + 200); // counting again from where it paused
     expect(B.ctrl.elapsed()).toBe(A.ctrl.elapsed()); // B took the turn time A reported
     // Black is in its first period (5 s used of it); the rest of it and the last period remain.
-    const left = timeLeft(zigo, A.ctrl.snapshot.game, A.ctrl.snapshot.tc!, A.ctrl.elapsed());
+    const left = timeLeft(zengo, A.ctrl.snapshot.game, A.ctrl.snapshot.tc!, A.ctrl.elapsed());
     expect(left).toBe(80_000 - A.ctrl.elapsed());
     expect(left).toBeLessThan(15_000);
     await h.advance(left - 1);
@@ -757,7 +757,7 @@ describe('byo-yomi in a room', () => {
     B.ctrl.resume();
     await h.advance(100);
     expect(A.ctrl.snapshot.myTurn).toBe(true);
-    const left = timeLeft(zigo, A.ctrl.snapshot.game, A.ctrl.snapshot.tc!, 0);
+    const left = timeLeft(zengo, A.ctrl.snapshot.game, A.ctrl.snapshot.tc!, 0);
     expect(left).toBe(10_000 + 2 * 10_000);
     await h.advance(left - 100 - 1);
     expect(end(A)).toBeUndefined();
@@ -850,7 +850,7 @@ describe('randomized scoring sessions', () => {
             if (rnd() > 0.35) {
               for (let tries = 0; tries < 20; tries++) {
                 const q = String.fromCharCode(97 + Math.floor(rnd() * 9), 97 + Math.floor(rnd() * 9));
-                if (zigo.isLegal(g, q)) {
+                if (zengo.isLegal(g, q)) {
                   p = q;
                   break;
                 }

@@ -9,14 +9,14 @@
  * the same game opens again at the same position. A bank for another game, another position
  * (a move was made since) or older than `MAX_AGE_MS` is ignored.
  *
- * Kept in `sessionStorage` (one tab's state; not one of the `zigo:` keys of DESIGN 13.1, which
+ * Kept in `sessionStorage` (one tab's state; not one of the `zengo:` keys of DESIGN 13.1, which
  * are device-wide), with an in-memory fallback when storage is blocked. Pure apart from the
  * injected storage; every access is guarded.
  */
 import { positionKey } from './clock';
 import type { Game, Now } from './types';
 
-export const TURN_BANK_KEY = 'zigo:turn';
+export const TURN_BANK_KEY = 'zengo:turn';
 
 /** A bank older than this is stale (a tab reopened the next day starts the turn fresh). */
 export const MAX_AGE_MS = 12 * 60 * 60 * 1000;

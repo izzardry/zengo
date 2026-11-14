@@ -7,7 +7,7 @@ import { I18nProvider } from '@/lib/i18n';
 import type { RoomControllerApi, RoomControllerOptions, RoomState } from '@/lib/room';
 import { createStore, memoryStorage } from '@/lib/storage';
 import type { Language, RoomNotice, RoomNoticeKind, RequestKind } from '@/lib/types';
-import zigo, { makeSettings } from '@/lib/zigo';
+import zengo, { makeSettings } from '@/lib/zengo';
 
 // Radix measures with ResizeObserver, which jsdom lacks.
 if (typeof globalThis.ResizeObserver === 'undefined') {
@@ -37,7 +37,7 @@ export function fakeRoomState(patch: Partial<RoomState> = {}): RoomState {
     score: [0, 0],
     n: 1,
     epoch: 0,
-    game: zigo.newGame(makeSettings(9)),
+    game: zengo.newGame(makeSettings(9)),
     color: 'B',
     tc: null,
     requests: {},

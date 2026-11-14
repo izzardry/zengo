@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Calibration ladder (DESIGN 10.2, 15.4): Zigo's computer levels against GNU Go 3.8 in Node, to fit
+ * Calibration ladder (DESIGN 10.2, 15.4): Zengo's computer levels against GNU Go 3.8 in Node, to fit
  * the approximate ranks the start screen may show (`src/lib/ranks.json`). Logged, not blocking.
  *
  *   node scripts/calibrate.mjs [--levels 1,3,5,7] [--games 2] [--size 9] [--rules area]
@@ -9,14 +9,14 @@
  *
  * GNU Go is the calibration anchor KaTrain used for its rank bot. It runs from the GPL-3.0 WASM
  * build of marinahane/gnugo-wasm (release v2), which this script downloads into
- * ~/.cache/zigo/gnugo-wasm-v2/ on first use. It is a development tool only: never copied into the
+ * ~/.cache/zengo/gnugo-wasm-v2/ on first use. It is a development tool only: never copied into the
  * repository, never shipped (DESIGN 15.2: nothing GPL ships).
  *
  * Each GNU Go move runs a fresh GNU Go instance (its `callMain` runs once per instance) that replays
- * the game as GTP `play` commands and answers `genmove`. Zigo plays with its own engine and level
+ * the game as GTP `play` commands and answers `genmove`. Zengo plays with its own engine and level
  * rules, exactly as `scripts/selfplay.mjs` does. Colors alternate. A game ends by resignation, by two
  * passes (area count with the engine's dead-stone proposal), or after three plies per point (the
- * engine's score estimate decides). GNU Go answers that Zigo's rules forbid (positional superko)
+ * engine's score estimate decides). GNU Go answers that Zengo's rules forbid (positional superko)
  * count as a pass.
  *
  * Output: per level the games, wins and win rate against GNU Go, and a rank estimate. The estimate
@@ -34,7 +34,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createNodeEngine } from '../src/lib/engine/node.ts';
 import { avoidFor, levelSpec, nextSeed, openDame, pickMove, resignDecision, seededRng } from '../src/lib/levels.ts';
-import { PASS, fromGtp, gtp, isLegal, isPass, makeSettings, newGame, pass, play, position } from '../src/lib/zigo.ts';
+import { PASS, fromGtp, gtp, isLegal, isPass, makeSettings, newGame, pass, play, position } from '../src/lib/zengo.ts';
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
@@ -60,7 +60,7 @@ const backend = arg('backend', 'wasm') === 'cpu' ? 'cpu' : 'wasm';
 
 const RELEASE = 'https://github.com/marinahane/gnugo-wasm/releases/download/v2';
 const FILES = { 'gnugo.mjs': 81401, 'gnugo.wasm': 6159472, LICENSE: 35147 };
-const CACHE = join(homedir(), '.cache', 'zigo', 'gnugo-wasm-v2');
+const CACHE = join(homedir(), '.cache', 'zengo', 'gnugo-wasm-v2');
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 /** Downloads GNU Go WASM into the cache (once), checking each file's size. */
@@ -123,7 +123,7 @@ async function gnugoMove(g, gnugoSeed) {
   if (text === 'pass' || text === '') return PASS;
   const p = fromGtp(text, size);
   if (!p || !isLegal(g, p)) {
-    console.warn(`  GNU Go answered ${text}, not legal under Zigo's rules: counted as a pass`);
+    console.warn(`  GNU Go answered ${text}, not legal under Zengo's rules: counted as a pass`);
     return PASS;
   }
   return p;
@@ -170,7 +170,7 @@ const rng = seededRng(seed);
 const started = Date.now();
 const deadline = started + maxMinutes * 60_000;
 const table = [];
-const timing = { zigo: { ms: 0, moves: 0 }, gnugo: { ms: 0, moves: 0 } };
+const timing = { zengo: { ms: 0, moves: 0 }, gnugo: { ms: 0, moves: 0 } };
 console.log(
   `Calibration on ${size}×${size} (${rules}): levels ${levels.join(', ')} × ${gamesPerLevel} game(s) against GNU Go level ${gnugoLevel}; backend ${engine.backend}`,
 );
@@ -185,19 +185,19 @@ outer: for (const level of levels) {
       break outer;
     }
     gameNo++;
-    const zigoColor = n % 2 === 0 ? 'B' : 'W';
+    const zengoColor = n % 2 === 0 ? 'B' : 'W';
     let g = newGame(makeSettings(size, rules, 0));
     const views = [];
     let result = null;
     const t0 = Date.now();
     while (!g.scoring && g.cursor < size * size * 3) {
       const ts = Date.now();
-      if (g.turn === zigoColor) {
+      if (g.turn === zengoColor) {
         const pos = position(g);
         const res = await engine.genmove(pos, level, undefined, { avoid: avoidFor(g, level), seed: nextSeed(rng) });
         views.push({ winrate: res.winrate, scoreLead: res.scoreLead });
         if (resignDecision(level, size, g.cursor, views)) {
-          result = { winner: zigoColor === 'B' ? 'W' : 'B', by: 'resign' };
+          result = { winner: zengoColor === 'B' ? 'W' : 'B', by: 'resign' };
           break;
         }
         let move = pickMove(g, level, res, rng).move;
@@ -207,14 +207,14 @@ outer: for (const level of levels) {
           if (dame.length > 0) move = dame[0];
         }
         g = isPass(move) ? pass(g, 0) : play(g, move, 0);
-        timing.zigo.ms += Date.now() - ts;
-        timing.zigo.moves++;
+        timing.zengo.ms += Date.now() - ts;
+        timing.zengo.moves++;
       } else {
         const move = await gnugoMove(g, seed * 1000 + gameNo * 7 + g.cursor);
         timing.gnugo.ms += Date.now() - ts;
         timing.gnugo.moves++;
         if (move === 'resign') {
-          result = { winner: zigoColor, by: 'resign' };
+          result = { winner: zengoColor, by: 'resign' };
           break;
         }
         g = isPass(move) ? pass(g, 0) : play(g, move, 0);
@@ -232,13 +232,13 @@ outer: for (const level of levels) {
         result = { winner: lead > 0 ? 'B' : 'W', by: 'estimate', margin: Math.abs(Math.round(lead * 10) / 10) };
       }
     }
-    const won = result.winner === zigoColor;
+    const won = result.winner === zengoColor;
     row.games++;
     if (won) row.wins++;
     const text = result.by === 'resign' ? `${result.winner}+R` : `${result.winner}+${result.margin}${result.by === 'estimate' ? ' (estimate)' : ''}`;
     row.results.push(text);
     console.log(
-      `  level ${level} as ${zigoColor === 'B' ? 'Black' : 'White'}: ${text} after ${g.cursor} plies, ${((Date.now() - t0) / 1000).toFixed(0)} s → ${won ? 'Zigo won' : 'GNU Go won'}`,
+      `  level ${level} as ${zengoColor === 'B' ? 'Black' : 'White'}: ${text} after ${g.cursor} plies, ${((Date.now() - t0) / 1000).toFixed(0)} s → ${won ? 'Zengo won' : 'GNU Go won'}`,
     );
   }
 }
@@ -273,7 +273,7 @@ for (const row of table) {
   );
 }
 console.log(
-  `\nTime per move: Zigo ${(timing.zigo.ms / Math.max(1, timing.zigo.moves)).toFixed(0)} ms, GNU Go ${(timing.gnugo.ms / Math.max(1, timing.gnugo.moves)).toFixed(0)} ms; total ${((Date.now() - started) / 60000).toFixed(1)} min.`,
+  `\nTime per move: Zengo ${(timing.zengo.ms / Math.max(1, timing.zengo.moves)).toFixed(0)} ms, GNU Go ${(timing.gnugo.ms / Math.max(1, timing.gnugo.moves)).toFixed(0)} ms; total ${((Date.now() - started) / 60000).toFixed(1)} min.`,
 );
 
 if (Object.keys(ranks).length >= 2) {

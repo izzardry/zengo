@@ -3,12 +3,12 @@
  * first-run defaults.
  *
  * Stored shapes (JSON, through `lib/storage.ts`):
- * - `zigo:opponent` → the `Opponent` object, e.g. `{"mode":"computer","level":5}`
- * - `zigo:color`    → `"random"` / `"B"` / `"W"`
- * - `zigo:size`     → `9` / `13` / `19`
- * - `zigo:rules`    → `"area"` / `"territory"`
- * - `zigo:handicap` → `{"9": 0, "13": 3, "19": 0}`
- * - `zigo:clock`    → `{"9": "2+7", "13": null, "19": "20m5x30"}` (null = off)
+ * - `zengo:opponent` → the `Opponent` object, e.g. `{"mode":"computer","level":5}`
+ * - `zengo:color`    → `"random"` / `"B"` / `"W"`
+ * - `zengo:size`     → `9` / `13` / `19`
+ * - `zengo:rules`    → `"area"` / `"territory"`
+ * - `zengo:handicap` → `{"9": 0, "13": 3, "19": 0}`
+ * - `zengo:clock`    → `{"9": "2+7", "13": null, "19": "20m5x30"}` (null = off)
  */
 import { useCallback, useState } from 'react';
 import {
@@ -25,7 +25,7 @@ import {
   type PrefStore,
 } from '@/lib/storage';
 import type { ColorChoice, Opponent, Rules, Size, TimeControl } from '@/lib/types';
-import { formatTc, normalizeHandicap, parseTc } from '@/lib/zigo';
+import { formatTc, normalizeHandicap, parseTc } from '@/lib/zengo';
 import { DEFAULT_OPPONENT, OPPONENTS, SIZE_CHOICES, isColorChoice, isOpponent, isRules, isSize, opponentIndex } from './options';
 
 export function readOpponent(s: PrefStore = goStore): Opponent {
@@ -43,12 +43,12 @@ export type PerSizeValues<T> = Readonly<Record<Size, T>>;
 const perSize = <T,>(f: (size: Size) => T): PerSizeValues<T> =>
   ({ 9: f(9), 13: f(13), 19: f(19) }) as PerSizeValues<T>;
 
-/** Remembered clock per size (`zigo:clock`); off where nothing valid is stored. */
+/** Remembered clock per size (`zengo:clock`); off where nothing valid is stored. */
 export function readClocks(s: PrefStore = goStore): PerSizeValues<TimeControl> {
   return perSize((size) => parseTc(readClock(s, size, null)));
 }
 
-/** Remembered handicap per size (`zigo:handicap`); 0 where nothing valid is stored. */
+/** Remembered handicap per size (`zengo:handicap`); 0 where nothing valid is stored. */
 export function readHandicaps(s: PrefStore = goStore): PerSizeValues<number> {
   return perSize((size) => readHandicap(s, size));
 }
@@ -78,7 +78,7 @@ export interface StartPrefs {
 
 /**
  * The remembered selector values with setters that persist immediately.
- * Pass a store in tests; the app uses the default `zigo:` localStorage store.
+ * Pass a store in tests; the app uses the default `zengo:` localStorage store.
  */
 export function useStartPrefs(s: PrefStore = goStore): StartPrefs {
   const [opponent, setOpponentState] = useState<Opponent>(() => readOpponent(s));

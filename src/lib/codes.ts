@@ -2,7 +2,7 @@
  * Game codes (Ztyle chapter 11, DESIGN 4.1).
  *
  * Alphabet `0-9A-Z`, uppercase. Generated codes have 6 characters; typed codes are accepted
- * with 1–8 characters after normalization. In Zigo the code names a game (and, for rooms,
+ * with 1–8 characters after normalization. In Zengo the code names a game (and, for rooms,
  * the room); nothing is generated from it.
  */
 import type { Rng } from './types';

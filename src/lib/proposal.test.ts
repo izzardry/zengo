@@ -3,7 +3,7 @@ import { FakeEngine } from './engine/fake';
 import { PROPOSAL_TIMEOUT_MS, PROPOSAL_VISITS, createDeadStoneProposer, proposalNet, proposeDeadStones } from './proposal';
 import type { DeadStoneProposer } from '@/hooks/useGameState';
 import type { EngineApi, Position } from './types';
-import { fromDiagram, pass, pointToIndex } from './zigo';
+import { fromDiagram, pass, pointToIndex } from './zengo';
 
 /**
  * A finished 9×9 game in scoring: Black owns the left, White the right; a white stone at b5 (`be`)

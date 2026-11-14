@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Rasterizes the Zigo brand images into public/ (DESIGN 2, Ztyle 01 and 12):
+ * Rasterizes the Zengo brand images into public/ (DESIGN 2, Ztyle 01 and 12):
  *
  *   public/pwa-192x192.png            icon, 192 × 192 (also the apple-touch-icon in index.html)
  *   public/pwa-512x512.png            icon, 512 × 512
@@ -124,7 +124,7 @@ function ogHtml() {
   const body = `
     <div class="board">${blurredBoard(520)}</div>
     <div class="text">
-      <div class="mark">ZIGO</div>
+      <div class="mark">ZENGO</div>
       <div class="tag">Zero Distractions. Just Go.</div>
       <div class="feat">${FEATURES.join("  |  ")}</div>
     </div>`;

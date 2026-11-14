@@ -4,10 +4,10 @@ describe("test environment", () => {
   it("provides working localStorage and sessionStorage", () => {
     for (const s of [localStorage, window.localStorage, sessionStorage]) {
       expect(s).toBeDefined();
-      s.setItem("zigo:probe", "1");
-      expect(s.getItem("zigo:probe")).toBe("1");
-      s.removeItem("zigo:probe");
-      expect(s.getItem("zigo:probe")).toBeNull();
+      s.setItem("zengo:probe", "1");
+      expect(s.getItem("zengo:probe")).toBe("1");
+      s.removeItem("zengo:probe");
+      expect(s.getItem("zengo:probe")).toBeNull();
     }
   });
 });

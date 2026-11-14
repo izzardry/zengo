@@ -33,18 +33,18 @@ type ToasterProps = ComponentProps<typeof Sonner>;
  * CSS variable (on `<html>`) with the height of the portrait bottom chrome above its inset, when it
  * is taller than the toolbar: set by the scoring bar with its note (`ScoringBar`).
  */
-export const BOTTOM_CHROME_VAR = "--zigo-bottom-chrome";
+export const BOTTOM_CHROME_VAR = "--zengo-bottom-chrome";
 /**
  * CSS variable (on `<html>`) with the toasts' bottom offset on the start screen, set by the start
  * footer while it shows (`startToastBottomPx`); absent in game.
  */
-export const START_TOAST_VAR = "--zigo-start-toast-bottom";
+export const START_TOAST_VAR = "--zengo-start-toast-bottom";
 /**
  * CSS variable (on `<html>`) with the height the toasts take at the bottom right in mobile landscape
  * (their stack, the bottom offset and a gap), set by the Toaster while toasts show there
  * (`railToastsValue`); absent otherwise. The right rail stays above it (`railVars`, `ScoringBar`).
  */
-export const RAIL_TOASTS_VAR = "--zigo-rail-toasts";
+export const RAIL_TOASTS_VAR = "--zengo-rail-toasts";
 /** The portrait toolbar's height above its inset: 44 px buttons + py-1.5 + border. */
 export const TOOLBAR_HEIGHT_PX = 58;
 
@@ -151,7 +151,7 @@ export function toasterPlacement(landscape: boolean, viewport: Viewport = { widt
       offset,
       mobileOffset: offset,
       style: { "--width": TOAST_WIDTH_LANDSCAPE } as CSSProperties,
-      className: "zigo-toaster-rail",
+      className: "zengo-toaster-rail",
     };
   }
   const mobileOffset = { bottom: TOAST_BOTTOM_PORTRAIT, left: TOAST_SIDE_PHONE, right: TOAST_SIDE_PHONE };

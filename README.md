@@ -1,10 +1,10 @@
-# Zigo
+# Zengo
 
 **Zero Distractions. Just Go.**
 
-A minimalist Go game built as a Progressive Web App, by [izzardry](https://github.com/izzardry). Play the computer, pass one device between two players, or open a room for two devices with no game server. No ads, no accounts, no nonsense — just Go. Zigo is the sibling of [Zhess](https://github.com/izzardry/zhess), the izzardry chess game.
+A minimalist Go game built as a Progressive Web App, by [izzardry](https://github.com/izzardry). Play the computer, pass one device between two players, or open a room for two devices with no game server. No ads, no accounts, no nonsense — just Go. Zengo is the sibling of [Zhess](https://github.com/izzardry/zhess), the izzardry chess game.
 
-Play it at **[izzardry.github.io/zigo](https://izzardry.github.io/zigo/)**.
+Play it at **[izzardry.github.io/zengo](https://izzardry.github.io/zengo/)**.
 
 ## Features
 
@@ -33,7 +33,7 @@ Play it at **[izzardry.github.io/zigo](https://izzardry.github.io/zigo/)**.
 - [Vite](https://vitejs.dev) (with SWC)
 - [Tailwind CSS](https://tailwindcss.com) with the izzardry Ztyle preset
 - [shadcn/ui](https://ui.shadcn.com) (Radix UI primitives)
-- A small rules core of its own (`src/lib/zigo.ts`), with [goscorer](https://github.com/lightvector/goscorer) for counting
+- A small rules core of its own (`src/lib/zengo.ts`), with [goscorer](https://github.com/lightvector/goscorer) for counting
 - [TensorFlow.js](https://www.tensorflow.org/js) 4.22.0 (WebGPU and WebAssembly backends) running [KataGo](https://github.com/lightvector/KataGo) networks, with a search ported from [Web KaTrain](https://github.com/Sir-Teo/web-katrain)
 - [PeerJS](https://peerjs.com) and WebRTC for rooms, [qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator) for the manual fallback
 - [vite-plugin-pwa](https://vite-pwa-org.netlify.app) for service worker and offline support
@@ -49,8 +49,8 @@ Play it at **[izzardry.github.io/zigo](https://izzardry.github.io/zigo/)**.
 ### Install & Run
 
 ```sh
-git clone https://github.com/izzardry/zigo.git
-cd zigo
+git clone https://github.com/izzardry/zengo.git
+cd zengo
 npm install
 npm run dev        # http://localhost:8080
 ```
@@ -83,7 +83,7 @@ node scripts/screenshots.mjs <baseURL> <outDir>   # the main screens against a r
 
 **Self-play.** `--strong 12 --weak 1 --size 9|13|19 --rules area|territory --games 1 --seed 1 --strong-black --max-plies N --backend wasm|cpu --quiet` (defaults shown first). Colors alternate unless `--strong-black` is given; the default ply cap is three plies per point. Exits 0 when the strong level won every game.
 
-**Calibration.** `--levels 1,3,5,7 --games 2 --size 9 --rules area --gnugo-level 10 --seed 1 --anchor 6 --min-games 10 --max-minutes 30 --write --backend wasm|cpu`. It downloads the GNU Go 3.8 WASM build into `~/.cache/zigo/gnugo-wasm-v2/` on first use. A level gets a rank only with at least `--min-games` games and a win rate between 10 % and 90 %; `--write` writes `src/lib/ranks.json` when at least two levels got one. The start screen shows ranks only from a 19×19 table, and none has been written yet.
+**Calibration.** `--levels 1,3,5,7 --games 2 --size 9 --rules area --gnugo-level 10 --seed 1 --anchor 6 --min-games 10 --max-minutes 30 --write --backend wasm|cpu`. It downloads the GNU Go 3.8 WASM build into `~/.cache/zengo/gnugo-wasm-v2/` on first use. A level gets a rank only with at least `--min-games` games and a win rate between 10 % and 90 %; `--write` writes `src/lib/ranks.json` when at least two levels got one. The start screen shows ranks only from a 19×19 table, and none has been written yet.
 
 **Screenshots.** Run `npm run build` and `npx vite preview --port 4180 --strictPort`, then pass `http://localhost:4180/`. `--only start,game-9,…`, `--sizes 390x844,…` and `--themes light,dark` narrow the set. The PeerJS broker is blocked, so nothing leaves the machine.
 
@@ -102,7 +102,7 @@ src/
   hooks/           # Game state, clock, engine, computer, hint, blunder guard, scoring, room, history, PWA
   workers/         # The engine worker (TF.js and the KataGo port)
   lib/             # Core logic, framework-free
-    zigo.ts        #   rules core: board, captures, ko and superko, handicap, move codec, SGF
+    zengo.ts        #   rules core: board, captures, ko and superko, handicap, move codec, SGF
     scoring.ts     #   area and territory count over goscorer
     levels.ts      #   level table and move picker
     clock.ts       #   Fischer and byo-yomi arithmetic
@@ -139,7 +139,7 @@ The count is [goscorer](https://github.com/lightvector/goscorer): area counts st
 
 A room connects exactly two devices over one WebRTC data channel. No server stores anything; each device keeps the full record of every game in the room.
 
-- **Joining is creating.** Pick `ROOM` and press Start: the code is the room. The PeerJS id `zigo-<CODE>` on the public PeerJS broker is claimed by the first device, the *anchor*, which waits; the second device finds it taken and *dials* the anchor. Both repeat this on every reconnect. The creator chooses size, rules, handicap and clock; the joiner sees them dimmed.
+- **Joining is creating.** Pick `ROOM` and press Start: the code is the room. The PeerJS id `zengo-<CODE>` on the public PeerJS broker is claimed by the first device, the *anchor*, which waits; the second device finds it taken and *dials* the anchor. Both repeat this on every reconnect. The creator chooses size, rules, handicap and clock; the joiner sees them dimmed.
 - **STUN only.** ICE uses public STUN servers (Google, Cloudflare). There is no TURN relay, so two strict NATs may not connect; the app says so. After the connection, nothing passes through a third party.
 - **Manual fallback.** If the broker is unreachable, `Connect manually` sends the offer and answer as links or QR codes (`#/?s=<CODE>&o=r&x=<offer>`, answered with `&y=<answer>`). The answer can be pasted into the waiting tab or opened on the same device.
 - **Seat key.** The creator makes a 128-bit secret and hands it to the first device that joins. From then on, on every connection each side proves it holds the key with an HMAC-SHA-256 challenge-response. The key is never sent again, and room links carry only the code.
@@ -149,7 +149,7 @@ A room connects exactly two devices over one WebRTC data channel. No server stor
 
 ## Engine
 
-The KataGo C++ program cannot run on GitHub Pages: its browser builds need threads, and threads need COOP/COEP headers that Pages cannot send. Zigo runs KataGo's networks with a search written in TypeScript instead, ported from Web KaTrain (`src/lib/engine/katago/`), in a Web Worker.
+The KataGo C++ program cannot run on GitHub Pages: its browser builds need threads, and threads need COOP/COEP headers that Pages cannot send. Zengo runs KataGo's networks with a search written in TypeScript instead, ported from Web KaTrain (`src/lib/engine/katago/`), in a Web Worker.
 
 - **Backend.** TF.js 4.22.0. The worker starts on single-threaded WASM (SIMD when available) and, once the small net has loaded, tries WebGPU: if an adapter is found and a fixed test position evaluates the same as on WASM, it switches. The choice is remembered per device. In Node, the scripts use the WASM or CPU backend.
 - **Networks.** `g170-b6c96` (3.8 MB) runs levels 1–7, hints, the blunder guard and the scoring proposal. `g170e-b10c128` (11 MB) runs levels 8–12.
@@ -158,7 +158,7 @@ The KataGo C++ program cannot run on GitHub Pages: its browser builds need threa
 
 ## Licence and Credits
 
-Zigo is MIT-licensed (see [LICENSE](LICENSE)).
+Zengo is MIT-licensed (see [LICENSE](LICENSE)).
 
 - **KataGo networks** in [`public/engine/nets/`](public/engine/nets/README.md) are CC0, by Jane Street and David J. Wu, from [katagoarchive.org](https://katagoarchive.org/g170/neuralnets/index.html).
 - **The engine** in [`src/lib/engine/katago/`](src/lib/engine/katago/LICENSE) is ported from [Web KaTrain](https://github.com/Sir-Teo/web-katrain) (MIT), which reimplements [KataGo](https://github.com/lightvector/KataGo) (MIT); both notices are kept.
@@ -166,4 +166,4 @@ Zigo is MIT-licensed (see [LICENSE](LICENSE)).
 - **goscorer** by David J. Wu (lightvector), MIT, is vendored in [`src/lib/vendor/goscorer.js`](src/lib/vendor/goscorer.js).
 - **GNU Go** (GPL-3.0) is only fetched by `scripts/calibrate.mjs` into a local cache for calibration. It is never copied into the repository or shipped.
 
-None of the engine files is covered by Zigo's MIT licence. Nothing GPL ships.
+None of the engine files is covered by Zengo's MIT licence. Nothing GPL ships.

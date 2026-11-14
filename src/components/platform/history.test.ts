@@ -17,7 +17,7 @@ import {
 } from './history';
 import { savedGame } from './test-utils';
 import type { Room } from '@/lib/types';
-import { fromGtp, pointToIndex } from '@/lib/zigo';
+import { fromGtp, pointToIndex } from '@/lib/zengo';
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
