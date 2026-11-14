@@ -59,7 +59,8 @@ export function StartFooter({ visible, landscape = false, selector, pills, statu
       {/* The status line's height is kept while it is empty (still checking the cache), so the pills
           never jump when it appears (a hold on a pill would slip off it). */}
       {status && <div className={cn(!landscape && 'mt-2 min-h-6')}>{status}</div>}
-      {extra && <div className={cn(!landscape && 'mt-4')}>{extra}</div>}
+      {/* The install pill appears when the browser offers installing: it fades in. */}
+      {extra && <div className={cn('animate-fade-in', !landscape && 'mt-4')}>{extra}</div>}
       {chevron && !landscape && (
         <div className="mt-6" data-start-toast-free="">
           {chevron}

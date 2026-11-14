@@ -21,7 +21,8 @@ export interface EngineStatusProps {
   className?: string;
 }
 
-const LINE = 'flex h-6 items-center justify-center gap-1.5 font-mono text-[10px] uppercase tracking-widest text-muted-foreground';
+// Each state fades in when it appears (the line is empty while the cache is checked), instead of popping in.
+const LINE = 'flex h-6 animate-fade-in items-center justify-center gap-1.5 font-mono text-[10px] uppercase tracking-widest text-muted-foreground';
 
 export function EngineStatus({ line, onDownload, enabled = COMPUTER_ENABLED, className }: EngineStatusProps) {
   const { t } = useI18n();

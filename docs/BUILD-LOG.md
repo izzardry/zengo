@@ -463,6 +463,14 @@ _(One line each: where the design was silent, what was chosen and why.)_
 - A WebGPU error, crash, mismatch or hung search remembers `wasm` in `zigo:engine-backend` and is not retried on that device. A warm-up slower than 180 s drops WebGPU for that page only, so a slow first compile is retried on the next launch.
 - The worker no longer probes or falls back by itself; one worker runs one backend.
 
+**After the run (first paint)**
+- The owner saw the start screen flicker on reload: text drawn in a fallback font that changed shape a few frames later, weights arriving one by one, elements popping in. Recorded with Chromium's screencast: the first contentful paint came before the font, "Medium" changed weight a frame later, and the status line popped in.
+- Theme and background are set inline in `index.html` before anything loads, so a reload never flashes the other theme.
+- The five Latin Fira Code weights are preloaded from `index.html` (a Vite plugin adds the hashed files) and loaded with `document.fonts.load` before the reveal.
+- `#root` stays transparent until the fonts are in and the first commit has had two frames to settle, then fades in over 300 ms (Ztyle's chrome duration). With reduced motion the page appears at once.
+- The reveal waits at most 1.5 s for fonts. If the script never runs, `index.html`'s CSS shows the page after 10 s; a reveal after that point does not fade a second time.
+- The engine status line and the install pill fade in when they appear (`animate-fade-in`) instead of popping in.
+
 **Final phase**
 - Orchestrator: PLAN's "`/code-review high` on the whole branch" runs as three high-effort review agents inside the final workflow (rules/sync/room, engine/assistance, UI/hooks), because the skill reviews a diff and the whole repo is new; each finding is checked by a skeptic like the audit findings.
 - Orchestrator: final workflow `wf_f5761ffc-978`: 5 design auditors (DESIGN 4–6, 7–8, 9, 10–11, 12–14), a Ztyle auditor, 3 code reviewers and a visual pass, each followed by a skeptic; then triage into fix clusters, fixes and the README in parallel, and the full gate with up to three fix rounds.

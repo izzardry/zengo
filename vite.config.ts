@@ -48,6 +48,31 @@ function engineGzipAsBytes(): Plugin {
 }
 
 // https://vitejs.dev/config/
+/**
+ * Preloads the brand font's Latin weights from index.html (src/boot.ts), so they download beside the
+ * app's script instead of after its stylesheet, and the first paint has the real font.
+ */
+function preloadBrandFont(): Plugin {
+  return {
+    name: "zigo-preload-brand-font",
+    apply: "build",
+    transformIndexHtml: {
+      order: "post",
+      handler(_html, ctx) {
+        if (!ctx.bundle) return;
+        return Object.keys(ctx.bundle)
+          .filter((f) => /fira-code-latin-(300|400|500|600|700)-normal-[^/]+\.woff2$/.test(f))
+          .sort()
+          .map((f) => ({
+            tag: "link",
+            attrs: { rel: "preload", as: "font", type: "font/woff2", href: `./${f}`, crossorigin: "" },
+            injectTo: "head" as const,
+          }));
+      },
+    },
+  };
+}
+
 export default defineConfig(() => {
   const gitHash = (() => {
     try {
@@ -77,6 +102,7 @@ export default defineConfig(() => {
     plugins: [
       react(),
       engineGzipAsBytes(),
+      preloadBrandFont(),
       VitePWA({
         registerType: "autoUpdate",
         includeAssets: ["favicon.ico", "robots.txt"],

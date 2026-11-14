@@ -29,6 +29,31 @@
     <meta name="twitter:title" content="Zigo - Zero Distractions. Just Go." />
     <meta name="twitter:description" content="A minimalist Go game. 9×9 to 19×19, 12 computer levels, serverless rooms for two, and zero ads." />
     <meta name="twitter:image" content="https://izzardry.github.io/zigo/og-image.png" />
+
+    <!--
+      First paint (src/boot.ts): the theme and the background are set before anything loads, so a
+      reload never flashes the other theme. #root stays transparent until the brand font is in and
+      the first layout has settled; then it fades in over 300 ms (Ztyle's chrome duration). If the
+      app's script never runs, the page shows itself after 10 s. The reveal has its own keyframes:
+      reusing the fallback's would update that animation in place instead of fading.
+    -->
+    <script>
+      try {
+        if (matchMedia("(prefers-color-scheme: dark)").matches) document.documentElement.classList.add("dark");
+      } catch (e) {}
+    </script>
+    <style>
+      html { background: #fafafa; }
+      html.dark { background: #0d0d0d; }
+      @keyframes zigo-boot-fallback { from { opacity: 0; } to { opacity: 1; } }
+      @keyframes zigo-reveal { from { opacity: 0; } to { opacity: 1; } }
+      #root { opacity: 0; animation: zigo-boot-fallback 0.3s ease-out 10s forwards; }
+      html.zigo-ready #root { opacity: 1; animation: zigo-reveal 0.3s ease-out; }
+      html.zigo-ready.zigo-late #root { animation: none; }
+      @media (prefers-reduced-motion: reduce) {
+        html.zigo-ready #root { animation: none; }
+      }
+    </style>
   </head>
 
   <body>
